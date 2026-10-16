@@ -1,0 +1,39 @@
+# ── 运行期数据（本地数据库，含观看记录，不要提交）──
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# ── 构建产物：用 README 里的命令自己生成即可 ──
+static/*.gz
+
+# ── 凭据 / 本地环境（务必不要提交）──
+.env
+.env.*
+*.secret
+*credential*
+*password*
+deploy.sh
+*.exp
+
+# ── 备份 / 临时文件 ──
+*.bak
+*.bak[0-9]
+*.wip
+*.orig
+*.tmp
+*.log
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# ── 编辑器 / 系统 ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
