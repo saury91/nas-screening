@@ -1,0 +1,233 @@
+/* ═══════════ 全屏播放器 ═══════════ */
+.playerlayer{background:#000;z-index:150;display:flex;flex-direction:column}
+.playerlayer[hidden]{display:none}
+/* 进了画中画：整层淡出但保持渲染，视频还在，用户回到页面继续浏览。
+   不能用 display:none / visibility:hidden，那会让浏览器退出画中画。 */
+.playerlayer.pip-out{opacity:0;pointer-events:none}
+/* 子元素里有显式 pointer-events:auto 的（.pl-top>*），父级 none 挡不住，
+   这里必须逐个压掉，否则画中画时这些区域仍然吃掉点击 */
+.playerlayer.pip-out *{pointer-events:none!important}
+.pl-stage{position:relative;flex:1;min-height:0;background:#000;touch-action:manipulation}
+/* 手机上双击画面别触发页面缩放（双击已经被我们用来切全屏） */
+#art-host video{touch-action:manipulation}
+/* 缓冲时用它背后的模糊海报打底，纯黑画面里任何加载动画都显得孤零零 */
+.pl-poster{
+  position:absolute;inset:-8%;z-index:0;
+  background-size:cover;background-position:center;
+  filter:blur(34px) saturate(140%) brightness(.42);
+  transform:scale(1.14);
+  transition:opacity .8s var(--ease);
+}
+/* 边缘压暗，让中间那块光更突出 */
+.pl-poster::after{
+  content:"";position:absolute;inset:0;
+  background:radial-gradient(ellipse at center,rgba(0,0,0,.1) 16%,rgba(0,0,0,.72) 96%);
+}
+.pl-poster.gone{opacity:0}
+/* 播放器容器默认是纯黑，会挡住背后的海报 —— 让 stage 自己兜底黑底 */
+#art-host .art-video-player{background:transparent!important}
+
+/* 换集/换线路的一瞬间：旧进度条会停在上一集的时间上，先整体藏起来 */
+.art-video-player.switching .art-bottom,
+.art-video-player.switching .art-progress,
+.art-video-player.switching .art-mask{opacity:0!important;pointer-events:none}
+
+/* ArtPlayer 的容器需要明确高度，否则 video 高度为 0（只剩声音） */
+#art-host{position:absolute;inset:0;width:100%;height:100%;z-index:1}
+#art-host .art-video-player{width:100%;height:100%}
+.pl-top{position:absolute;top:0;left:0;right:0;z-index:20;display:flex;align-items:flex-start;
+  gap:16px;padding:22px 28px 60px;
+  background:linear-gradient(180deg,rgba(0,0,0,.78),transparent);
+  transition:opacity .3s,transform .3s;pointer-events:none}
+.pl-top>*{pointer-events:auto}
+.pl-top.hide{opacity:0;transform:translateY(-10px)}
+.pl-title{min-width:0;flex:1}
+.pl-title h2{margin:0;font-size:18px;font-weight:620;color:#fff;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 14px rgba(0,0,0,.6)}
+.pl-title p{margin:5px 0 0;font-size:12px;color:rgba(255,255,255,.62)}
+.pl-tools{display:flex;gap:8px;align-items:center}
+.pl-tools .icon-btn{
+  width:38px;height:38px;color:#fff;background:rgba(8,9,13,.46);
+  border:1px solid rgba(255,255,255,.16);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+}
+.pl-tools .icon-btn:hover{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.3)}
+.pl-side{
+  position:absolute;top:0;right:0;bottom:0;width:min(408px,88vw);z-index:30;
+  background:linear-gradient(180deg,rgba(29,32,40,.97),rgba(17,19,25,.96));
+  -webkit-backdrop-filter:blur(34px) saturate(150%);backdrop-filter:blur(34px) saturate(150%);
+  border-left:1px solid rgba(255,255,255,.13);
+  box-shadow:-30px 0 80px rgba(0,0,0,.5);
+  transform:translateX(102%);
+  transition:transform .4s var(--ease);display:flex;flex-direction:column;
+}
+.pl-side.open{transform:none}
+.pl-side-head{padding:22px 22px 16px;display:flex;align-items:center;gap:10px;
+  border-bottom:1px solid rgba(255,255,255,.1)}
+/* 收起按钮：箭头指向面板滑出的方向 */
+#pl-side-close svg{transition:transform .22s var(--ease)}
+#pl-side-close:hover svg{transform:translateX(2px)}
+.pl-side-head h3{margin:0;font-size:15px;font-weight:600;flex:1}
+.pl-side-body{overflow:auto;padding:18px 22px 30px}
+.pl-side-body h5{margin:0 0 10px;font-size:11px;letter-spacing:.18em;color:#9aa1ad;
+  text-transform:uppercase;font-weight:600;display:flex;gap:8px;align-items:center}
+.pl-side-body h5 .count{letter-spacing:0;color:rgba(255,255,255,.3)}
+.pl-side-body .blk+.blk{margin-top:20px}
+.pl-now{display:flex;gap:10px;align-items:center;padding:11px 13px;border-radius:12px;
+  background:linear-gradient(135deg,rgba(255,207,122,.12),rgba(255,255,255,.035));
+  border:1px solid rgba(255,207,122,.24);margin-bottom:16px}
+.pl-now div{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;min-width:0}
+.pl-now b{color:var(--accent);font-size:13px;font-weight:600}
+.pl-now span{color:#a8aeba;font-size:12px}
+.pl-now b{font-size:12.5px;display:block}
+.pl-now span{font-size:11px;color:#7c828f}
+/* 缓冲：三个依次跳起的波点。简单、有生命感，不像任何系统控件。 */
+.pl-buffer{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:18;
+  display:flex;flex-direction:column;align-items:center;gap:20px;
+  pointer-events:none;animation:bufferIn .3s var(--ease);
+}
+.pl-buffer[hidden]{display:none}
+@keyframes bufferIn{from{opacity:0;transform:translate(-50%,calc(-50% + 8px))}
+  to{opacity:1;transform:translate(-50%,-50%)}}
+
+.pl-dots{display:flex;align-items:flex-end;gap:13px;height:28px}
+.pl-dots b{
+  width:10px;height:10px;border-radius:50%;
+  background:rgba(255,248,232,.98);
+  box-shadow:0 0 14px rgba(255,206,150,.6);
+  animation:dotJump 1.05s cubic-bezier(.45,0,.55,1) infinite;
+}
+.pl-dots b:nth-child(2){animation-delay:.13s}
+.pl-dots b:nth-child(3){animation-delay:.26s}
+@keyframes dotJump{
+  0%,62%,100%{transform:translateY(0) scale(1);opacity:.55}
+  28%{transform:translateY(-14px) scale(1.12);opacity:1}
+  45%{transform:translateY(-4px) scale(1.03);opacity:.92}
+}
+
+.pl-buffer-label{display:flex;align-items:baseline;gap:11px;white-space:nowrap}
+.pl-buffer-label span{font-size:11.5px;letter-spacing:.24em;text-indent:.24em;
+  color:rgba(255,255,255,.52);font-weight:500}
+.pl-buffer-label em{font-style:normal;font-size:11px;letter-spacing:.04em;
+  color:rgba(255,214,150,.85);font-variant-numeric:tabular-nums}
+.pl-buffer-label em:empty{display:none}
+.pl-buffer-label i{font-style:normal;font-size:10px;letter-spacing:.03em;
+  color:rgba(255,255,255,.28);font-variant-numeric:tabular-nums}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* 自定义控制栏按钮 */
+.ap-ctl{display:flex;align-items:center;justify-content:center;width:34px;height:34px;
+  border-radius:8px;color:currentColor;transition:background .2s}
+.ap-ctl svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round}
+.art-control:hover .ap-ctl{background:rgba(255,255,255,.12)}
+/* 画中画进行中：按钮点亮，提示当前画面在系统小窗里 */
+.art-control-pip.on .ap-ctl{color:var(--accent)}
+
+/* ArtPlayer 自带的 mask 关掉：它连「刚进页面/正在缓冲」都会显示，
+   中央状态改由 .pl-flash 自己画，只在用户点画面时出现 */
+.art-video-player .art-mask{display:none!important}
+
+/* 点画面时的中央状态反馈：毛玻璃圆 + 白色图标 */
+.pl-flash{
+  position:absolute;inset:0;display:grid;place-items:center;z-index:16;
+  pointer-events:none;opacity:0;transition:opacity .32s var(--ease);
+}
+.pl-flash.on{opacity:1}
+.pl-flash span{
+  display:grid;place-items:center;width:74px;height:74px;border-radius:50%;
+  color:#fff;background:rgba(10,11,15,.46);
+  border:1px solid rgba(255,255,255,.16);
+  -webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%);
+  box-shadow:0 14px 44px rgba(0,0,0,.45);
+  transform:scale(.9);transition:transform .28s var(--ease);
+}
+.pl-flash.on span{transform:scale(1)}
+.pl-flash svg{width:26px;height:26px}
+/* ArtPlayer 自己的状态条会写「播放 / 暂停」，和左上角标题叠在一起 */
+.art-video-player .art-notice{display:none!important}
+
+/* ArtPlayer 自带的转圈隐藏：只留自己的缓冲条 */
+.art-video-player .art-loading,
+.art-video-player .art-loading-icon{display:none!important}
+.pl-err{position:absolute;inset:0;display:grid;place-items:center;z-index:12;background:#05060a;
+  text-align:center;padding:30px}
+.pl-err h3{margin:0 0 8px;font-size:17px}
+.pl-err p{margin:0 0 20px;color:#7c828f;font-size:13px;line-height:1.7;max-width:440px}
+
+/* 侧栏展开时把顶部标题/关闭按钮让出来，避免被面板盖住 */
+@media (min-width:900px){
+  .pl-stage.side-open .pl-top{padding-right:436px}
+  .pl-stage.side-open .pl-buffer{left:calc((100% - 408px) / 2)}
+}
+
+/* 侧栏线路：紧凑胶囊，12 条线路 3~4 行铺完，不挤掉选集 */
+.pl-side .line-chips{display:flex;flex-wrap:wrap;gap:7px}
+.pl-side .line-chip{
+  display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px;
+  border-radius:9px;border:1px solid rgba(255,255,255,.13);
+  background:rgba(255,255,255,.05);color:#dfe3ea;font-size:12.5px;
+  outline:none;transition:.16s var(--ease);white-space:nowrap;
+}
+.pl-side .line-chip b{font-weight:500}
+.pl-side .line-chip i{font-style:normal;font-size:10.5px;color:#7c828f}
+.pl-side .line-chip.on u{background:rgba(27,18,6,.2);color:#1b1206}
+/* 播放器标题行的真实分辨率 */
+.pl-res{display:inline-block;margin-left:8px;font-size:10px;font-weight:600;
+  letter-spacing:.02em;color:var(--accent);opacity:.9}
+.pl-res:empty{display:none}
+.pl-side .line-chip:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.24);color:#fff}
+.pl-side .line-chip.on{
+  border-color:transparent;color:#1b1206;font-weight:600;
+  background:linear-gradient(180deg,#ffe0a2,var(--accent));
+  box-shadow:0 5px 16px rgba(255,175,90,.2);
+}
+.pl-side .line-chip.on i{color:rgba(27,18,6,.6)}
+.pl-side .line-chip.focused{box-shadow:inset 0 0 0 2px var(--accent)}
+
+/* ArtPlayer 皮肤微调 */
+.artplayer{--art-theme:var(--accent)}
+.art-video-player .art-bottom .art-progress .art-progress-indicator{background:var(--accent)}
+.art-video-player .art-bottom .art-progress .art-progress-played{background:var(--accent)}
+.art-video-player .art-bottom .art-progress .art-progress-loaded{background:rgba(255,207,122,.24)}
+
+/* ═══════════ 搜索浮层 ═══════════ */
+.searchlayer{padding:clamp(40px,9vh,110px) var(--pad) 40px;overflow:auto}
+.search-box{max-width:1080px;margin:0 auto;animation:searchIn .4s var(--ease)}
+@keyframes searchIn{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}
+.search-input-row{display:flex;align-items:center;gap:14px;padding-bottom:18px;
+  border-bottom:1px solid rgba(255,255,255,.14)}
+.search-input-row .si{width:24px;height:24px;fill:none;stroke:var(--muted);stroke-width:1.8;
+  stroke-linecap:round;flex:none}
+#search-input{flex:1;background:none;border:0;outline:none;font-size:clamp(22px,3vw,34px);
+  font-weight:600;letter-spacing:-.01em;color:#f4f5f7;min-width:0}
+#search-input::placeholder{color:rgba(255,255,255,.24)}
+.search-body{margin-top:26px}
+.search-section{margin-bottom:28px}
+.search-section h5{margin:0 0 12px;font-size:11px;letter-spacing:.2em;color:#7c828f;
+  font-weight:600;text-transform:uppercase}
+.search-chips{display:flex;flex-wrap:wrap;gap:8px}
+.search-chips button{padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.07);
+  font-size:13px;color:#b3b8c3;transition:.2s;outline:none}
+.search-chips button:hover{background:rgba(255,255,255,.13);color:#f4f5f7}
+.search-chips button.focused{box-shadow:0 0 0 2px var(--accent);color:#f4f5f7}
+.search-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:18px 14px}
+.sr-card{outline:none;cursor:pointer}
+.sr-card img,.sr-card .ph{width:100%;height:auto!important;aspect-ratio:2/3;object-fit:cover;border-radius:10px;
+  background:linear-gradient(140deg,#2a2118,#14161d);display:grid;place-items:center;
+  color:rgba(255,255,255,.3);font-weight:700;transition:.25s}
+.sr-card:hover img,.sr-card.focused img{transform:translateY(-4px) scale(1.02);
+  box-shadow:0 18px 40px rgba(0,0,0,.55)}
+.sr-card.focused img{box-shadow:0 0 0 2px var(--accent),0 18px 40px rgba(0,0,0,.55)}
+.sr-card h6{margin:9px 0 2px;font-size:12.5px;font-weight:550;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sr-card p{margin:0;font-size:10.5px;color:#7c828f}
+.search-empty{color:#7c828f;font-size:13px;padding:20px 0}
+
+@media (max-width:900px){
+  .pl-top{padding:16px 16px 40px}
+  .pl-title h2{font-size:15px}
+  .search-results{grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:14px 10px}
+}
