@@ -466,10 +466,12 @@ class Handler(BaseHTTPRequestHandler):
             ver = hashlib.sha1(
                 json.dumps(src, sort_keys=True, ensure_ascii=False).encode("utf-8")
             ).hexdigest()[:12]
+            # 直播频道表也一起下发：App 首次冷启动（没网）也能把频道列出来
             return _json({
                 "version": ver,
                 "generatedAt": int(time.time()),
                 "sources": src,
+                "live": {"groups": live.live_groups(), "items": live.live_list()},
                 "ui": {"version": os.environ.get("UI_VERSION", "")},
             })
         if path == "/api/auth/state":

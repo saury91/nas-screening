@@ -22,6 +22,13 @@ async function tryAggregate(path) {
     if (u.pathname === '/api/browse') {
       return await agg.listPage(Number(u.searchParams.get('pg') || 1));
     }
+    // 直播频道表：配置包里带了一份，NAS 不在也能列出频道
+    if (u.pathname === '/api/live') {
+      const b = await agg.getBundle();
+      if (b && b.live && Array.isArray(b.live.items)) {
+        return { groups: b.live.groups || [], items: b.live.items, sources: [], fromBundle: true };
+      }
+    }
   } catch (e) { /* 聚合失败就当没有 */ }
   return null;
 }
