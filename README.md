@@ -230,6 +230,30 @@ cd android && gradle assembleDebug
 
 格式与迁移规则见 [`docs/config-schema.md`](docs/config-schema.md)。
 
+## 更新与发布
+
+App 自带升级：启动时向 NAS 查 `/api/app/latest`，版本号更高就提示更新，
+下载 `/api/app/download` 后交给系统安装器。
+
+**发布一个新版本**（在 NAS 上）：
+
+```bash
+cd android
+./gradlew assemblePhoneRelease assembleTvRelease   # 记得改 versionCode/versionName
+cd .. && ./tools/publish-apk.sh phone && ./tools/publish-apk.sh tv
+```
+
+`publish-apk.sh` 会把 APK 和 `{versionCode, versionName, size, sha256, notes}` 一起写进
+`data/apps/`，App 端会校验 size 与 sha256，坏包不会进安装器。
+
+几个已知前提：
+
+- **更新依赖 NAS 在线**（安装包放在 NAS 上）。手机不在同一网络时会提示"连不上 NAS"，这是预期的
+- **系统会拦一次**：Android 8+ 需要「安装未知应用」授权，App 会跳转设置页，
+  授权返回后自动继续安装，不用再点一遍
+- **国产 ROM 的额外提示**：小米/vivo 等会弹"未备案/风险应用"的黄色警告，
+  勾选"已了解风险"再点「继续安装」即可，这是系统行为，不是安装包坏了
+
 ## 运行规则（改代码前先看这几条）
 
 1. **缓存优先**：页面数据先读本地（IndexedDB）立刻渲染，后台再拉新；
