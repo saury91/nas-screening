@@ -78,6 +78,20 @@ export function startReceiver(onPlay) {
   setInterval(poll, 3000);
 }
 
+/** 局域网直连的电视（不需要 NAS）：回调式，原生发现完调 __proomCastResult */
+export function discoverLocal(timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    if (!window.ProomNative?.castDiscover) { resolve([]); return; }
+    let done = false;
+    const finish = (arr) => { if (!done) { done = true; resolve(arr || []); } };
+    window.__proomCastResult = (json) => {
+      try { finish(JSON.parse(json)); } catch (e) { finish([]); }
+    };
+    try { window.ProomNative.castDiscover(); } catch (e) { finish([]); }
+    setTimeout(() => finish([]), timeoutMs);
+  });
+}
+
 export async function listTargets() {
   const id = deviceId();
   const d = await getJSON('/api/cast/targets?id=' + encodeURIComponent(id));
@@ -119,6 +133,41 @@ export async function openCastSheet(info) {
   }
 
   renderTargets(body, info, items);
+  renderLocal(body, info);
+}
+
+/** 局域网直连：不经过 NAS，NAS 关机也能投 */
+async function renderLocal(body, info) {
+  const box = document.createElement('div');
+  box.className = 'cast-local';
+  box.innerHTML = '<p class="hint">正在查找可直连的电视…</p>';
+  body.appendChild(box);
+
+  const tvs = await discoverLocal();
+  if (!tvs.length) { box.remove(); return; }
+
+  box.innerHTML = '<div class="cast-group">直连电视<span>不需要 NAS</span></div>' +
+    tvs.map((t, i) => `
+      <button class="cast-item" data-li="${i}" data-focus>
+        <span class="cast-ico">${icon('tv')}</span>
+        <span class="cast-name">${esc(t.name)}</span>
+        <span class="cast-state">直连</span>
+      </button>`).join('');
+
+  box.querySelectorAll('[data-li]').forEach(btn => {
+    btn.onclick = async () => {
+      const t = tvs[+btn.dataset.li];
+      btn.disabled = true;
+      try {
+        const ok = window.ProomNative?.castPlay?.(t.url, JSON.stringify(info));
+        if (ok) { closeCast(); toast(`已投到「${t.name}」`); }
+        else { toast('电视没响应，检查它是否开着放映室', 'err'); btn.disabled = false; }
+      } catch (e) {
+        toast('投屏失败', 'err');
+        btn.disabled = false;
+      }
+    };
+  });
 }
 
 let castTimer = null;

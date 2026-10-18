@@ -50,6 +50,22 @@ class NativeBridge(private val act: MainActivity) {
         main.post { act.setPlayerOrientation(on) }
     }
 
+    /** 局域网直连投屏：异步发现，结果回给页面（阻塞 1~2 秒，不能卡 JS 线程） */
+    @JavascriptInterface
+    fun castDiscover() {
+        Thread({
+            val json = com.projectionroom.tv.LocalCast.discover()
+            act.bridgeEval(
+                "window.__proomCastResult && window.__proomCastResult(${org.json.JSONObject.quote(json)})"
+            )
+        }, "cast-discover").start()
+    }
+
+    /** 局域网直连投屏：推过去 */
+    @JavascriptInterface
+    fun castPlay(url: String, payload: String): Boolean =
+        com.projectionroom.tv.LocalCast.cast(url, payload)
+
     /** 打开「设置 NAS 地址」页（遥控器菜单键在没有播放时触发） */
     @JavascriptInterface
     fun openSetup() {
