@@ -235,3 +235,10 @@
   .pl-title h2{font-size:15px}
   .search-results{grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:14px 10px}
 }
+
+/* ArtPlayer 自带的默认海报（灰底 + 大播放键）跟应用的暗色影院风格完全不搭，
+   缓冲/换集/换线路时会一闪而过。背景我们自己画（.pl-poster 模糊封面），
+   这层直接不显示。 */
+.pl-stage .art-poster{display:none!important}
+/* 视频还没出画时，让底下的模糊封面透出来，而不是一块纯黑 */
+.pl-stage .art-video-player{background:transparent!important}
