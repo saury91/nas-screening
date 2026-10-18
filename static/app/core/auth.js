@@ -109,6 +109,20 @@ export function showGate() {
   document.body.classList.add('gated');
 
   if (!initialized) {
+    // 电视端不该出现"建管理员"：初始化是 NAS 上一次性的事，电视只负责输 PIN。
+    // 用 UA 判断而不是 html.tv：那个类要等 onPageFinished 才加上，比这里晚。
+    const isTv = /ProomTV\//.test(navigator.userAgent) ||
+      document.documentElement.classList.contains('tv');
+    if (isTv) {
+      box.innerHTML = `<div class="gate-card gate-solo">
+        <div class="gate-brand">
+          <div class="gate-logo">${'▶'}</div>
+          <div><h2>NAS 还没初始化</h2>
+            <p class="hint">请先在电脑或手机上打开放映室，建好管理员再来。</p></div>
+        </div>
+      </div>`;
+      return;
+    }
     box.innerHTML = `<div class="gate-card">
       <div class="gate-brand">
         <div class="gate-logo">${'▶'}</div>

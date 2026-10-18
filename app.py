@@ -35,6 +35,45 @@ def live_auto_loop():
         time.sleep(1800)
 
 
+def discovery_loop():
+    """在 UDP 8897 上回答电视的「放映室在哪」。
+
+    电视上用遥控器敲 IP 是最难受的一步，所以让它广播一句、这边回地址。
+    只认局域网广播，不回外网，也不暴露任何信息。
+    """
+    import socket as _socket
+
+    port = 8897
+    sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+    sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+    try:
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
+    except Exception:
+        pass
+    try:
+        sock.bind(("0.0.0.0", port))
+    except Exception as e:
+        log("发现服务启动失败（%s），电视需要手动填地址" % str(e)[:60])
+        return
+    while True:
+        try:
+            data, addr = sock.recvfrom(512)
+            if not data.startswith(b"PROOM_DISCOVER"):
+                continue
+            # 用「面向对端的出口地址」，多网卡时也能给对
+            probe = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            try:
+                probe.connect((addr[0], 9))
+                ip = probe.getsockname()[0]
+            except Exception:
+                ip = _socket.gethostbyname(_socket.gethostname())
+            finally:
+                probe.close()
+            sock.sendto(("PROOM_OFFER http://%s:%d" % (ip, PORT)).encode(), addr)
+        except Exception:
+            time.sleep(0.2)
+
+
 def music_warm():
     """后台把音乐页要用的三份数据先跑一遍。
 
@@ -101,6 +140,8 @@ def main():
     threading.Thread(target=live_auto_loop, daemon=True).start()
     # 在线歌单推荐预热
     threading.Thread(target=music_warm, daemon=True).start()
+    # 电视端自动发现
+    threading.Thread(target=discovery_loop, daemon=True).start()
 
     log("就绪 → http://127.0.0.1:%d" % PORT)
     try:

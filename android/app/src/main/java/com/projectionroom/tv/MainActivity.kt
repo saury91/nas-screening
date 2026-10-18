@@ -98,6 +98,15 @@ class MainActivity : AppCompatActivity() {
         web.addJavascriptInterface(NativeBridge(this), "ProomNative")
 
         web.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                // 早点打标记，避免首屏闪一下桌面布局
+                web.evaluateJavascript(
+                    "(function(){if(document.documentElement)document.documentElement.classList.add('tv')})()",
+                    null
+                )
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 errorBox.visibility = View.GONE
