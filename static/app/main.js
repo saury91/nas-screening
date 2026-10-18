@@ -189,12 +189,18 @@ async function boot() {
   // 本地有 token 但 Cookie 可能丢了（WebView 重启/清缓存）：
   // 让服务端补发一次，视频分片和封面图才带得上认证
   api.post('/api/auth/touch', {}).catch(() => {});
+  // 遥控器菜单键：播放器开着就切「选集/线路」面板，否则打开地址设置
+  window.addEventListener('app:menu', () => {
+    if (window.__proomMenu && window.__proomMenu()) return;
+    try { window.ProomNative?.openSetup?.(); } catch (e) {}
+  });
+
   // 电视端把自己注册成投屏接收端；收到指令就用同一套播放器播
   startReceiver((cmd) => {
     import('/static/app/components/player.js').then(({ openPlayer }) => {
       openPlayer({
         name: cmd.title || '投屏播放',
-        sources: [{ site: '投屏', eps: [{ name: '正片', url: cmd.url }] }],
+        sources: [{ site: '投屏', count: 1, eps: [{ name: '正片', url: cmd.url }] }],
       }, { position: cmd.position || 0 });
       // 投屏时把音量/进度留给电视自己，页面不用滚动
     }).catch(() => {});
