@@ -16,7 +16,7 @@
 .tabs-inline button.focused{background:rgba(255,255,255,.04)}
 
 /* ═══════════ 详情 ═══════════ */
-.detail-hero{position:relative;overflow:hidden;padding:calc(var(--hdr) + 30px) var(--pad) 26px;
+.detail-hero{position:relative;overflow:hidden;padding:calc(var(--hdr) + var(--safe-top) + 66px) var(--pad) 26px;
   min-height:min(46vh,520px);display:flex;align-items:flex-end;isolation:isolate;
 }
 .detail-hero .hero-bg{top:-10%;right:-10%;bottom:-10%;left:-10%;filter:blur(46px) saturate(150%) brightness(.72);
@@ -843,3 +843,34 @@ body.gated{overflow:hidden}
 .pin-big.loading{opacity:.55}
 .gate-solo .gate-brand{margin-bottom:16px}
 .gate-err{margin:10px 0 0;min-height:1.2em;color:var(--danger);font-size:12px}
+
+/* 详情页返回：原来只能靠键盘/遥控器返回键，鼠标和触屏没入口 */
+.back-pill{
+  position:fixed;left:var(--pad);top:calc(var(--hdr) + var(--safe-top) + 8px);z-index:70;
+  display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px 0 12px;
+  border-radius:999px;border:1px solid rgba(255,255,255,.20);
+  background:rgba(16,18,24,.74);color:#f0f2f6;font-size:13px;font-family:inherit;
+  outline:none;cursor:pointer;transition:.2s var(--ease);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+}
+.back-pill svg{width:16px;height:16px}
+.back-pill:hover{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.34)}
+.back-pill.focused{box-shadow:0 0 0 2px var(--accent)}
+@media (max-width:600px){
+  /* 手机上毛玻璃容易失效，用实色更稳 */
+  .back-pill{background:rgba(16,18,24,.9);-webkit-backdrop-filter:none;backdrop-filter:none;
+    height:36px;font-size:12.5px;padding:0 14px 0 10px}
+}
+
+/* 手机端详情页：内容是竖排的，比 hero 最小高度还高，
+   align-items:flex-end 会把整块往上顶，标题和海报反而钻到导航下面。
+   改成从顶部开始排，并把状态栏高度补进 padding。 */
+@media (max-width:600px){
+  .detail-hero{min-height:auto;align-items:flex-start;
+    padding:calc(var(--hdr) + var(--safe-top) + 56px) var(--pad) 18px}
+  .detail-body{flex-direction:column;align-items:flex-start;gap:16px;max-width:100%}
+  .detail-poster{width:112px;border-radius:12px}
+  .detail-title{font-size:26px;margin-bottom:10px}
+  .detail-desc{font-size:13px}
+  .detail-actions .btn{height:40px;padding:0 16px}
+}
