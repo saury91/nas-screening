@@ -5,7 +5,7 @@ import { emptyState, imgTag } from '../components/ui.js';
 import { go } from '../core/router.js';
 import { store } from '../core/store.js';
 import { cacheDrop } from '../core/cache.js';
-import { currentUser, isAdmin, refreshProfiles, usingDefaultPin, logout } from '../core/auth.js';
+import { isAdmin } from '../core/auth.js';
 
 const NAV = [
   ['sources', '片源管理', 'link'],
@@ -14,7 +14,6 @@ const NAV = [
   ['history', '播放记录', 'clock'],
   ['live', '直播源', 'tv'],
   ['music', '音乐', 'music'],
-  ['accounts', '家庭账户', 'heart'],
   ['backup', '配置备份', 'upload'],
   ['about', '关于与自检', 'info'],
 ];
@@ -48,7 +47,7 @@ export async function render(root, ctx) {
   const panel = root.querySelector('#panel');
   const fn = { sources: sourcesPanel, favorites: favPanel, downloads: tasksPanel,
                history: historyPanel, live: livePanel, music: musicPanel,
-               accounts: accountsPanel, backup: backupPanel, about: aboutPanel }[tab];
+               backup: backupPanel, about: aboutPanel }[tab];
   try {
     await fn(panel);
   } catch (e) {
@@ -698,123 +697,6 @@ async function musicPanel(panel) {
                            : `<p class="hint" style="color:var(--danger)">${esc(r.msg)}</p>`;
     } catch (e) { box.innerHTML = `<p class="hint" style="color:var(--danger)">${esc(e.message)}</p>`; }
   };
-}
-
-// ═══════════ 家庭账户 ═══════════
-async function accountsPanel(panel) {
-  const meUser = currentUser();
-  const draw = (items) => {
-    panel.innerHTML = `<h2>家庭账户</h2>
-      <p class="lead">家里每个人一份观看记录与收藏，互不干扰。管理员能改名字、设 PIN、删账户。</p>
-      ${usingDefaultPin() ? `<div class="card-block" style="border-color:rgba(255,207,122,.35);
-        background:rgba(255,207,122,.07)">
-        <h4 style="margin-bottom:4px">还在用默认口令</h4>
-        <p class="hint" style="margin:0">管理员默认 PIN 是 <code>123456</code>，建议点下面的「改 PIN」换一个。</p>
-      </div>` : ''}
-
-      <div class="card-block">
-        <h4>新增账户</h4>
-        <p class="hint">每人一个 6 位数字 PIN，全库不能重复——登录就是靠它认出是谁。</p>
-        <div class="row" style="gap:10px;flex-wrap:wrap">
-          <input class="input" id="pf-name" placeholder="名字" maxlength="16"
-                 style="max-width:180px;height:38px">
-          <input class="input pin-input" id="pf-pin" placeholder="PIN（6 位数字）" inputmode="numeric"
-                 maxlength="6" style="max-width:180px;height:38px">
-          <select class="input" id="pf-role" style="width:120px;height:38px">
-            <option value="member">家人</option>
-            <option value="admin">管理员</option>
-          </select>
-          <button class="btn primary" id="pf-add" data-focus>${icon('plus')}添加</button>
-        </div>
-        <p class="hint" id="pf-tip"></p>
-      </div>
-
-      <div class="tracklist">
-        ${items.map(p => `
-          <div class="track pf-row" data-pid="${esc(p.id)}">
-            <span class="pf-av">${esc((p.avatar || p.name || '?').slice(0, 1))}</span>
-            <span class="t-name">${esc(p.name)}
-              ${p.role === 'admin' ? '<span class="pf-badge">管理员</span>' : ''}
-              ${p.id === meUser.id ? '<span class="pf-badge me">当前</span>' : ''}</span>
-            <span class="t-artist">${p.hasPin ? '已设 PIN' : '未设 PIN'}</span>
-            <span class="pf-acts">
-              <button class="btn sm ghost" data-act="rename" data-focus>改名</button>
-              <button class="btn sm ghost" data-act="pin" data-focus>${p.hasPin ? '改 PIN' : '设 PIN'}</button>
-              ${p.role === 'admin' ? '<span class="hint" style="font-size:11px">不可删除</span>'
-                : `<button class="btn sm danger" data-act="del" data-focus>删除</button>`}
-            </span>
-          </div>`).join('')}
-      </div>`;
-
-    const tip = panel.querySelector('#pf-tip');
-    const add = async () => {
-      const name = panel.querySelector('#pf-name').value.trim();
-      const pin = panel.querySelector('#pf-pin').value.trim();
-      const role = panel.querySelector('#pf-role').value;
-      if (!name) { tip.textContent = '填个名字'; return; }
-      if (!/^\d{6}$/.test(pin)) { tip.textContent = 'PIN 必须是 6 位数字'; return; }
-      try {
-        await api.post('/api/profiles/save', { name, pin, role });
-        toast('已添加「' + name + '」');
-        refresh();
-      } catch (e) { tip.textContent = e.message; }
-    };
-    panel.querySelector('#pf-add').onclick = add;
-    panel.querySelector('#pf-pin')?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') add();
-    });
-
-    panel.querySelectorAll('.pf-row').forEach(row => {
-      const pid = row.dataset.pid;
-      const who = items.find(x => x.id === pid);
-      row.querySelectorAll('[data-act]').forEach(b => {
-        b.onclick = async () => {
-          const act = b.dataset.act;
-          if (act === 'rename') {
-            const name = prompt('新的名字', who.name);
-            if (!name || name.trim() === who.name) return;
-            try { await api.post('/api/profiles/save', { id: pid, name: name.trim() }); refresh(); }
-            catch (e) { toast(e.message, 'err'); }
-            return;
-          }
-          if (act === 'pin') {
-            const pin = prompt('设置新的 6 位数字 PIN', '');
-            if (pin === null) return;
-            if (!/^\d{6}$/.test(pin.trim())) { toast('PIN 必须是 6 位数字', 'err'); return; }
-            try {
-              await api.post('/api/profiles/save', { id: pid, pin: pin.trim() });
-              if (pid === meUser.id) {
-                // 改自己的 PIN 会清掉所有会话，必须重新登录
-                toast('PIN 已更新，请用新 PIN 重新登录');
-                await logout();
-                setTimeout(() => location.reload(), 600);
-                return;
-              }
-              toast('PIN 已更新');
-              refresh();
-            } catch (e) { toast(e.message, 'err'); }
-            return;
-          }
-          if (act === 'del') {
-            const ok = await dialog({
-              title: '删除「' + who.name + '」？',
-              body: '会同时删除这个账户的观看记录与收藏，不能恢复。',
-              ok: '删除',
-            });
-            if (!ok) return;
-            try { await api.post('/api/profiles/delete', { id: pid }); refresh(); }
-            catch (e) { toast(e.message, 'err'); }
-          }
-        };
-      });
-    });
-  };
-
-  const refresh = async () => {
-    try { draw(await refreshProfiles()); }
-    catch (e) { panel.innerHTML = `<p class="hint" style="color:var(--danger)">${esc(e.message)}</p>`; }
-  };
-  await refresh();
 }
 
 // ═══════════ 配置备份 / 迁移 ═══════════
