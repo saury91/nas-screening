@@ -435,7 +435,6 @@ a.card:focus-visible{outline-offset:4px;border-radius:var(--r-md)}
   #tabs a{padding:7px 9px;font-size:12.5px}
   .nav-actions{gap:2px}
   .nav-actions .icon-btn{width:34px;height:34px}
-  .nav-me{width:30px;height:30px;font-size:12px}
   .brand-mark{width:28px;height:28px}
 
   /* 手机 GPU 上 blur(30px)+mask 又贵又容易整块渲染成黑色，换成纯亮度压暗 */
@@ -899,7 +898,6 @@ a.card:focus-visible{outline-offset:4px;border-radius:var(--r-md)}
   #tabs a{padding:7px 9px;font-size:12.5px}
   .nav-actions{gap:2px}
   .nav-actions .icon-btn{width:34px;height:34px}
-  .nav-me{width:30px;height:30px;font-size:12px}
   .brand-mark{width:28px;height:28px}
 
   /* 手机 GPU 上 blur(30px)+mask 又贵又容易整块渲染成黑色，换成纯亮度压暗 */

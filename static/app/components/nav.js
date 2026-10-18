@@ -19,7 +19,6 @@ const TABS = [
 let searchOpen = false;
 let lastScroll = 0;
 
-import { currentUser, openSwitcher } from '../core/auth.js';
 
 export function initNav() {
   const tabs = $('#tabs');
@@ -37,16 +36,6 @@ export function initNav() {
 // 于是 input.value 变成 "[object PointerEvent]"，还会被记进搜索历史
 $('#btn-search')?.addEventListener('click', () => openSearch());
   $('#search-close')?.addEventListener('click', closeSearch);
-  const meBtn = $('#btn-me');
-  if (meBtn) {
-    const u = currentUser();
-    const av = $('#me-avatar');
-    if (u && av) {
-      av.textContent = (u.avatar || u.name || '?').slice(0, 1);
-      meBtn.title = u.name + (u.role === 'admin' ? '（管理员）' : '') + ' · 点这里切换账户';
-    }
-    meBtn.addEventListener('click', () => openSwitcher());
-  }
   $('#searchlayer')?.addEventListener('click', e => {
     if (e.target.id === 'searchlayer') closeSearch();
   });
