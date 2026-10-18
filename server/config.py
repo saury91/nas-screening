@@ -17,6 +17,12 @@ DB_PATH = os.environ.get("DB_PATH") or os.path.join(ROOT, "data", "media.db")
 STATIC = os.environ.get("STATIC_DIR") or os.path.join(ROOT, "static")
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "")
 
+# ── 账户模式 ─────────────────────────────────────────────────
+# 局域网自用：不需要账户与 PIN。NAS 只作为「配置分发 + UI 升级」的服务器，
+# 手机/电视 App 与浏览器都直接可用。
+# 想恢复多账户：NO_AUTH=0 启动即可。
+NO_AUTH = os.environ.get("NO_AUTH", "1").strip().lower() not in ("0", "false", "no", "off")
+
 # ── qBittorrent ───────────────────────────────────────────────
 QBT_URL = os.environ.get("QBT_URL", "http://127.0.0.1:8080")
 QBT_USER = os.environ.get("QBT_USER", "")

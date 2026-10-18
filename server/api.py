@@ -15,7 +15,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from .cache import cache_peek
-from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, SLUG_CAT, STATIC)
+from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, NO_AUTH, SLUG_CAT, STATIC)
 from .db import (dbrun, note_search, pref_json, source_get, sources_list,
                  toggle_fav, touch_history)
 from .log import log
@@ -29,6 +29,10 @@ from .services.qbt import QBT
 
 # 只有管理员能碰的路由前缀：改配置、管账户、动下载。
 # 其余 /api/* 登录后任何人可用（看片、记录、收藏都是按人隔离的）。
+# 无账户模式下的「本机用户」：权限等于管理员，但没有任何 PIN/会话
+LOCAL_USER = {"id": "local", "name": "本机", "avatar": "", "role": "admin",
+              "hasPin": False, "createdAt": 0, "lastSeen": 0}
+
 _ADMIN_PREFIX = (
     "/api/sources", "/api/config/", "/api/profiles", "/api/backup",
     "/api/live/add", "/api/live/refresh", "/api/live/collect",
@@ -119,6 +123,9 @@ class Handler(BaseHTTPRequestHandler):
         return t
 
     def me(self):
+        # 无账户模式（NO_AUTH=1）：谁都当本机管理员，整个登录/PIN 流程不参与
+        if NO_AUTH:
+            return LOCAL_USER
         # 注意：Handler 实例是「每个连接」一个，keep-alive 上会复用。
         # 直接用 hasattr 缓存会把第一个请求（登录前）的 None 带给后面的请求，
         # 表现就是「刚登录完还是 401，刷新一下又好了」。所以每个请求开头都要重置。
