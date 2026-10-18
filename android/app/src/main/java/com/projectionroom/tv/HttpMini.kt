@@ -31,7 +31,7 @@ object HttpMini {
         query: String,
         headers: Map<String, String>,
         body: ByteArray,
-        timeoutMs: Int = 20_000,
+        timeoutMs: Int = 12_000,
     ): Response {
         val uri = URI(base)
         val https = uri.scheme.equals("https", true)
@@ -40,11 +40,11 @@ object HttpMini {
 
         val socket: Socket = if (https) {
             val raw = Socket()
-            raw.connect(InetSocketAddress(host, port), 8000)
+            raw.connect(InetSocketAddress(host, port), 2500)
             (SSLSocketFactory.getDefault() as SSLSocketFactory)
                 .createSocket(raw, host, port, true)
         } else {
-            Socket().apply { connect(InetSocketAddress(host, port), 8000) }
+            Socket().apply { connect(InetSocketAddress(host, port), 2500) }
         }
         socket.soTimeout = timeoutMs
 
