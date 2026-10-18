@@ -789,36 +789,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radiu
 /* 左右各扩 44px，避免播放头在 0 时粒子被画布左边裁成一条竖线 */
 .np-fx{left:-44px;width:calc(100% + 88px)}
 
-/* ═══════════ 登录门 ═══════════ */
-.auth-gate{position:fixed;top:0;right:0;bottom:0;left:0;z-index:400;display:grid;place-items:center;padding:24px;
-  background:rgba(6,7,11,.88);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
-.auth-gate[hidden]{display:none}
 body.gated{overflow:hidden}
-.gate-card{width:min(520px,100%);border-radius:20px;border:1px solid var(--line);
-  background:linear-gradient(180deg,#16181f,#0d0f14);padding:26px;
-  box-shadow:0 40px 90px rgba(0,0,0,.65);animation:gateIn .34s var(--ease) both}
 @keyframes gateIn{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
-.gate-brand{display:flex;gap:14px;align-items:center;margin-bottom:18px}
-.gate-logo{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;flex:none;
-  background:linear-gradient(180deg,#ffe0a2,var(--accent));color:#1b1206;font-size:17px}
-.gate-brand h2{margin:0 0 4px;font-size:17px;font-weight:600}
-.gate-brand p{margin:0;font-size:12px;color:#8a919e;line-height:1.6}
-.gate-field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
-.gate-field span{font-size:12px;color:#9aa1ad}
-.gate-form .btn{width:100%;margin-top:6px}
-.gate-users{display:grid;gap:8px}
-.gate-user{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;
-  border:1px solid var(--line);background:rgba(255,255,255,.03);text-align:left;
-  outline:none;cursor:pointer;transition:.16s var(--ease)}
-.gate-user:hover{background:rgba(255,255,255,.08);border-color:var(--line-strong)}
-.gate-user.focused{box-shadow:0 0 0 2px var(--accent)}
-.gate-user.on{border-color:rgba(255,207,122,.5);background:rgba(255,207,122,.08)}
-.gate-avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:none;
-  background:#23262f;color:#f4f5f7;font-weight:600;font-size:14px}
-.gate-uname{flex:1;font-size:14px;color:#f4f5f7}
-.gate-urole{font-size:11.5px;color:#8a919e}
-.gate-pinbox{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
-.gate-pinbox .input{margin-bottom:10px}
 .nav-me{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex:none;
   background:linear-gradient(180deg,#ffe0a2,var(--accent));color:#1b1206;
   font-weight:650;font-size:14px;outline:none;border:0;cursor:pointer;
@@ -841,8 +813,6 @@ body.gated{overflow:hidden}
 .pin-big{height:64px;font-size:26px;text-align:center;border-radius:14px;
   background:rgba(255,255,255,.04);letter-spacing:.55em;text-indent:.55em}
 .pin-big.loading{opacity:.55}
-.gate-solo .gate-brand{margin-bottom:16px}
-.gate-err{margin:10px 0 0;min-height:1.2em;color:var(--danger);font-size:12px}
 
 /* 详情页返回：原来只能靠键盘/遥控器返回键，鼠标和触屏没入口 */
 .back-pill{

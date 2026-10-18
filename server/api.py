@@ -31,7 +31,8 @@ from .services.qbt import QBT
 # 只有管理员能碰的路由前缀：改配置、管账户、动下载。
 # 其余 /api/* 登录后任何人可用（看片、记录、收藏都是按人隔离的）。
 # 无账户模式下的「本机用户」：权限等于管理员，但没有任何 PIN/会话
-LOCAL_USER = {"id": "local", "name": "本机", "avatar": "", "role": "admin",
+# 沿用历史数据里的 owner "admin"：否则老的观看记录/收藏会因为 owner 变了而看不见
+LOCAL_USER = {"id": "admin", "name": "本机", "avatar": "", "role": "admin",
               "hasPin": False, "createdAt": 0, "lastSeen": 0}
 
 _ADMIN_PREFIX = (
@@ -374,13 +375,6 @@ class Handler(BaseHTTPRequestHandler):
         path = p.path
         qs = {k: v[0] for k, v in urllib.parse.parse_qs(p.query).items()}
         try:
-            if (path.startswith("/api/")
-                    and not path.startswith("/api/auth/")
-                    and not path.startswith("/api/app/")):
-                if not self.me():
-                    return self._deny(401, "auth", "需要登录")
-                if path.startswith(_ADMIN_PREFIX) and not self._is_admin():
-                    return self._deny(403, "admin", "只有管理员能做这个")
             if path in ("/tv", "/tv/"):
                 # 电视浏览器里手输地址很痛苦，给一个短路径 + 大按钮
                 return self._serve_file("tv.html", cache="no-cache")
@@ -474,10 +468,6 @@ class Handler(BaseHTTPRequestHandler):
                 "live": {"groups": live.live_groups(), "items": live.live_list()},
                 "ui": {"version": os.environ.get("UI_VERSION", "")},
             })
-        if path == "/api/auth/state":
-            return _json(auth.state(self.me()))
-        if path == "/api/profiles":
-            return _json({"ok": True, "items": auth.list_profiles()})
         if path == "/api/status":
             if not QBT.ok:
                 QBT.login()
@@ -804,11 +794,6 @@ class Handler(BaseHTTPRequestHandler):
         self._reset_auth()
         path = urllib.parse.urlparse(self.path).path
         try:
-            if not path.startswith("/api/auth/"):
-                if not self.me():
-                    return self._deny(401, "auth", "需要登录")
-                if path.startswith(_ADMIN_PREFIX) and not self._is_admin():
-                    return self._deny(403, "admin", "只有管理员能做这个")
             b = self._body()
             return self._api_post(path, b)
         except Exception as e:
@@ -837,75 +822,6 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return send({"ok": False, "msg": str(e)})
             return send({"ok": True})
-        if path == "/api/auth/setup":
-            try:
-                prof, tok = auth.setup(b.get("name") or "管理员", b.get("pin") or "")
-            except auth.AuthError as e:
-                return send({"ok": False, "msg": e.msg})
-            return self._send(200, json.dumps(
-                {"ok": True, "token": tok, "me": prof, "profiles": auth.list_profiles()},
-                ensure_ascii=False), "application/json; charset=utf-8",
-                extra=[_cookie(tok)])
-        if path == "/api/auth/login":
-            ip = (self.client_address or ("",))[0]
-            try:
-                # PIN 即身份：不再传账户 id，直接按 PIN 匹配
-                prof, tok = auth.login(b.get("pin") or "", ip=ip)
-            except auth.AuthError as e:
-                return self._send(e.code, json.dumps(
-                    {"ok": False, "code": "auth", "msg": e.msg}, ensure_ascii=False),
-                    "application/json; charset=utf-8")
-            return self._send(200, json.dumps(
-                {"ok": True, "token": tok, "me": prof, "profiles": auth.list_profiles()},
-                ensure_ascii=False), "application/json; charset=utf-8",
-                extra=[_cookie(tok)])
-        if path == "/api/auth/tv":
-            # 电视端免输 PIN：固定账户「电视」/ 999999
-            prof = auth.tv_profile()
-            if not prof:
-                return self._send(409, json.dumps(
-                    {"ok": False, "code": "pin_taken",
-                     "msg": "999999 已被其它账户占用，电视需要手动输 PIN"},
-                    ensure_ascii=False), "application/json; charset=utf-8")
-            tok = auth.issue_token(prof["id"], ua=self.headers.get("User-Agent") or "tv")
-            return self._send(200, json.dumps(
-                {"ok": True, "token": tok, "me": prof, "profiles": auth.list_profiles()},
-                ensure_ascii=False), "application/json; charset=utf-8",
-                extra=[_cookie(tok)])
-        if path == "/api/auth/touch":
-            # 客户端本地还留着 token 但 Cookie 丢了（WebView 重启、清缓存常见）：
-            # 让他拿 X-Token 换一次 Set-Cookie，媒体元素（video/img/audio）才能继续带认证
-            tok = self._token()
-            if not tok or not self.me():
-                return self._send(401, json.dumps(
-                    {"ok": False, "code": "auth"}, ensure_ascii=False),
-                    "application/json; charset=utf-8")
-            return self._send(200, json.dumps({"ok": True}, ensure_ascii=False),
-                              "application/json; charset=utf-8", extra=[_cookie(tok)])
-        if path == "/api/auth/logout":
-            auth.logout(self._token())
-            return self._send(200, json.dumps({"ok": True}, ensure_ascii=False),
-                              "application/json; charset=utf-8",
-                              extra=[("Set-Cookie", "pr_token=; Path=/; Max-Age=0; HttpOnly")])
-        if path == "/api/profiles/save":
-            try:
-                if b.get("id"):
-                    prof = auth.update_profile(b["id"], name=b.get("name"),
-                                               pin=b.get("pin") if "pin" in b else None,
-                                               role=b.get("role"), avatar=b.get("avatar"))
-                else:
-                    prof = auth.create_profile(b.get("name") or "", b.get("pin") or "",
-                                               role=b.get("role") or "member",
-                                               avatar=b.get("avatar") or "")
-            except auth.AuthError as e:
-                return send({"ok": False, "msg": e.msg})
-            return send({"ok": True, "item": prof, "items": auth.list_profiles()})
-        if path == "/api/profiles/delete":
-            try:
-                auth.delete_profile(b.get("id") or "")
-            except auth.AuthError as e:
-                return send({"ok": False, "msg": e.msg})
-            return send({"ok": True, "items": auth.list_profiles()})
         if path == "/api/config/import":
             doc = b.get("config") or b.get("doc")
             if doc is None:
