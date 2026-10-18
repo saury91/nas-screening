@@ -159,9 +159,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_LONG).show()
+                val msg = when (e) {
+                    is java.net.ConnectException, is java.net.SocketTimeoutException,
+                    is java.net.UnknownHostException ->
+                        "连不上 NAS，请确认手机和 NAS 在同一个网络后重试"
+                    is java.io.IOException -> "下载中断：${e.message ?: "请重试"}"
+                    else -> "下载失败：${e.message ?: e.javaClass.simpleName}"
                 }
+                runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
             }
         }, "update-download").start()
     }
