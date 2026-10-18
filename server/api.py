@@ -832,6 +832,16 @@ class Handler(BaseHTTPRequestHandler):
                 {"ok": True, "token": tok, "me": prof, "profiles": auth.list_profiles()},
                 ensure_ascii=False), "application/json; charset=utf-8",
                 extra=[_cookie(tok)])
+        if path == "/api/auth/touch":
+            # 客户端本地还留着 token 但 Cookie 丢了（WebView 重启、清缓存常见）：
+            # 让他拿 X-Token 换一次 Set-Cookie，媒体元素（video/img/audio）才能继续带认证
+            tok = self._token()
+            if not tok or not self.me():
+                return self._send(401, json.dumps(
+                    {"ok": False, "code": "auth"}, ensure_ascii=False),
+                    "application/json; charset=utf-8")
+            return self._send(200, json.dumps({"ok": True}, ensure_ascii=False),
+                              "application/json; charset=utf-8", extra=[_cookie(tok)])
         if path == "/api/auth/logout":
             auth.logout(self._token())
             return self._send(200, json.dumps({"ok": True}, ensure_ascii=False),

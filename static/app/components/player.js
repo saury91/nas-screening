@@ -3,6 +3,7 @@
 import { $, esc, icon, toast, fmtSpeed } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { openCastSheet } from '../core/cast.js';
+import { getToken } from '../core/auth.js';
 import { setFocus, clearFocus } from '../core/focus.js';
 
 let art = null;
@@ -483,6 +484,12 @@ function mountArt(url, position) {
             maxBufferLength: 40,
             maxMaxBufferLength: 90,
             fragLoadingMaxRetry: 4,
+            // hls.js 的请求不走 api.js，不会自动带 X-Token；
+            // Cookie 万一没有，这里兜住（WebView 里很常见）
+            xhrSetup: (xhr) => {
+              const tk = getToken();
+              if (tk) xhr.setRequestHeader('X-Token', tk);
+            },
           });
           hls.loadSource(u);
           hls.attachMedia(video);
