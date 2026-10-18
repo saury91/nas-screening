@@ -192,6 +192,25 @@ class LocalServer(
 
     // ── 反代到 NAS ────────────────────────────────────────────
 
+    /** 当前是否在局域网（Wi-Fi / 有线）。NAS 是私网地址，蜂窝网络下不可能连上 */
+    private fun onLan(): Boolean {
+        return try {
+            val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                as android.net.ConnectivityManager
+            val n = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(n) ?: return false
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
+        } catch (e: Exception) { true }
+    }
+
+    private fun isPrivateHost(url: String): Boolean {
+        val host = try { java.net.URI(url).host ?: return false } catch (e: Exception) { return false }
+        return host.startsWith("192.168.") || host.startsWith("10.") ||
+            Regex("^172\\.(1[6-9]|2\\d|3[01])\\.").containsMatchIn(host) ||
+            host == "localhost" || host.startsWith("127.")
+    }
+
     private fun proxy(
         sock: Socket,
         method: String,
@@ -203,6 +222,11 @@ class LocalServer(
         val base = nasUrl().trimEnd('/')
         if (base.isBlank()) {
             json(sock, """{"ok":false,"offline":true,"msg":"还没设置 NAS 地址"}""", 503)
+            return
+        }
+        // 蜂窝网络 + 私网 NAS = 一定连不上，立刻回 503，让前端马上走离线分支
+        if (isPrivateHost(base) && !onLan()) {
+            json(sock, """{"ok":false,"offline":true,"msg":"当前不在局域网"}""", 503)
             return
         }
         val resp = try {
