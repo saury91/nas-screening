@@ -20,6 +20,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewCompat
 
 /**
@@ -45,6 +48,20 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         isTv = Device.isTv(this)
         if (isTv) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+
+        // 手机上要"撑满":让页面画到状态栏与手势条下面，再把状态栏高度喂给 CSS
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (Build.VERSION.SDK_INT >= 28) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
 
         val url = server
         if (url.isBlank()) {
@@ -191,6 +208,7 @@ class MainActivity : AppCompatActivity() {
               ${if (isTv) "document.documentElement.classList.add('tv');" else ""}
               window.ProomTV = {
                 version: '${BuildConfig.VERSION_NAME}',
+                safeTop: ${statusBarHeight()},
                 webview: ${webViewMajor()},
                 tv: ${isTv},
                 play: function(url, title){ window.ProomNative.play(url || '', title || ''); },
@@ -200,6 +218,18 @@ class MainActivity : AppCompatActivity() {
             })();
         """.trimIndent()
         web.evaluateJavascript(js, null)
+        web.evaluateJavascript(
+            "document.documentElement.style.setProperty('--safe-top','${statusBarHeight()}px')",
+            null
+        )
+    }
+
+    /** 状态栏高度：页面画到了它下面，得把这段留出来 */
+    private fun statusBarHeight(): Int {
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (id <= 0) return 0
+        // CSS 的 px 是 dp，不是物理像素：要除以 density，否则会被放大 3~4 倍
+        return (resources.getDimensionPixelSize(id) / resources.displayMetrics.density).toInt()
     }
 
     /** 系统 WebView 主版本号，用来判断前端能不能跑得动 */
@@ -227,7 +257,16 @@ class MainActivity : AppCompatActivity() {
     private fun showNetError() {
         errorBox.visibility = View.VISIBLE
         errorTitle.text = "连不上 NAS"
-        errorDesc.text = "检查一下 ${server} 能不能打开，以及电视和 NAS 是不是同一个网络。"
+        errorDesc.text = "检查一下 ${server} 能不能打开，以及设备与 NAS 是不是同一个网络。"
+        // 地址可能过期（DHCP 换了 IP / NAS 换了端口），给一个重新发现的入口
+        findViewById<Button>(R.id.error_btn).apply {
+            text = "重新查找 NAS"
+            setOnClickListener {
+                Prefs.setServer(this@MainActivity, "")
+                startActivity(Intent(this@MainActivity, SetupActivity::class.java))
+                finish()
+            }
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {

@@ -421,3 +421,44 @@ a.card:focus-visible{outline-offset:4px;border-radius:var(--r-md)}
   border:2px solid rgba(255,255,255,.16);border-top-color:var(--accent);
   animation:spin .9s linear infinite}
 .load-more{display:flex;align-items:center;justify-content:center;gap:12px;padding:24px 0 8px}
+
+/* ═══════════ 手机端（≤600px）═══════════════════════════
+   360dp 宽下：6 个 tab + logo + 3 个按钮塞不下，原来会把「剧集」挤成半个字。
+   这里收紧尺寸，并给 tab 条右侧加渐隐提示"还能滑"。 */
+@media (max-width:600px){
+  .nav-inner{gap:10px;padding-inline:12px}
+  #tabs{gap:2px;
+    -webkit-mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 18px),transparent);
+    mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 18px),transparent)}
+  #tabs a{padding:7px 9px;font-size:12.5px}
+  .nav-actions{gap:2px}
+  .nav-actions .icon-btn{width:34px;height:34px}
+  .nav-me{width:30px;height:30px;font-size:12px}
+  .brand-mark{width:28px;height:28px}
+
+  /* 手机 GPU 上 blur(30px)+mask 又贵又容易整块渲染成黑色，换成纯亮度压暗 */
+  .hero-bg{filter:brightness(.52) saturate(125%);transform:none}
+  .hero .hero-bg{-webkit-mask-image:none;mask-image:none;animation:none;opacity:1}
+  .hero{min-height:min(44vh,400px);padding-bottom:64px}
+  .hero-inner{max-width:100%}
+}
+
+/* 应用把页面画到状态栏下面了：把状态栏高度让出来（浏览器里 --safe-top 为 0） */
+:root{--safe-top:0px}
+#topbar{height:calc(var(--hdr) + var(--safe-top));padding-top:var(--safe-top)}
+.view{padding-top:calc(var(--hdr) + var(--safe-top) + 16px)}
+
+/* 手机 GPU 上 78px 的模糊会把整层渲染成黑色：改成只压暗、不模糊 */
+@media (max-width:600px){
+  .ambient::before{filter:brightness(.62) saturate(130%);transform:none;opacity:.30}
+}
+
+/* 沉浸式：首页 Hero 顶到屏幕最上沿，导航浮在图上。
+   否则状态栏那块会是空的黑色横条（用户会以为没全屏）。 */
+.page.bleed > .hero{
+  margin-top:calc(-1 * (var(--hdr) + var(--safe-top) + 16px));
+  padding-top:calc(var(--hdr) + var(--safe-top) + 22px);
+}
+.page.bleed > .detail-hero{
+  margin-top:calc(-1 * (var(--hdr) + var(--safe-top) + 16px));
+}
