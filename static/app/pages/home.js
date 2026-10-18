@@ -151,13 +151,29 @@ function paint(root, d) {
     title: '最近更新', items: rec.latest.slice(0, 14),
   }) : '';
 
+  // 收藏不再藏在设置里：首页给一条货架，找片更顺手
+  const favItems = (d.fav || []).filter(x => x.kind === 'online' && (x.title || x.key)).map(f => {
+    let year = '';
+    try { year = JSON.parse(f.payload || '{}').year || ''; } catch (e) { year = ''; }
+    return { name: f.title || f.key, year, pic: f.cover };
+  });
+  const favShelf = favItems.length ? shelf({
+    title: '我的收藏', sub: `${favItems.length} 部`,
+    items: favItems.slice(0, 14), more: '#/settings/favorites',
+  }) : '';
+
   const liked = (rec.liked || []).length ? shelf({
     title: '按你的口味', sub: '根据搜索与观看记录挑的', items: rec.liked.slice(0, 14),
   }) : '';
 
   const nothing = !items.length && !catShelves && !latest;
 
-  root.innerHTML = `<div class="page" style="padding:0">
+  const lead = items[0];
+  document.documentElement.style.setProperty(
+    '--ambient-poster',
+    lead && lead.pic ? `url("${String(lead.pic).replace(/["'\\\n\r]/g, '')}")` : 'none');
+
+  root.innerHTML = `<div class="page bleed" style="padding:0">
     ${heroHTML(items)}
     ${cont}
     ${quick}
@@ -170,6 +186,7 @@ function paint(root, d) {
     ${tastes}
     ${catShelves}
     ${latest}
+    ${favShelf}
     ${liked}
   </div>`;
 

@@ -98,16 +98,41 @@ function renderGroups(root) {
 }
 
 function paint(root) {
+  try {
+    _paint(root);
+  } catch (e) {
+    // 以前这里一抛错就静默停在上一屏（常见表现：上面写着有 400 多个频道，下面空白）
+    console.error(e);
+    const box = root.querySelector('#chlist');
+    if (box) {
+      box.innerHTML = emptyState({
+        iconName: 'tv', title: '频道列表渲染出错',
+        desc: String((e && e.message) || e),
+      });
+    }
+  }
+}
+
+function _paint(root) {
   const box = root.querySelector('#chlist');
-  let items = st.items;
+  // 分组列表可能刚被「自动汇总」重建过，旧的分组名已经不存在了：
+  // 这时要回退到「全部」，否则会永远筛出 0 条
+  if (st.grp && !st.groups.some(g => g.group === st.grp)) {
+    st.grp = '';
+    root.querySelectorAll('#groups .chip').forEach(x => x.classList.toggle('on', !x.dataset.g));
+  }
+  let items = (st.items || []).filter(x => x && typeof x.name === 'string' && x.name);
   if (st.grp) items = items.filter(x => x.group === st.grp);
   if (st.kw) items = items.filter(x => x.name.includes(st.kw));
 
   if (!items.length) {
     box.innerHTML = emptyState({
-      iconName: 'tv', title: st.kw ? '没有这个频道' : '这里还没有频道',
-      desc: st.kw ? '换个关键词试试。' : '直播源可能没抓成功，去设置 → 直播源里手动导入一个 M3U / TXT。',
-      action: st.kw ? '' : '<a class="btn" href="#/settings/live" data-focus>去导入直播源</a>',
+      iconName: 'tv',
+      title: st.kw ? '没有这个频道' : (st.grp ? '这个分组里暂时没有频道' : '这里还没有频道'),
+      desc: st.kw ? '换个关键词试试。'
+        : st.grp ? '换一个分组看看，或点右上角「检测可用」重新测一遍。'
+        : '直播源可能没抓成功，去设置 → 直播源里手动导入一个 M3U / TXT。',
+      action: (st.kw || st.grp) ? '' : '<a class="btn" href="#/settings/live" data-focus>去导入直播源</a>',
     });
     return;
   }
@@ -116,20 +141,21 @@ function paint(root) {
   items = items.slice().sort((a, b) => rank(a) - rank(b));
 
   box.innerHTML = `<div class="live-grid">${items.slice(0, 240).map((c, i) => `
-    <div class="ch-card ${c.alive === 0 ? 'dead' : ''}" data-focus data-ch="${i}">
+    <button class="ch-card ${c.alive === 0 ? 'dead' : ''}" data-focus data-ch="${i}"
+            aria-label="播放 ${esc(c.name)}">
       <span class="ch-glow"></span>
-      <div class="row" style="justify-content:space-between">
-        <div class="ch-logo">${esc(c.name.slice(0, 1))}</div>
+      <span class="row" style="justify-content:space-between">
+        <span class="ch-logo">${esc(c.name.slice(0, 1))}</span>
         <span class="tag">${esc((c.urls || []).length > 1 ? (c.urls.length + ' 线路') : 'HD')}</span>
-      </div>
-      <div>
-        <p class="ch-name">${esc(c.name)}</p>
-        <p class="ch-sub">${esc(c.group || '未分组')}${
+      </span>
+      <span>
+        <span class="ch-name">${esc(c.name)}</span>
+        <span class="ch-sub">${esc(c.group || '未分组')}${
           c.alive === 1 ? '<i class="st ok">可播</i>'
-          : c.alive === 0 ? '<i class="st dead">失效</i>' : ''}</p>
-      </div>
+          : c.alive === 0 ? '<i class="st dead">失效</i>' : ''}</span>
+      </span>
       <span class="live-play"><span>${icon('play')}</span></span>
-    </div>`).join('')}</div>`;
+    </button>`).join('')}</div>`;
 
   box.onclick = e => {
     const card = e.target.closest('[data-ch]');

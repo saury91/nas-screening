@@ -1,21 +1,44 @@
 /* ═══════════ 首页：全幅 Hero + 货架 ═══════════ */
 .hero{
   /* 别让 Hero 吃满整屏：留出下一块，首屏就能看到「有内容继续」 */
-  position:relative;min-height:min(72vh,700px);display:flex;align-items:flex-end;
-  padding:calc(var(--hdr) + 32px) var(--pad) 34px;overflow:hidden;isolation:isolate;
+  position:relative;min-height:min(52vh,520px);display:flex;align-items:flex-end;
+  padding:calc(var(--hdr) + 22px) var(--pad) 96px;overflow:hidden;isolation:isolate;
 }
 .hero-bg{position:absolute;inset:-6%;z-index:-3;background-size:cover;background-position:center;
-  filter:blur(34px) saturate(150%) brightness(.56);transform:scale(1.1);
-  transition:opacity 1.1s var(--ease),background-image .6s}
+  filter:blur(30px) saturate(155%) brightness(.62);transform:scale(1.1);
+  transition:opacity 1s var(--ease)}
+/* 两层叠着交叉淡入，换片不再是「啪」一下硬切 */
+.hero .hero-bg{opacity:0;animation:kenburns 28s ease-in-out infinite alternate;
+  -webkit-mask-image:linear-gradient(180deg,#000 58%,rgba(0,0,0,.55) 80%,transparent 96%);
+  mask-image:linear-gradient(180deg,#000 58%,rgba(0,0,0,.55) 80%,transparent 96%)}
+.hero .hero-bg:first-of-type{opacity:1}
+@keyframes kenburns{
+  from{transform:scale(1.1) translate3d(0,0,0)}
+  to{transform:scale(1.19) translate3d(-1.4%,-1%,0)}
+}
 .hero-veil{position:absolute;inset:0;z-index:-2;
-  background:
-    linear-gradient(90deg,rgba(7,8,11,.9) 0%,rgba(7,8,11,.66) 40%,rgba(7,8,11,.08) 70%,rgba(7,8,11,.42) 100%),
-    linear-gradient(0deg,var(--bg) 2%,rgba(7,8,11,.55) 26%,transparent 60%),
-    linear-gradient(180deg,rgba(7,8,11,.72),transparent 32%);
+  background:linear-gradient(180deg,rgba(7,8,11,.72),transparent 32%);
+}
+/* 左右压暗单独一层，并在底部渐隐：
+   否则这条横向渐变会停在 Hero 下边缘，和下方的氛围光再切一条线 */
+.hero-veil::before{content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,rgba(7,8,11,.9) 0%,rgba(7,8,11,.66) 40%,rgba(7,8,11,.08) 70%,rgba(7,8,11,.42) 100%);
+  -webkit-mask-image:linear-gradient(180deg,#000 55%,rgba(0,0,0,.5) 82%,transparent 99%);
+  mask-image:linear-gradient(180deg,#000 55%,rgba(0,0,0,.5) 82%,transparent 99%);
 }
 .hero-grain{position:absolute;inset:0;z-index:-1;opacity:.32;pointer-events:none;
+  -webkit-mask-image:linear-gradient(180deg,#000 62%,transparent 96%);
+  mask-image:linear-gradient(180deg,#000 62%,transparent 96%);
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.34'/%3E%3C/svg%3E")}
-.hero-inner{position:relative;z-index:2;display:flex;align-items:flex-end;gap:clamp(24px,5vw,64px);width:100%}
+
+/* Banner 只用全局那一层模糊背景。文字侧补一个径向暗角（透明收边），
+   保证亮海报时标题也可读，同时不会在任何位置形成边界 */
+.hero::before{
+  content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(58% 78% at 18% 58%,rgba(7,8,11,.62),rgba(7,8,11,0) 72%);
+}
+.hero-inner{position:relative;z-index:2;display:flex;align-items:flex-end;gap:clamp(24px,5vw,64px);
+  width:100%;max-width:var(--shell);margin-inline:auto}
 .hero-copy{max-width:min(660px,58vw);animation:heroIn .8s var(--ease) both}
 @keyframes heroIn{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 .hero-tag{display:flex;align-items:center;gap:10px;margin-bottom:16px}
@@ -28,40 +51,23 @@
   margin:0 0 16px;text-wrap:balance;
   text-shadow:0 2px 6px rgba(0,0,0,.45),0 14px 50px rgba(0,0,0,.55);
 }
-/* 左右翻页：贴边的半胶囊，平时半透明，悬停/聚焦时亮起 */
-/* 翻页：圆形毛玻璃按钮，平时隐去，鼠标进 Hero 才浮现（Apple TV 那种「不打扰画面」） */
-.hero-arrow{
-  position:absolute;top:50%;transform:translateY(-50%) scale(.96);z-index:5;
-  width:42px;height:42px;border-radius:50%;
-  display:grid;place-items:center;
-  padding:0;border:0;outline:none;
-  background:rgba(18,20,26,.38);
-  -webkit-backdrop-filter:blur(20px) saturate(160%);
-  backdrop-filter:blur(20px) saturate(160%);
-  color:#fff;opacity:0;
-  box-shadow:0 10px 34px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.1);
-  transition:opacity .32s var(--ease),transform .32s var(--ease),
-    background .2s var(--ease),box-shadow .2s;
+/* 翻页控件：收进 banner 底部居中的一组，不再贴屏幕边 */
+.hero-step{
+  width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex:none;
+  padding:0;border:0;outline:none;background:transparent;
+  color:rgba(255,255,255,.5);
+  transition:color .2s var(--ease),background .2s var(--ease);
 }
-.hero-arrow.prev{left:10px}
-.hero-arrow.next{right:10px}
-.hero-arrow.prev svg{transform:rotate(180deg)}
-.hero-arrow svg{width:17px;height:17px;fill:none;stroke:currentColor;
-  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;
-  transition:transform .25s var(--ease)}
-.hero:hover .hero-arrow,.hero-arrow:focus-visible,.hero-arrow.focused{opacity:.85}
-.hero-arrow:hover{background:rgba(255,255,255,.2);transform:translateY(-50%) scale(1)}
-/* 悬停时图标轻轻往翻页方向挪一点，指明方向 */
-.hero-arrow.next:hover svg{transform:translateX(2px)}
-.hero-arrow.prev:hover svg{transform:rotate(180deg) translateX(2px)}
-.hero-arrow:active{transform:translateY(-50%) scale(.92);transition-duration:.12s}
-.hero-arrow.focused{opacity:1;box-shadow:inset 0 0 0 2px var(--accent),
-  0 10px 34px rgba(0,0,0,.38)}
+.hero-step svg{width:18px;height:18px;fill:none;stroke:currentColor;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.hero-step.prev svg{transform:rotate(180deg)}
+.hero-step:hover,.hero-step.focused{color:#fff;background:rgba(255,255,255,.08)}
+
 .hero-meta{display:flex;flex-wrap:wrap;align-items:center;gap:10px;color:#b3b8c3;
   font-size:13px;margin-bottom:16px}
 .hero-meta .score{color:var(--accent);font-weight:650}
 .hero-meta .sep{opacity:.4}
-.hero-desc{color:#b3b8c3;font-size:14.5px;line-height:1.75;margin:0 0 26px;
+.hero-desc{color:#b3b8c3;font-size:14.5px;line-height:1.7;margin:0 0 20px;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
   max-width:560px;text-shadow:0 2px 16px rgba(0,0,0,.5)}
 .hero-actions{display:flex;gap:12px;flex-wrap:wrap}
@@ -69,37 +75,37 @@
   margin-left:auto;flex:none;width:clamp(180px,19vw,270px);aspect-ratio:2/3;border-radius:18px;
   overflow:hidden;box-shadow:0 40px 90px rgba(0,0,0,.72),0 0 0 1px rgba(255,255,255,.1);
   transform:rotate(.6deg);animation:posterIn .9s var(--ease) both .06s;
-  position:relative;
+  position:relative;transition:opacity .45s var(--ease);opacity:1;
 }
 @keyframes posterIn{from{opacity:0;transform:translateY(24px) rotate(2deg)}to{opacity:1;transform:rotate(.6deg)}}
 .hero-poster img{width:100%;height:100%;object-fit:cover}
 .hero-poster .ph{width:100%;height:100%;background:linear-gradient(150deg,#2a2118,#14161d)}
-.hero-dots{position:absolute;left:var(--pad);bottom:18px;display:flex;align-items:center;gap:7px;z-index:3}
-.hero-dots button{width:22px;height:3px;border-radius:2px;background:rgba(255,255,255,.22);
+.hero-dots{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+  display:flex;align-items:center;gap:10px;z-index:3}
+.hero-pips{display:flex;align-items:center;gap:7px}
+.hero-pips button{width:22px;height:3px;border-radius:2px;background:rgba(255,255,255,.22);
   padding:0;transition:.35s var(--ease)}
-.hero-dots button.on{background:var(--accent);width:40px;box-shadow:0 0 12px rgba(255,207,122,.5)}
-.hero-idx{margin-left:8px;font-size:11px;letter-spacing:.1em;color:rgba(255,255,255,.5);
-  font-variant-numeric:tabular-nums}
+.hero-pips button.on{background:var(--accent);width:40px;box-shadow:0 0 12px rgba(255,207,122,.5)}
 .hero-skl{height:min(86vh,820px);display:flex;align-items:flex-end;padding:0 var(--pad) 60px}
 
 /* 继续观看：横向宽卡 */
-.continue-rail .card{width:clamp(240px,25vw,352px);aspect-ratio:16/9}
+.continue-rail .card{width:clamp(220px,23vw,320px);aspect-ratio:16/9}
 .continue-rail .card-meta{padding:10px 2px 0}
 .continue-ep{position:absolute;left:10px;bottom:10px;z-index:2;font-size:11px;padding:3px 8px;
   border-radius:6px;background:rgba(0,0,0,.66);backdrop-filter:blur(6px)}
 
 /* 快捷入口 */
-.quick-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;
-  padding:6px var(--pad) 0}
+.quick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;
+  padding:4px var(--pad) 0}
 .quick{
-  position:relative;border-radius:18px;padding:22px;overflow:hidden;min-height:132px;
+  position:relative;border-radius:18px;padding:18px;overflow:hidden;min-height:112px;
   border:1px solid var(--line);background:linear-gradient(140deg,rgba(255,255,255,.06),rgba(255,255,255,.02));
   transition:transform .3s var(--ease),border-color .3s,box-shadow .3s;outline:none;display:block;
 }
 .quick:hover{transform:translateY(-4px);border-color:rgba(255,207,122,.35)}
 .quick.focused{box-shadow:0 0 0 2px var(--accent),0 20px 50px rgba(0,0,0,.55);transform:translateY(-4px)}
 .quick h4{margin:0 0 6px;font-size:16px;font-weight:620}
-.quick p{margin:0;color:#7c828f;font-size:12.5px;line-height:1.6;max-width:76%}
+.quick p{margin:0;color:#8a919e;font-size:12.5px;line-height:1.6;max-width:76%}
 .quick .q-ico{position:absolute;right:14px;bottom:8px;opacity:.2}
 .quick .q-ico svg{width:74px;height:74px;fill:none;stroke:currentColor;stroke-width:1}
 .quick.live{background:linear-gradient(140deg,rgba(255,92,92,.16),rgba(255,255,255,.02))}
@@ -107,23 +113,21 @@
 .quick.sources{background:linear-gradient(140deg,rgba(255,207,122,.14),rgba(255,255,255,.02))}
 
 /* 口味标签 */
-.taste-row{display:flex;gap:8px;flex-wrap:wrap;padding:0 var(--pad)}
+.taste-row{display:flex;gap:8px;flex-wrap:wrap;padding:0 var(--pad);
+  max-width:calc(var(--shell) + var(--pad) * 2);margin-inline:auto}
 
 @media (max-width:900px){
-  /* 窄屏放到右下角，避免压住标题 */
-  .hero-arrow{
-    width:34px;height:34px;top:auto;bottom:6px;transform:none;opacity:.72;
-    background:rgba(18,20,26,.5);
-  }
-  .hero-arrow.prev{left:auto;right:56px}
-  .hero-arrow.next{right:12px}
-  .hero-arrow:active{transform:scale(.94)}
-  .hero-arrow svg{width:15px;height:15px}
-  .hero{min-height:66vh;padding-bottom:28px}
+  .hero{min-height:58vh;padding-bottom:22px}
   .hero-poster{display:none}
   .hero-copy{max-width:100%}
   .hero-title{font-size:clamp(32px,9vw,48px)}
   .hero-desc{-webkit-line-clamp:3;font-size:13.5px}
   .hero-actions .btn{height:42px;padding:0 18px}
   .hero-dots{bottom:12px}
+}
+
+/* 超宽屏：Hero 内容不要贴着两端，收在一个居中的版心里 */
+@media (min-width:1600px){
+  .hero-copy{max-width:min(720px,52vw)}
+  .hero-title{font-size:clamp(54px,4.6vw,88px)}
 }

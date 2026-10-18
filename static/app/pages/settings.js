@@ -5,6 +5,7 @@ import { emptyState, imgTag } from '../components/ui.js';
 import { go } from '../core/router.js';
 import { store } from '../core/store.js';
 import { cacheDrop } from '../core/cache.js';
+import { currentUser, isAdmin, refreshProfiles, usingDefaultPin, logout } from '../core/auth.js';
 
 const NAV = [
   ['sources', '片源管理', 'link'],
@@ -13,6 +14,8 @@ const NAV = [
   ['history', '播放记录', 'clock'],
   ['live', '直播源', 'tv'],
   ['music', '音乐', 'music'],
+  ['accounts', '家庭账户', 'heart'],
+  ['backup', '配置备份', 'upload'],
   ['about', '关于与自检', 'info'],
 ];
 
@@ -20,8 +23,12 @@ let timer = null;
 
 export function destroy() { clearInterval(timer); timer = null; }
 
+const ADMIN_TABS = ['sources', 'downloads', 'live', 'accounts', 'backup'];
+
 export async function render(root, ctx) {
-  const tab = NAV.some(n => n[0] === ctx.seg[1]) ? ctx.seg[1] : 'sources';
+  // 家人只要看自己的东西，管理类页面直接不出现（后端也会再挡一次）
+  const nav = NAV.filter(([k]) => isAdmin() || !ADMIN_TABS.includes(k));
+  const tab = nav.some(n => n[0] === ctx.seg[1]) ? ctx.seg[1] : nav[0][0];
   document.body.dataset.hero = '0';
   root.innerHTML = `<div class="page">
     <div class="page-head">
@@ -30,7 +37,7 @@ export async function render(root, ctx) {
     </div>
     <div class="settings-layout">
       <aside class="settings-nav">
-        ${NAV.map(([k, label, ic]) => `<a href="#/settings/${k}" data-focus
+        ${nav.map(([k, label, ic]) => `<a href="#/settings/${k}" data-focus
           class="${k === tab ? 'on' : ''}">${icon(ic)}${label}</a>`).join('')}
       </aside>
       <section class="settings-panel" id="panel">
@@ -41,7 +48,7 @@ export async function render(root, ctx) {
   const panel = root.querySelector('#panel');
   const fn = { sources: sourcesPanel, favorites: favPanel, downloads: tasksPanel,
                history: historyPanel, live: livePanel, music: musicPanel,
-               about: aboutPanel }[tab];
+               accounts: accountsPanel, backup: backupPanel, about: aboutPanel }[tab];
   try {
     await fn(panel);
   } catch (e) {
@@ -83,6 +90,16 @@ async function sourcesPanel(panel) {
       <div class="row" style="justify-content:flex-end;margin-top:14px">
         <button class="btn sm" id="add-src-toggle" data-focus>${icon('plus')}手动添加一个</button>
       </div>
+      <div class="card-block" style="margin-top:18px">
+        <div class="between">
+          <div><h4>自动发现片源</h4>
+            <p class="hint" style="margin:4px 0 0">从精选目录里读取影视仓配置，逐个发一次真实搜索验证，
+              只把能用的加入列表（只增不减，每周最多自动跑一次）。</p></div>
+          <button class="btn sm" id="src-discover" data-focus>${icon('search')}立即发现</button>
+        </div>
+        <p class="hint" id="src-discover-info" style="margin:10px 0 0"></p>
+      </div>
+
       <div id="add-src" hidden style="margin-top:14px">
         <div class="setting-2col">
           <div class="field"><label>名称</label><input class="input" id="ns-name" placeholder="我的资源"></div>
@@ -239,6 +256,38 @@ async function sourcesPanel(panel) {
   };
 
   await load();
+
+  // 自动发现片源
+  const dInfo = panel.querySelector('#src-discover-info');
+  const paintDiscover = st => {
+    st = st || {};
+    if (st.running) {
+      dInfo.textContent = `正在拉取配置并逐个验证，约需 1 分钟…（已开始 ${timeAgo(st.since)}）`;
+      return;
+    }
+    const r = st.result || {};
+    dInfo.textContent = r.at
+      ? `上次：${timeAgo(r.at)} · ${r.configs} 个配置 / ${r.candidates} 个候选 → 可用 ${r.alive} · 新增 ${r.added}（${r.seconds}s）`
+      : '还没有执行过；每周自动任务也会跑一次。';
+  };
+  try { paintDiscover(await api.discoverSources()); } catch (e) { /* 旧库没有这个字段 */ }
+
+  panel.querySelector('#src-discover').onclick = async () => {
+    const b = panel.querySelector('#src-discover');
+    b.disabled = true;
+    try {
+      const r = await api.runDiscover();
+      toast(r.msg || '已开始发现', 'ok');
+      for (let i = 0; i < 90; i++) {
+        await new Promise(ok => setTimeout(ok, 2000));
+        if (!panel.isConnected) break;
+        const st = await api.discoverSources();
+        paintDiscover(st);
+        if (!st.running) { await load(); break; }
+      }
+    } catch (e) { toast(e.message, 'err'); }
+    b.disabled = false;
+  };
 }
 
 // ═══════════ 收藏 ═══════════
@@ -256,10 +305,12 @@ async function favPanel(panel) {
   }
   box.innerHTML = `<div class="grid">${items.map(x => `
     <div class="card-wrap">
-      <div class="card" data-focus data-open="/title?n=${encodeURIComponent(x.key)}${yearOf(x)}">
+      <a class="card" href="#/title?n=${encodeURIComponent(x.key)}${yearOf(x)}" data-focus
+         data-open="/title?n=${encodeURIComponent(x.key)}${yearOf(x)}"
+         aria-label="${esc(x.title || x.key)}">
         ${imgTag(x.cover, x.title)}
         <span class="card-play"><span>${icon('play')}</span></span>
-      </div>
+      </a>
       <div class="card-meta">
         <p class="card-title">${esc(x.title || x.key)}</p>
         <p class="card-sub"><button class="chip" data-unfav="${esc(x.key)}"
@@ -369,7 +420,7 @@ async function historyPanel(panel) {
   }
   box.innerHTML = items.map(x => {
     const pct = x.duration ? Math.min(100, x.position / x.duration * 100) : 0;
-    return `<div class="history-row" data-focus data-open="/title?n=${encodeURIComponent(x.key)}${x.year ? '&y=' + x.year : ''}${x.ep ? '&ep=' + encodeURIComponent(x.ep) : ''}${x.position ? '&t=' + Math.floor(x.position) : ''}">
+    return `<div class="history-row" data-focus tabindex="0" role="link" aria-label="${esc(x.title || x.key)}" data-open="/title?n=${encodeURIComponent(x.key)}${x.year ? '&y=' + x.year : ''}${x.ep ? '&ep=' + encodeURIComponent(x.ep) : ''}${x.position ? '&t=' + Math.floor(x.position) : ''}">
       ${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : `<div class="ph">${esc((x.title || '?')[0])}</div>`}
       <div class="history-main">
         <h5>${esc(x.title || x.key)}</h5>
@@ -393,6 +444,24 @@ async function livePanel(panel) {
         <button class="btn primary" id="lv-add" data-focus>${icon('plus')}添加并抓取</button>
       </div>
     </div>
+    <div class="card-block">
+      <div class="between">
+        <div><h4>每日自动维护</h4>
+          <p class="hint" style="margin:4px 0 0">每天 <b id="lv-auto-hour">04:00</b> 重新抓取所有启用源，
+            检测频道可用性；<b>连续 3 次</b>都测不通的频道会被自动清理。</p></div>
+        <button class="switch" id="lv-auto" aria-label="每日自动维护"></button>
+      </div>
+      <p class="hint" id="lv-auto-info" style="margin:10px 0 0"></p>
+      <div class="field" style="margin-top:14px">
+        <label>候选源清单（每行一个地址；每天全部拉一遍、合并去重、逐条探活）</label>
+        <textarea class="input" id="lv-seeds" placeholder="https://.../result.m3u"></textarea>
+      </div>
+      <div class="row" style="justify-content:flex-end;gap:8px">
+        <button class="btn sm" id="lv-seeds-save" data-focus>保存清单</button>
+        <button class="btn sm primary" id="lv-auto-now" data-focus>${icon('refresh')}立即汇总并检测</button>
+      </div>
+    </div>
+
     <div class="card-block">
       <div class="between"><h4>已配置的源</h4>
         <button class="btn sm" id="lv-refresh" data-focus>${icon('refresh')}全部刷新</button></div>
@@ -462,6 +531,73 @@ async function livePanel(panel) {
   };
 
   await load();
+
+  // 每日自动维护：开关 + 立即执行
+  const sw = panel.querySelector('#lv-auto');
+  const info = panel.querySelector('#lv-auto-info');
+  const seedBox = panel.querySelector('#lv-seeds');
+  const paintAuto = st => {
+    st = st || {};
+    sw.classList.toggle('on', !!st.enabled);
+    const hourEl = panel.querySelector('#lv-auto-hour');
+    if (hourEl) hourEl.textContent = String(st.hour ?? 4).padStart(2, '0') + ':00';
+    if (seedBox && document.activeElement !== seedBox) {
+      seedBox.value = (st.seeds || []).join('\n');
+    }
+    const r = st.result || {};
+    const c = st.collect || {};
+    if (st.running) {
+      info.textContent = `正在汇总候选源并探活，可能需要几分钟…（已开始 ${timeAgo(st.since)}）`;
+    } else if (c.at) {
+      info.textContent = `上次汇总：${timeAgo(c.at)} · ${c.seeds || 0} 个源 / ${c.fetched || 0} 条 → `
+        + `探测 ${c.probed || 0} · 可用频道 ${c.kept || 0} · 入库 ${c.rows || 0}（${c.seconds || 0}s）`;
+    } else if (r.at) {
+      info.textContent = `上次：${timeAgo(r.at)} · 抓取 ${r.fetched || 0} · 检测 ${r.checked || 0} · 清理 ${r.pruned || 0}`;
+    } else {
+      info.textContent = '还没有执行过；开启后会在设定时间自动跑一次。';
+    }
+  };
+  try { paintAuto(await api.liveAuto()); } catch (e) { info.textContent = ''; }
+
+  sw.onclick = async () => {
+    const on = !sw.classList.contains('on');
+    sw.classList.toggle('on', on);
+    try {
+      const r = await api.setLiveAuto(on);
+      paintAuto(r.status || {});
+      toast(on ? '已开启每日自动维护' : '已关闭每日自动维护');
+    } catch (e) {
+      sw.classList.toggle('on', !on);
+      toast(e.message, 'err');
+    }
+  };
+
+  panel.querySelector('#lv-seeds-save').onclick = async () => {
+    const list = (seedBox.value || '').split('\n').map(x => x.trim()).filter(Boolean);
+    try {
+      const r = await api.setLiveSeeds(list);
+      toast(`已保存 ${r.seeds.length} 个候选源`, 'ok');
+      paintAuto(await api.liveAuto());
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  panel.querySelector('#lv-auto-now').onclick = async () => {
+    const b = panel.querySelector('#lv-auto-now');
+    b.disabled = true;
+    try {
+      const r = await api.collectLive();
+      toast(r.msg || '已开始汇总', 'ok');
+      // 后台跑，轮询到结束
+      for (let i = 0; i < 120; i++) {
+        await new Promise(ok => setTimeout(ok, 3000));
+        if (!panel.isConnected) break;
+        const st = await api.liveAuto();
+        paintAuto(st);
+        if (!st.running) { await load(); break; }
+      }
+    } catch (e) { toast(e.message, 'err'); }
+    b.disabled = false;
+  };
 }
 
 // ═══════════ 音乐 ═══════════
@@ -564,6 +700,239 @@ async function musicPanel(panel) {
   };
 }
 
+// ═══════════ 家庭账户 ═══════════
+async function accountsPanel(panel) {
+  const meUser = currentUser();
+  const draw = (items) => {
+    panel.innerHTML = `<h2>家庭账户</h2>
+      <p class="lead">家里每个人一份观看记录与收藏，互不干扰。管理员能改名字、设 PIN、删账户。</p>
+      ${usingDefaultPin() ? `<div class="card-block" style="border-color:rgba(255,207,122,.35);
+        background:rgba(255,207,122,.07)">
+        <h4 style="margin-bottom:4px">还在用默认口令</h4>
+        <p class="hint" style="margin:0">管理员默认 PIN 是 <code>123456</code>，建议点下面的「改 PIN」换一个。</p>
+      </div>` : ''}
+
+      <div class="card-block">
+        <h4>新增账户</h4>
+        <p class="hint">每人一个 6 位数字 PIN，全库不能重复——登录就是靠它认出是谁。</p>
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+          <input class="input" id="pf-name" placeholder="名字" maxlength="16"
+                 style="max-width:180px;height:38px">
+          <input class="input pin-input" id="pf-pin" placeholder="PIN（6 位数字）" inputmode="numeric"
+                 maxlength="6" style="max-width:180px;height:38px">
+          <select class="input" id="pf-role" style="width:120px;height:38px">
+            <option value="member">家人</option>
+            <option value="admin">管理员</option>
+          </select>
+          <button class="btn primary" id="pf-add" data-focus>${icon('plus')}添加</button>
+        </div>
+        <p class="hint" id="pf-tip"></p>
+      </div>
+
+      <div class="tracklist">
+        ${items.map(p => `
+          <div class="track pf-row" data-pid="${esc(p.id)}">
+            <span class="pf-av">${esc((p.avatar || p.name || '?').slice(0, 1))}</span>
+            <span class="t-name">${esc(p.name)}
+              ${p.role === 'admin' ? '<span class="pf-badge">管理员</span>' : ''}
+              ${p.id === meUser.id ? '<span class="pf-badge me">当前</span>' : ''}</span>
+            <span class="t-artist">${p.hasPin ? '已设 PIN' : '未设 PIN'}</span>
+            <span class="pf-acts">
+              <button class="btn sm ghost" data-act="rename" data-focus>改名</button>
+              <button class="btn sm ghost" data-act="pin" data-focus>${p.hasPin ? '改 PIN' : '设 PIN'}</button>
+              ${p.role === 'admin' ? '<span class="hint" style="font-size:11px">不可删除</span>'
+                : `<button class="btn sm danger" data-act="del" data-focus>删除</button>`}
+            </span>
+          </div>`).join('')}
+      </div>`;
+
+    const tip = panel.querySelector('#pf-tip');
+    const add = async () => {
+      const name = panel.querySelector('#pf-name').value.trim();
+      const pin = panel.querySelector('#pf-pin').value.trim();
+      const role = panel.querySelector('#pf-role').value;
+      if (!name) { tip.textContent = '填个名字'; return; }
+      if (!/^\d{6}$/.test(pin)) { tip.textContent = 'PIN 必须是 6 位数字'; return; }
+      try {
+        await api.post('/api/profiles/save', { name, pin, role });
+        toast('已添加「' + name + '」');
+        refresh();
+      } catch (e) { tip.textContent = e.message; }
+    };
+    panel.querySelector('#pf-add').onclick = add;
+    panel.querySelector('#pf-pin').addEventListener('keydown', e => {
+      if (e.key === 'Enter') add();
+    });
+
+    panel.querySelectorAll('.pf-row').forEach(row => {
+      const pid = row.dataset.pid;
+      const who = items.find(x => x.id === pid);
+      row.querySelectorAll('[data-act]').forEach(b => {
+        b.onclick = async () => {
+          const act = b.dataset.act;
+          if (act === 'rename') {
+            const name = prompt('新的名字', who.name);
+            if (!name || name.trim() === who.name) return;
+            try { await api.post('/api/profiles/save', { id: pid, name: name.trim() }); refresh(); }
+            catch (e) { toast(e.message, 'err'); }
+            return;
+          }
+          if (act === 'pin') {
+            const pin = prompt('设置新的 6 位数字 PIN', '');
+            if (pin === null) return;
+            if (!/^\d{6}$/.test(pin.trim())) { toast('PIN 必须是 6 位数字', 'err'); return; }
+            try {
+              await api.post('/api/profiles/save', { id: pid, pin: pin.trim() });
+              if (pid === meUser.id) {
+                // 改自己的 PIN 会清掉所有会话，必须重新登录
+                toast('PIN 已更新，请用新 PIN 重新登录');
+                await logout();
+                setTimeout(() => location.reload(), 600);
+                return;
+              }
+              toast('PIN 已更新');
+              refresh();
+            } catch (e) { toast(e.message, 'err'); }
+            return;
+          }
+          if (act === 'del') {
+            const ok = await dialog({
+              title: '删除「' + who.name + '」？',
+              body: '会同时删除这个账户的观看记录与收藏，不能恢复。',
+              ok: '删除',
+            });
+            if (!ok) return;
+            try { await api.post('/api/profiles/delete', { id: pid }); refresh(); }
+            catch (e) { toast(e.message, 'err'); }
+          }
+        };
+      });
+    });
+  };
+
+  const refresh = async () => {
+    try { draw(await refreshProfiles()); }
+    catch (e) { panel.innerHTML = `<p class="hint" style="color:var(--danger)">${esc(e.message)}</p>`; }
+  };
+  await refresh();
+}
+
+// ═══════════ 配置备份 / 迁移 ═══════════
+async function backupPanel(panel) {
+  panel.innerHTML = `<h2>配置备份与分享</h2>
+    <p class="lead">把片源、直播种子、音乐与界面偏好打包成一个 JSON。
+      文件里不含密码、Cookie 之类的凭据；换台机器导入即可还原，也可以直接发给别人。</p>
+
+    <div class="card-block">
+      <h4>导出</h4>
+      <p class="hint">两种都行：完整版连直播频道一起带走，配置源版只留片源和种子（体积小、更适合分享）。</p>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <a class="btn primary" href="/api/config/export?channels=1" data-focus>
+          ${icon('download')}下载完整配置</a>
+        <a class="btn" href="/api/config/export?channels=0" data-focus>只要配置源</a>
+      </div>
+    </div>
+
+    <div class="card-block">
+      <h4>导入</h4>
+      <p class="hint">先预览会改什么，确认后才写入。写入前会自动把当前配置备份到
+        <code>data/backups/</code>，导错了再导回来即可。</p>
+      <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
+        <label class="btn" data-focus style="cursor:pointer">
+          ${icon('upload')}选择配置文件
+          <input type="file" id="cfg-file" accept=".json,application/json" hidden>
+        </label>
+        <select class="input" id="cfg-mode" style="width:210px;height:38px">
+          <option value="merge">合并：保留现有，同名更新</option>
+          <option value="replace">替换：先清空同类片源</option>
+        </select>
+        <span class="hint" id="cfg-name"></span>
+      </div>
+      <div id="cfg-preview" style="margin-top:14px"></div>
+    </div>`;
+
+  const fileEl = panel.querySelector('#cfg-file');
+  const modeEl = panel.querySelector('#cfg-mode');
+  const nameEl = panel.querySelector('#cfg-name');
+  const box = panel.querySelector('#cfg-preview');
+  let doc = null;
+
+  const line = (label, n, extra) => n
+    ? `<li><b>${esc(label)}</b> ${n} 条${extra ? '：' + extra : ''}</li>` : '';
+
+  const renderPlan = (r) => {
+    const p = r.plan || {}, s = p.sources || {}, l = p.liveChannels || {}, pr = p.prefs || {};
+    const meta = r.meta || {};
+    const items = [
+      line('片源', s.total, `新增 ${s.add}，更新 ${s.update}，不变 ${s.same}`),
+      line('直播频道', l.total, `新增 ${l.add}，已存在 ${l.same}`),
+      line('偏好项', pr.total, (pr.keys || []).map(esc).join('、')),
+    ].filter(Boolean);
+    const warns = (r.warnings || []).length
+      ? `<div class="hint" style="margin-top:10px;color:var(--danger)">
+           <b>有 ${r.warnings.length} 条被跳过：</b><br>${r.warnings.slice(0, 8).map(esc).join('<br>')}
+           ${r.warnings.length > 8 ? '<br>…' : ''}</div>` : '';
+    const ver = meta.fromSchema && meta.fromSchema !== meta.schema
+      ? `<span class="hint">（已从 v${meta.fromSchema} 升级到 v${meta.schema}）</span>` : '';
+    box.innerHTML = `<div class="card-block" style="background:rgba(255,255,255,.03)">
+      <h4 style="margin-bottom:6px">预览 ${ver}</h4>
+      <ul class="hint" style="margin:6px 0 0;padding-left:18px;line-height:1.9">${items.join('')}</ul>
+      ${warns}
+      <div class="row" style="gap:10px;margin-top:14px">
+        <button class="btn primary" id="cfg-go" data-focus>${icon('check')}确认导入</button>
+        <button class="btn ghost" id="cfg-cancel" data-focus>取消</button>
+      </div>
+    </div>`;
+    box.querySelector('#cfg-cancel').onclick = () => {
+      doc = null; fileEl.value = ''; nameEl.textContent = ''; box.innerHTML = '';
+    };
+    box.querySelector('#cfg-go').onclick = async () => {
+      const btn = box.querySelector('#cfg-go');
+      btn.disabled = true;
+      btn.textContent = '写入中…';
+      try {
+        const res = await api.configImport({ config: doc, mode: modeEl.value });
+        const st = res.stats || {};
+        const s2 = st.sources || {}, l2 = st.liveChannels || {};
+        cacheDrop();
+        box.innerHTML = `<div class="card-block">
+          <h4 style="color:var(--ok)">导入完成</h4>
+          <p class="hint">片源新增 ${s2.add || 0} / 更新 ${s2.update || 0}，
+            直播频道新增 ${l2.add || 0}。</p>
+          ${res.backup ? `<p class="hint">导入前的备份：<code>${esc(res.backup)}</code></p>` : ''}
+          <p class="hint">刷新页面后生效。</p>
+        </div>`;
+        toast('配置已导入');
+      } catch (e) {
+        box.innerHTML = `<p class="hint" style="color:var(--danger)">导入失败：${esc(e.message)}</p>`;
+        toast('导入失败', 'err');
+      }
+    };
+  };
+
+  fileEl.onchange = async () => {
+    const f = fileEl.files && fileEl.files[0];
+    if (!f) return;
+    nameEl.textContent = f.name;
+    try {
+      doc = JSON.parse(await f.text());
+    } catch (e) {
+      doc = null;
+      box.innerHTML = `<p class="hint" style="color:var(--danger)">这个文件不是合法 JSON</p>`;
+      return;
+    }
+    box.innerHTML = '<p class="hint">预览中…</p>';
+    try {
+      const r = await api.configImport({ config: doc, mode: modeEl.value, dryRun: true });
+      if (!r.ok) throw new Error(r.msg || '预览失败');
+      renderPlan(r);
+    } catch (e) {
+      box.innerHTML = `<p class="hint" style="color:var(--danger)">${esc(e.message)}</p>`;
+    }
+  };
+  modeEl.onchange = () => { if (doc) fileEl.onchange(); };
+}
+
 // ═══════════ 关于 / 自检 ═══════════
 async function aboutPanel(panel) {
   panel.innerHTML = `<h2>关于与自检</h2>
@@ -596,10 +965,29 @@ async function aboutPanel(panel) {
       </div>
     </div>
     <div class="card-block">
+      <h4>数据备份</h4>
+      <p class="hint">导出收藏、播放记录、片源与偏好设置。换机前存一份，密码类字段不会被包含。</p>
+      <button class="btn sm" id="btn-backup" data-focus>${icon('download')}导出 JSON</button>
+    </div>
+    <div class="card-block">
       <h4>快捷键</h4>
       <p class="hint">方向键移动焦点 · 回车确认 · Esc 返回 · <kbd>/</kbd> 搜索 · 播放器里空格暂停、← → 快进退、F 全屏。</p>
       <h4 style="margin-top:14px">关于内容</h4>
       <p class="hint" style="margin:0">本项目不存储、不托管任何影视内容，只聚合公开采集接口做展示与播放。
         片源可用性由对应站点决定，仅供个人在自有设备上学习使用。</p>
     </div>`;
+
+  const bk = box.querySelector('#btn-backup');
+  if (bk) bk.onclick = async () => {
+    try {
+      const d = await api.get('/api/backup');
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'projection-room-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast('已导出备份', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  };
 }

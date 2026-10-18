@@ -3,13 +3,19 @@ import { api } from '../core/api.js';
 import { esc, icon, toast } from '../core/dom.js';
 import { isFav, syncFavs, toggleFav } from '../core/store.js';
 import { openPlayer } from '../components/player.js';
-import { emptyState, imgTag } from '../components/ui.js';
+import { emptyState, imgTag, posterCard } from '../components/ui.js';
 
 let hit = null;
 let userPicked = false;   // 用户手动点过线路后，就不再自动切到最高画质
 let si = 0;
 
 export function destroy() { hit = null; }
+
+function tintAmbient(pic) {
+  document.documentElement.style.setProperty(
+    '--ambient-poster',
+    pic ? `url("${String(pic).replace(/["'\\\n\r]/g, '')}")` : 'none');
+}
 
 export async function render(root, ctx) {
   const name = ctx.query.n || '';
@@ -19,7 +25,7 @@ export async function render(root, ctx) {
     return;
   }
 
-  root.innerHTML = `<div class="page" style="padding:0">
+  root.innerHTML = `<div class="page bleed" style="padding:0">
     <div class="detail-hero"><div class="hero-veil"></div>
       <div class="detail-body">
         <div class="skl" style="width:200px;aspect-ratio:2/3;border-radius:16px"></div>
@@ -30,7 +36,10 @@ export async function render(root, ctx) {
           <div class="skl skl-line" style="width:64%"></div>
         </div>
       </div>
-    </div></div>`;
+    </div>
+    <p class="result-hint" style="padding:0 var(--pad)">
+      正在向十几个片源要线路，慢的会自动跳过…
+    </p></div>`;
 
   let d;
   try {
@@ -46,6 +55,68 @@ export async function render(root, ctx) {
   si = 0;
   await syncFavs();
   paint(root, d, ctx);
+}
+
+// ── 右侧影片信息 ─────────────────────────────────────────────
+function infoRows(d) {
+  const rows = [];
+  const add = (k, v) => { if (v) rows.push([k, v]); };
+  add('评分', d.score && parseFloat(d.score) > 0 ? d.score : '');
+  add('年份', d.year);
+  add('地区', d.area);
+  add('语言', d.lang);
+  add('类型', d.type);
+  add('集数', d.total && +d.total > 1 ? d.total + ' 集' : '');
+  add('线路', d.sources.length + ' 条');
+  add('导演', d.director);
+  add('主演', d.actor);
+  return rows.map(([k, v]) =>
+    `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+}
+
+// ── 相关推荐 ─────────────────────────────────────────────────
+const CAT_SLUG = { 电影: 'movie', 剧集: 'series', 动漫: 'anime',
+                   综艺: 'variety', 纪录片: 'doc' };
+
+// 和聚合层同一套归类规则：先判动画/纪录/综艺，再按「X片」判电影，最后才看「剧」
+function catOfType(t) {
+  const s = String(t || '');
+  if (/动漫|动画|番剧/.test(s)) return '动漫';
+  if (/纪录|记录/.test(s)) return '纪录片';
+  if (/综艺/.test(s)) return '综艺';
+  if (/片$/.test(s)) return '电影';
+  if (/剧/.test(s)) return '剧集';
+  if (/电影/.test(s)) return '电影';
+  return '电影';
+}
+
+const plainName = s => String(s || '').replace(/\s+/g, '').toLowerCase();
+
+async function loadSimilar(root, d) {
+  const box = root.querySelector('#similar');
+  if (!box) return;
+  const cat = catOfType(d.type);
+  box.innerHTML = `<div class="section-head"><h2 class="section-title">相关推荐</h2>
+    <span class="section-sub">同类作品</span></div>
+    <div class="rail">${Array(8).fill('<div class="skl skl-card"></div>').join('')}</div>`;
+  try {
+    const r = await api.browse({ cat, pg: 1 });
+    if (!root.isConnected) return;
+    const items = (r.items || [])
+      .filter(x => plainName(x.name) !== plainName(d.name))
+      .slice(0, 14);
+    if (!items.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="section-head">
+      <h2 class="section-title">相关推荐</h2>
+      <span class="section-sub">${esc(cat)} · 同类作品</span>
+      <a class="more" href="#/browse/${CAT_SLUG[cat] || 'movie'}" data-focus>查看全部${icon('chevron')}</a>
+    </div>
+    <div class="rail">${items.map(x => posterCard(x, {
+      sub: [x.year, x.type, x.site].filter(Boolean).join(' · '),
+    })).join('')}</div>`;
+  } catch (e) {
+    box.innerHTML = '';
+  }
 }
 
 function metaLine(d) {
@@ -69,14 +140,23 @@ function people(d) {
 
 function paint(root, d, ctx) {
   userPicked = false;
-  document.body.dataset.hero = '0';
+  document.body.dataset.hero = '1';   // 详情页有全幅背景，不要顶栏那层留白
+  tintAmbient(d.pic);
+  // 上次看这部片时用的线路，优先沿用（比"最高画质"更贴近用户习惯）
+  let start = 0;
+  try {
+    const remembered = localStorage.getItem('pr.line.' + d.name);
+    const k = remembered ? d.sources.findIndex(s => s.site === remembered) : -1;
+    if (k > 0) { start = k; userPicked = true; }
+  } catch (e) { /* 隐私模式下 localStorage 不可用 */ }
+  si = start;
   const fav = isFav(d.name);
-  root.innerHTML = `<div class="page" style="padding:0">
+  root.innerHTML = `<div class="page bleed" style="padding:0">
     <section class="detail-hero">
       <div class="hero-bg" style="${d.pic ? `background-image:url('${esc(d.pic)}')` : ''}"></div>
       <div class="hero-veil"></div>
       <div class="detail-body">
-        <div class="detail-poster">${imgTag(d.pic, d.name)}</div>
+        <div class="detail-poster">${imgTag(d.pic, d.name, '', true)}</div>
         <div class="detail-main">
           <div class="eyebrow">来自 ${esc((d.sources[0] || {}).site || '聚合片库')}</div>
           <h1 class="detail-title">${esc(d.name)}</h1>
@@ -99,7 +179,7 @@ function paint(root, d, ctx) {
           <span class="panel-sub" id="panel-sub">${d.sources.length} 条线路可选</span>
         </div>
         <div class="src-chips" id="lines">
-          ${d.sources.map((s, i) => `<button class="src-chip ${i === 0 ? 'on' : ''}"
+          ${d.sources.map((s, i) => `<button class="src-chip ${i === start ? 'on' : ''}"
             data-si="${i}" data-focus title="${esc(s.remarks || '')}">
             <b>${esc(s.site)}</b>${s.q ? `<u>${esc(s.q)}</u>` : ''}<i>${s.count} 集</i>
           </button>`).join('')}
@@ -109,6 +189,12 @@ function paint(root, d, ctx) {
           <div class="ep-grid" id="eps"></div>
         </div>
       </section>
+      <aside class="panel info-panel">
+        <h3>影片信息</h3>
+        <dl class="info-list">${infoRows(d)}</dl>
+      </aside>
+    </div>
+    <section class="section similar-sec" id="similar"></section>
   </div>`;
 
   const toggle = root.querySelector('#desc-toggle');
@@ -139,6 +225,8 @@ function paint(root, d, ctx) {
 
   paintEps(root);
   probeQualities(root, d);
+  // 相关推荐后加载，不挡首屏
+  loadSimilar(root, d);
 
   // 从「继续观看」或「立即观看」进来时直接起播
   if (ctx.query.play === '1' || ctx.query.ep || ctx.query.t) {
@@ -169,6 +257,7 @@ async function probeQualities(root, d) {
           continue;
         }
         probedUrls.set(url, r);
+        if (probedUrls.size > 300) probedUrls.clear();
       }
       if (!r || !r.q || !root.isConnected) continue;
       src.q = r.q;
@@ -215,6 +304,9 @@ function resortLines(root) {
 
 function paintEps(root) {
   const src = hit.sources[si];
+  // 集数多的剧集才并排；电影这种 1 集的保持单栏，避免右边留一大块空白
+  const panel = root.querySelector('.play-panel');
+  if (panel) panel.classList.toggle('many-eps', (src.eps || []).length >= 8);
   root.querySelector('#ep-count').textContent = `共 ${src.count} 集 · 来自 ${src.site}`;
   const sub = root.querySelector('#panel-sub');
   if (sub) sub.textContent = `当前：${src.site}${src.remarks ? ' · ' + src.remarks : ''}`;

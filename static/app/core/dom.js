@@ -65,7 +65,9 @@ const ICONS = {
   check: '<path d="M20 6L9 17l-5-5"/>',
   heart: '<path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 00-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 000-7.8z"/>',
   download: '<path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/>',
+  upload: '<path d="M12 16V4m0 0L8 8m4-4l4 4"/><path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
+  chevronDown: '<path d="M6 9l6 6 6-6"/>',
   back: '<path d="M15 18l-6-6 6-6"/>',
   close: '<path d="M18 6L6 18M6 6l12 12"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
@@ -83,13 +85,20 @@ const ICONS = {
   arrowup: '<path d="M12 19V5M5 12l7-7 7 7"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   folder: '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
-  skip: '<path d="M5 5l10 7-10 7zM17 5v14" fill="currentColor" stroke="none"/>',
-  prev: '<path d="M19 5L9 12l10 7zM7 5v14" fill="currentColor" stroke="none"/>',
-  next: '<path d="M5 5l10 7-10 7zM17 5v14" fill="currentColor" stroke="none"/>',
+  skip: '<path d="M5 5l8.6 7L5 19z" fill="currentColor" stroke="none"/><rect x="15.4" y="5" width="3" height="14" rx="1.4" fill="currentColor" stroke="none"/>',
+  prev: '<path d="M19 5l-8.6 7L19 19z" fill="currentColor" stroke="none"/><rect x="5.6" y="5" width="3" height="14" rx="1.4" fill="currentColor" stroke="none"/>',
+  next: '<path d="M5 5l8.6 7L5 19z" fill="currentColor" stroke="none"/><rect x="15.4" y="5" width="3" height="14" rx="1.4" fill="currentColor" stroke="none"/>',
   volume: '<path d="M11 5L6 9H3v6h3l5 4zM16 9a4 4 0 010 6M19 6a8 8 0 010 12"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   expand: '<path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"/>',
   pip: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><rect x="12" y="12" width="7" height="6" rx="1.5" fill="currentColor" stroke="none"/>',
+  repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/>',
+  repeatOne: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/><path d="M11.2 10.4l1.4-.9V15"/>',
+  shuffle: '<path d="M16 3h5v5"/><path d="M4 20L21 3.2"/><path d="M21 16v5h-5"/><path d="M15.2 15.2L21 21"/><path d="M4 4l5.2 5.2"/>',
+  lyrics: '<path d="M4 5.5h16v10.5H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
+  eq: '<path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M1.5 15h5M9.5 8h5M17.5 17h5"/>',
+  volumeMute: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M17 9.5l4 5M21 9.5l-4 5"/>',
+  queue: '<path d="M4 6h11M4 12h11M4 18h7"/><path d="M17 12v7"/><circle cx="15" cy="19" r="2"/><path d="M17 12l4-1v7"/><circle cx="19" cy="18" r="2"/>',
 };
 export function icon(name, cls = '') {
   const body = ICONS[name] || ICONS.info;
@@ -97,15 +106,32 @@ export function icon(name, cls = '') {
     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 }
 
-// ── Toast ─────────────────────────────────────────────────
-let toastTimer;
-export function toast(msg, kind = '') {
+// ── Toast（排队，不互相覆盖）──────────────────────────────
+let toastTimer = null;
+const toastQueue = [];
+let toastBusy = false;
+
+function pumpToast() {
   const t = $('#toast');
-  if (!t) return;
+  if (!t) { toastQueue.length = 0; toastBusy = false; return; }
+  if (!toastQueue.length) { toastBusy = false; return; }
+  toastBusy = true;
+  const [msg, kind] = toastQueue.shift();
   t.textContent = msg;
   t.className = 'toast on ' + kind;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.className = 'toast ' + kind; }, 2800);
+  toastTimer = setTimeout(() => {
+    t.className = 'toast ' + kind;
+    toastTimer = setTimeout(pumpToast, 180);
+  }, 2200);
+}
+
+export function toast(msg, kind = '') {
+  if (!msg) return;
+  // 连续操作（比如连点收藏）时把消息排起来，而不是后一条顶掉前一条
+  if (toastQueue.length > 3) toastQueue.shift();
+  toastQueue.push([msg, kind]);
+  if (!toastBusy) pumpToast();
 }
 
 // ── 弹窗 ──────────────────────────────────────────────────

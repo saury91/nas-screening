@@ -18,6 +18,70 @@ let booting = true;
 
 const layer = () => $('#playerlayer');
 
+// ArtPlayer + hls.js 合计 540KB。以前放在 index.html 里同步加载，
+// 首屏白等它们解析完；现在只有真的进播放器才拉。
+let libsPromise = null;
+function ensureLibs() {
+  if (window.Artplayer) return Promise.resolve();
+  if (libsPromise) return libsPromise;
+  const load = src => new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error(src));
+    document.head.appendChild(s);
+  });
+  libsPromise = load('/static/artplayer.js')
+    .then(() => (window.Hls ? null : load('/static/hls.js')))
+    .catch(e => { libsPromise = null; throw e; });
+  return libsPromise;
+}
+
+let triedLines = new Set();
+// 卡死看门狗：hls.js 只在「明确报错」时才触发 error，
+// 有些线路是 TCP 连着但一直不给数据 —— 播放器就会永远停在缓冲。
+let stallTimer = null;
+let stallAt = 0;
+let stallPos = 0;
+
+function stopStallWatch() {
+  clearInterval(stallTimer);
+  stallTimer = null;
+}
+
+function startStallWatch() {
+  stopStallWatch();
+  stallAt = Date.now();
+  stallPos = 0;
+  stallTimer = setInterval(() => {
+    const v = art && art.video;
+    if (!state || !v) return;
+    if (v.paused) { stallAt = Date.now(); stallPos = v.currentTime; return; }
+    // 有进展就续命
+    if (Math.abs(v.currentTime - stallPos) > 0.2) {
+      stallPos = v.currentTime;
+      stallAt = Date.now();
+      return;
+    }
+    // 连续 12 秒没动过：换线
+    if (Date.now() - stallAt < 12000) return;
+    stallAt = Date.now();
+    if (switching) return;
+    toast('这条线路没有响应，自动换一条');
+    if (!autoNextLine()) {
+      showError('这条线路播不动', '换一条线路，或者过一会儿再试。');
+    }
+  }, 2000);
+}
+
+function rememberLine() {
+  if (!state) return;
+  try {
+    localStorage.setItem('pr.line.' + state.item.name, currentSource().site);
+  } catch (e) { /* 隐私模式忽略 */ }
+}
+
 export function playerOpen() { return state !== null; }
 
 export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false, key = '' } = {}) {
@@ -81,8 +145,12 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
   bindUI();
   waitState = true;
   booting = true;
+  triedLines = new Set();
   showBuffer('缓冲中');
-  mountArt(ep ? ep.url : '', position);
+  const url0 = ep ? ep.url : '';
+  ensureLibs()
+    .then(() => { if (state) mountArt(url0, position); })
+    .catch(() => showError('播放器没加载出来', '检查 /static/artplayer.js 与 hls.js 是否可访问。'));
 }
 
 function currentSource() { return state.item.sources[state.si]; }
@@ -220,31 +288,77 @@ function step(dir) {
   switchEp(next);
 }
 
+// 播完自动接下一集：追剧时最常用的一次点击，不该让用户自己找
+function onEnded() {
+  if (!state || state.isLive || switching) return;
+  const src = currentSource();
+  if (state.ei + 1 >= src.eps.length) return;
+  const nxt = src.eps[state.ei + 1];
+  toast('即将播放 · ' + (nxt.name || '下一集'));
+  setTimeout(() => {
+    if (!state || state.isLive) return;
+    if (state.ei + 1 < currentSource().eps.length) switchEp(state.ei + 1);
+  }, 1200);
+}
+
+// 线路挂了自动往下一条试，用户不用自己回到详情页换源
+let fallbackBusy = false;
+function autoNextLine() {
+  if (!state || fallbackBusy) return false;
+  const n = state.item.sources.length;
+  if (n < 2) return false;
+  let next = -1;
+  for (let i = 1; i <= n; i++) {
+    const k = (state.si + i) % n;
+    if (!triedLines.has(k)) { next = k; break; }
+  }
+  if (next < 0) return false;
+  triedLines.add(next);
+  fallbackBusy = true;
+  const keepEp = state.ei;
+  setTimeout(() => {
+    fallbackBusy = false;
+    if (!state) return;
+    toast('这条线路播不动，自动换一条');
+    switchLine(next, keepEp);
+  }, 700);
+  return true;
+}
+
 function switchEp(ei) {
   const src = currentSource();
-  state.ei = Math.max(0, Math.min(ei, src.eps.length - 1));
+  const next = Math.max(0, Math.min(ei, src.eps.length - 1));
+  if (next === state.ei) return;
+  // 先落库上一集，再改 state.ei —— 否则最后几秒的进度会被写到新一集上
+  saveProgress(true);
+  state.ei = next;
   state.position = 0;
-  const ep = src.eps[state.ei];
+  const ep = src.eps[next];
   syncSide();
   playUrl(ep.url, 0);
   const t = $('.pl-title h2');
   if (t) t.textContent = `${state.item.name} · ${ep.name}`;
 }
 
-function switchLine(si) {
+function switchLine(si, keepEp = false) {
   if (si === state.si) return;
   const body = $('#pl-side-body');
-  const keep = body ? body.scrollTop : 0;
+  const scrolled = body ? body.scrollTop : 0;
+  const prevEi = state.ei;
+  saveProgress(true);
   state.si = si;
-  state.ei = 0;
+  const src = currentSource();
+  // 自动降级时保留当前集；手动换线路仍从第 1 集开始
+  state.ei = keepEp ? Math.min(prevEi, src.eps.length - 1) : 0;
   state.position = 0;
-  const ep = currentSource().eps[0];
+  const ep = src.eps[state.ei] || src.eps[0];
   if (body) {
     body.innerHTML = sideHTML();
-    body.scrollTop = keep;
+    body.scrollTop = scrolled;
   }
   playUrl(ep.url, 0);
-  toast('已切换到 ' + currentSource().site);
+  rememberLine();
+  toast('已切换到 ' + src.site);
 }
 
 // ── 缓冲状态（画面里唯一保留的浮层）────────────────────────
@@ -292,6 +406,15 @@ function refreshBuffer() {
 }
 
 // ── 播放器 ────────────────────────────────────────────────
+
+// 直播地址不一定带 .m3u8（有的走 ?channelId= 之类），
+// 只要不是明确的 mp4/flv，就按 HLS 处理，否则这些频道会直接黑屏。
+function isHlsUrl(url) {
+  if (/\.m3u8(\?|$)/i.test(url)) return true;
+  if (/\.(mp4|flv|mkv|webm)(\?|$)/i.test(url)) return false;
+  return !!(state && state.isLive);
+}
+
 function mountArt(url, position) {
   const host = $('#art-host');
   if (!url || !window.Artplayer) {
@@ -299,7 +422,7 @@ function mountArt(url, position) {
     return;
   }
   applyClickGesture();
-  const isM3u8 = /\.m3u8(\?|$)/i.test(url);
+  const isM3u8 = isHlsUrl(url);
   // 走同源代理：采集站几乎都不带 CORS 头，直连必被浏览器拦
   const src = isM3u8 ? '/api/proxy?u=' + encodeURIComponent(url) : url;
   const options = {
@@ -370,17 +493,34 @@ function mountArt(url, position) {
   art.on('video:resize', showRes);
 
   art.on('ready', () => {
-    if (position > 4) art.currentTime = position;
-    if (state.isLive) art.currentTime = 0;
+    // 音量与倍速跨集/跨片记忆
+    try {
+      const v = parseFloat(localStorage.getItem('pr.volume'));
+      if (!isNaN(v) && v >= 0 && v <= 1) art.volume = v;
+      const rate = parseFloat(localStorage.getItem('pr.rate'));
+      if (!isNaN(rate) && rate >= 0.5 && rate <= 2) art.video.playbackRate = rate;
+    } catch (e) { /* ignore */ }
+    // 直播不要主动 seek：把 currentTime 归零会让播放器回到缓冲区头部，
+    // 每次重新 ready 都跳一次，看起来就是一直在缓冲。
+    if (!state.isLive && position > 4) art.currentTime = position;
     saveTimer = setInterval(saveProgress, 6000);
+    startStallWatch();
     refreshBuffer();
     autoplayFallback();
   });
+  art.on('video:volumechange', () => {
+    try { localStorage.setItem('pr.volume', String(art.volume)); } catch (e) {}
+  });
+  art.video && art.video.addEventListener('ratechange', () => {
+    try { localStorage.setItem('pr.rate', String(art.video.playbackRate)); } catch (e) {}
+  });
+  art.on('video:ended', onEnded);
   // 只在真的卡住/定位时显示缓冲状态；正常播放时不打扰画面
   const onWait = () => { waitState = true; showBuffer('缓冲中'); };
   art.on('video:waiting', onWait);
   art.on('video:stalled', () => { waitState = true; showBuffer('网络较慢，正在等数据'); });
   art.on('video:playing', () => {
+    if (state) rememberLine();   // 能播了才记线路
     endSwitch();
     settleBuffer();
     hideCenter();
@@ -391,7 +531,10 @@ function mountArt(url, position) {
   art.on('video:pause', () => { if (!switching && !art.video.seeking) settleBuffer(); });
   art.on('video:canplay', () => { if (!art.video.paused) { endSwitch(); settleBuffer(); } });
   art.video && art.video.addEventListener('seeked', settleBuffer);
-  art.on('error', () => showError('播放失败', '片源可能已经失效，换条线路试试。'));
+  art.on('error', () => {
+    showError('播放失败', '片源可能已经失效，换条线路试试。');
+    autoNextLine();
+  });
   art.on('destroy', () => clearInterval(saveTimer));
 }
 
@@ -451,7 +594,10 @@ function wireHls(hls, player) {
     if (player.video && !player.video.paused) settleBuffer();
   });
   hls.on(H.Events.ERROR, (_, data) => {
-    if (data.fatal) showError('这条线路播不动', '可以换一条线路，或稍后再试。');
+    if (data.fatal) {
+      showError('这条线路播不动', '可以换一条线路，或稍后再试。');
+      autoNextLine();
+    }
   });
 }
 
@@ -680,6 +826,8 @@ function applyClickGesture() {
 }
 
 function playUrl(url, position) {
+  const stale = $('.pl-err');
+  if (stale) stale.remove();
   if (!art) { mountArt(url, position); return; }
   fragPct = 0;
   speedBps = 0;
@@ -692,7 +840,7 @@ function playUrl(url, position) {
   clearTimeout(switchTimer);
   switchTimer = setTimeout(endSwitch, 9000);   // 兜底：卡住也要恢复 UI
   showBuffer('缓冲中');
-  const isM3u8 = /\.m3u8(\?|$)/i.test(url);
+  const isM3u8 = isHlsUrl(url);
   const src = isM3u8 ? '/api/proxy?u=' + encodeURIComponent(url) : url;
   try {
     art.type = isM3u8 ? 'm3u8' : '';
@@ -713,6 +861,7 @@ function endSwitch() {
 
 function destroyArt() {
   endSwitch();
+  stopStallWatch();
   if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
   try { art && art.destroy(false); } catch (e) {}
   art = null;
@@ -792,5 +941,6 @@ export function closePlayer(silent = false) {
   clearFocus();
   const wasLive = state.isLive;
   state = null;
+  triedLines = new Set();
   if (!silent) window.dispatchEvent(new CustomEvent('player:closed', { detail: { live: wasLive } }));
 }

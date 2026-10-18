@@ -3,6 +3,7 @@
 import html
 import http.cookiejar
 import json
+import threading
 import urllib.parse
 import urllib.request
 
@@ -29,6 +30,9 @@ class Qbt:
         self.op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.cj))
         self.ok = False
         self.msg = ""
+        # 全局单例 + 多线程 HTTP 服务：cookie 罐必须串行访问，
+        # 否则并发请求会互相踩登录态
+        self.lk = threading.RLock()
 
     def _req(self, path, fields=None, timeout=25):
         hdr = {"Referer": QBT_URL, "Origin": QBT_URL, "User-Agent": UA}
@@ -36,8 +40,9 @@ class Qbt:
         if data:
             hdr["Content-Type"] = "application/x-www-form-urlencoded"
         req = urllib.request.Request(QBT_URL + path, data=data, headers=hdr)
-        with self.op.open(req, timeout=timeout) as r:
-            return r.status, r.read().decode("utf-8", "replace")
+        with self.lk:
+            with self.op.open(req, timeout=timeout) as r:
+                return r.status, r.read().decode("utf-8", "replace")
 
     def login(self):
         # 账号密码从环境变量注入。没配就说清楚是什么没配，
