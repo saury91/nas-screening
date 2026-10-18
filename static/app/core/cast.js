@@ -85,12 +85,8 @@ export async function listTargets() {
 }
 
 export async function castTo(target, info) {
-  return post('/api/cast/send', {
-    target,
-    url: info.url,
-    title: info.title || '',
-    position: info.position || 0,
-  });
+  // 把「整部片 + 当前线路/集数/进度」一起给电视，电视那边才能换源换集
+  return post('/api/cast/send', { target, ...info });
 }
 
 /** 手机/电脑：选一台电视投过去 */
