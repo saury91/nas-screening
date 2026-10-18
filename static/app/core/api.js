@@ -1,5 +1,11 @@
 // 接口封装：统一错误处理，页面里只关心数据
 import { getToken, needLogin } from './auth.js';
+import { load as cacheLoad, save as cacheSave, setOffline } from './offline.js';
+
+// 只缓存幂等的 GET；带 token 的接口也缓存，离线时靠它把界面撑起来
+function cacheable(path, method) {
+  return method === 'GET' && !path.startsWith('/api/proxy');
+}
 
 async function request(path, { method = 'GET', body, signal } = {}) {
   const init = { method, headers: {}, signal };
@@ -15,6 +21,13 @@ async function request(path, { method = 'GET', body, signal } = {}) {
   } catch (e) {
     // 连不上 NAS：交给上层显示「离线模式」横幅，同时让页面用缓存数据继续渲染
     window.dispatchEvent(new CustomEvent('app:offline', { detail: { path } }));
+    if (cacheable(path, method)) {
+      const cached = await cacheLoad(path);
+      if (cached) {
+        setOffline(true);
+        return cached;
+      }
+    }
     throw new Error('连不上 NAS，正在使用离线数据');
   }
   window.dispatchEvent(new CustomEvent('app:online'));
@@ -24,12 +37,23 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     data = ct.includes('json') ? await res.json() : await res.text();
   } catch (e) { data = null; }
   if (!res.ok) {
+    // 本地服务用 503 表示"NAS 不可达"：有缓存就用缓存，不要给用户看错误
+    if ((res.status === 503 || res.status === 502) && cacheable(path, method)) {
+      const cached = await cacheLoad(path);
+      if (cached) {
+        setOffline(true);
+        return cached;
+      }
+    }
     if (res.status === 401) needLogin();       // 会话过期 → 弹登录门
     const msg = (data && (data.msg || data.error)) || `请求失败（${res.status}）`;
     const err = new Error(msg);
     err.status = res.status;
     err.code = data && data.code;
     throw err;
+  }
+  if (cacheable(path, method) && data && typeof data === 'object') {
+    cacheSave(path, data);
   }
   return data;
 }
