@@ -254,3 +254,17 @@
 /* 模糊海报压在 video 之上、控制条之下 */
 .pl-poster{z-index:2;pointer-events:none}
 #art-host{position:relative;z-index:1}
+
+/* 快进/快退提示：遥控器长按左右键时，画面中间给个明确反馈 */
+.pl-seek{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.94);
+  z-index:26;display:flex;flex-direction:column;align-items:center;gap:6px;
+  padding:18px 26px;border-radius:16px;
+  background:rgba(8,9,13,.72);border:1px solid rgba(255,255,255,.14);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  color:#f2f3f6;opacity:0;pointer-events:none;
+  transition:opacity .18s var(--ease),transform .18s var(--ease);
+}
+.pl-seek.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
+.pl-seek b{font-size:22px;font-weight:650;letter-spacing:.02em;color:var(--accent)}
+.pl-seek span{font-size:13px;color:#9aa0ac;font-variant-numeric:tabular-nums}
