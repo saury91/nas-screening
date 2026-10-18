@@ -109,6 +109,12 @@ export async function openCastSheet(info) {
 
   const body = box.querySelector('#cast-body');
   let items = [];
+  // 面板开着的时候每 2 秒刷一次：电视刚打开也能自己冒出来，不用重开面板
+  clearInterval(castTimer);
+  castTimer = setInterval(() => {
+    if (box.hidden) { clearInterval(castTimer); return; }
+    renderTargets(body, info).catch(() => {});
+  }, 2000);
   try {
     items = await listTargets();
   } catch (e) {
@@ -116,11 +122,29 @@ export async function openCastSheet(info) {
     return;
   }
 
+  renderTargets(body, info, items);
+}
+
+let castTimer = null;
+
+/** 渲染设备列表（面板定时刷新也走这里） */
+async function renderTargets(body, info, preloaded) {
+  let items = preloaded;
+  if (!items) {
+    try { items = await listTargets(); } catch (e) {
+      body.innerHTML = `<p class="hint">拿不到设备列表：${esc(e.message)}</p>`;
+      return;
+    }
+  }
   if (!items.length) {
     body.innerHTML = `<p class="hint">没找到在线的电视。<br>
       电视上打开放映室（保持前台）就会出现在这里。</p>`;
     return;
   }
+  // 列表没变就不重建，避免每 2 秒闪一下、焦点被打断
+  const sig = items.map(x => x.id).join(',');
+  if (body.dataset.sig === sig) return;
+  body.dataset.sig = sig;
 
   body.innerHTML = items.map((d, i) => `
     <button class="cast-item" data-i="${i}" data-focus>
@@ -146,6 +170,7 @@ export async function openCastSheet(info) {
 }
 
 export function closeCast() {
+  clearInterval(castTimer);
   const box = $('#cast-sheet');
   if (box) { box.hidden = true; box.innerHTML = ''; }
 }

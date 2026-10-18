@@ -261,6 +261,7 @@ function bindUI() {
     if (e.detail) clearFocus();
   };
 
+  $('.pl-stage')?.addEventListener('pointerdown', pingChrome, true);
   document.addEventListener('keydown', onKeys, true);
   document.addEventListener('keyup', (e) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') stopSeekHold();
@@ -387,6 +388,8 @@ function pingChrome() {
   clearTimeout(pingChrome.t);
   pingChrome.t = setTimeout(() => {
     if ($('#pl-side')?.classList.contains('open')) return;
+    // 暂停状态别收：用户停下来了，正想找按钮
+    if (art && art.video && art.video.paused) return;
     top.classList.add('hide');
   }, 2600);
 }
