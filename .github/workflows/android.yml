@@ -35,13 +35,13 @@ jobs:
           gradle-version: "8.7"
 
       - name: 编译 release APK（签名用的是仓库里的发布密钥）
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleTvRelease assemblePhoneRelease --no-daemon
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
           name: projection-room-tv
-          path: android/app/build/outputs/apk/release/*.apk
+          path: android/app/build/outputs/apk/*/release/*.apk
           if-no-files-found: error
 
       # 打 tv-v* 标签时，把 APK 挂到 Release，方便别人直接下载安装
@@ -49,5 +49,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/tv-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/release/*.apk
+          files: android/app/build/outputs/apk/*/release/*.apk
           generate_release_notes: true

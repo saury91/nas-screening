@@ -9,14 +9,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APK="${1:-android/app/build/outputs/apk/release/app-release.apk}"
-META="android/app/build/outputs/apk/release/output-metadata.json"
+KIND="${KIND:-${1:-tv}}"
+case "$KIND" in
+  tv|phone) ;;
+  *) echo "用法: ./tools/publish-apk.sh [tv|phone]  （默认 tv）"; exit 1 ;;
+esac
+APK="android/app/build/outputs/apk/$KIND/release/app-$KIND-release.apk"
+META="android/app/build/outputs/apk/$KIND/release/output-metadata.json"
 OUT="data/apps"
-KIND="${KIND:-tv}"
 
 if [ ! -f "$APK" ]; then
   echo "找不到 APK：$APK"
-  echo "先构建：cd android && gradle assembleRelease"
+  echo "先构建：cd android && gradle assemble${KIND^}Release"
   exit 1
 fi
 

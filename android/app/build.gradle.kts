@@ -12,12 +12,31 @@ android {
         // 老电视普遍是 5.x / 6.x，能装就先让它装
         minSdk = 21
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.3.2"
+        versionCode = 6
+        versionName = "0.4.0"
     }
 
     buildFeatures {
         buildConfig = true
+    }
+
+    // 一套代码出两个包：电视端和手机端不再靠运行时猜，行为在编译期就定死
+    flavorDimensions += "device"
+    productFlavors {
+        create("tv") {
+            dimension = "device"
+            applicationId = "com.projectionroom.tv"
+            buildConfigField("boolean", "IS_TV", "true")
+            buildConfigField("String", "KIND", "\"tv\"")
+            resValue("string", "app_name", "放映室 TV")
+        }
+        create("phone") {
+            dimension = "device"
+            applicationId = "com.projectionroom.phone"
+            buildConfigField("boolean", "IS_TV", "false")
+            buildConfigField("String", "KIND", "\"phone\"")
+            resValue("string", "app_name", "放映室")
+        }
     }
 
     // 发布签名：仓库里带一份固定密钥，保证每次构建的签名一致，

@@ -46,8 +46,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        isTv = Device.isTv(this)
-        if (isTv) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        isTv = Device.isTv()
+        // 手机端锁竖屏：只有播放时才临时横过去（否则放桌上/横着拿都会乱转）
+        requestedOrientation = if (isTv) {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
 
         // 手机上要"撑满":让页面画到状态栏与手势条下面，再把状态栏高度喂给 CSS
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -155,7 +160,7 @@ class MainActivity : AppCompatActivity() {
             allowContentAccess = false
             setSupportZoom(false)
             // 让前端能识别"这是电视端"，从而切到大屏/遥控器布局
-            userAgentString = userAgentString + " " + Device.uaTag(this@MainActivity) + BuildConfig.VERSION_NAME
+            userAgentString = userAgentString + " " + Device.uaTag() + BuildConfig.VERSION_NAME
         }
 
         web.addJavascriptInterface(NativeBridge(this), "ProomNative")
@@ -300,7 +305,7 @@ class MainActivity : AppCompatActivity() {
         requestedOrientation = if (on) {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         } else {
-            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
 
