@@ -246,9 +246,9 @@ async function boot() {
   });
 
   // 电视端把自己注册成投屏接收端；收到指令就用同一套播放器播
-  startReceiver((cmd) => {
+  // NAS 中转与局域网直连共用：拿到 {item, si, ei, position} 就起播
+  const playCast = (cmd) => {
     import('/static/app/components/player.js').then(({ openPlayer }) => {
-      // 手机/电脑会把整部片的线路与集数一起发过来；只有 url 的老格式兜底成单集
       const item = cmd.item && cmd.item.sources && cmd.item.sources.length
         ? cmd.item
         : { name: cmd.title || '投屏播放',
@@ -259,9 +259,15 @@ async function boot() {
         position: Math.floor(cmd.position || 0),
         isLive: !!cmd.isLive,
       });
-      // 投屏时把音量/进度留给电视自己，页面不用滚动
     }).catch(() => {});
-  });
+  };
+
+  // 局域网直连（手机 → 电视 App，不经过 NAS）
+  window.__proomCastPlay = (json) => {
+    try { playCast(JSON.parse(json)); } catch (e) { /* 忽略坏包 */ }
+  };
+
+  startReceiver(playCast);
   initFocus();
   initMusicPlayer();
   onRoute(renderPage);

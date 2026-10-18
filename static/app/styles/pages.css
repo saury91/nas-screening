@@ -921,3 +921,9 @@ body.gated{overflow:hidden}
     width:36px;height:4px;border-radius:2px;background:rgba(255,255,255,.22)}
   .np-side-body{padding:8px 10px calc(18px + env(safe-area-inset-bottom))}
 }
+
+/* 投屏面板里的分组标题 / 直连电视 */
+.cast-group{display:flex;align-items:center;gap:8px;margin:14px 2px 8px;
+  font-size:12px;color:#8a919e}
+.cast-group span{font-size:11px;color:#6b7280}
+.cast-local{display:flex;flex-direction:column;gap:8px}
