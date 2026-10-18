@@ -147,14 +147,19 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /** 等用户去系统设置里授予「安装未知应用」后，回来接着装 */
+    private var pendingApk: java.io.File? = null
+
     private fun doUpdate(info: Updater.Info) {
         Toast.makeText(this, "正在下载 ${info.name}…", Toast.LENGTH_SHORT).show()
         Thread({
             try {
                 val apk = Updater.download(this, info)
                 runOnUiThread {
+                    pendingApk = apk
                     if (!Updater.install(this, apk)) {
-                        Toast.makeText(this, "请在系统设置里允许安装未知应用后重试",
+                        Toast.makeText(this,
+                            "请允许「安装未知应用」，返回后会自动继续安装",
                             Toast.LENGTH_LONG).show()
                     }
                 }
@@ -369,6 +374,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从「安装未知应用」设置页回来：权限有了就继续装，别让用户再点一遍
+        val apk = pendingApk ?: return
+        if (apk.exists() && Updater.canInstall(this)) {
+            pendingApk = null
+            if (!Updater.install(this, apk)) {
+                pendingApk = apk
+            }
+        }
     }
 
     override fun onDestroy() {

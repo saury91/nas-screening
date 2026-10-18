@@ -80,10 +80,21 @@ object Updater {
         return out
     }
 
+    /** 是否已经拿到「安装未知应用」权限 */
+    fun canInstall(act: Activity): Boolean =
+        Build.VERSION.SDK_INT < 26 || act.packageManager.canRequestPackageInstalls()
+
     /** 拉起系统安装器；电视上如果没给权限，先去设置页开 */
     fun install(act: Activity, apk: File): Boolean {
-        if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {
-            act.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${act.packageName}")))
+        if (!canInstall(act)) {
+            try {
+                act.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${act.packageName}")))
+            } catch (e: Exception) {
+                // 个别 ROM 没这个页面，退回到应用详情页
+                act.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:${act.packageName}")))
+            }
             return false
         }
         val uri = FileProvider.getUriForFile(act, "${act.packageName}.files", apk)
