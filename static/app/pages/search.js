@@ -56,6 +56,7 @@ export async function render(root, ctx) {
 
 async function load(root, force) {
   const box = root.querySelector('#result');
+  if (!box) return;                    // 页面已被切走，别再写
   if (st.tab === 'online') {
     if (!st.online || force) {
       box.innerHTML = `<div class="grid">${Array(12).fill('<div class="skl skl-card" style="width:100%"></div>').join('')}</div>`;
@@ -78,6 +79,7 @@ async function load(root, force) {
 
 async function loadMagnet(root, force) {
   const box = root.querySelector('#result');
+  if (!box) return;
   if (st.mags && !force) return paint(root);
   box.innerHTML = `<p class="result-hint">正在抓磁力站…这一步可能要几秒</p>
     <div class="skl" style="height:120px;border-radius:14px;margin-bottom:10px"></div>
@@ -96,6 +98,7 @@ async function loadMagnet(root, force) {
 
 function paint(root) {
   const box = root.querySelector('#result');
+  if (!box) return;
   if (st.tab === 'online') {
     if (!st.online) return;
     box.innerHTML = st.online.length

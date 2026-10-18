@@ -5,6 +5,7 @@
 业务逻辑一律在 services / providers 里，新增接口不需要动服务代码。
 """
 import gzip
+import hashlib
 import json
 import mimetypes
 import os
@@ -456,6 +457,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, data, "application/vnd.android.package-archive",
                               extra=[("Content-Disposition",
                                       'attachment; filename="projection-room-%s.apk"' % kind)])
+        if path == "/api/config/bundle":
+            # 配置包：App 拉一次存本地，NAS 不在时也能自己问源站
+            src = [{"name": x.get("name"), "api": x.get("url"),
+                    "type": x.get("type") or 0, "cat": x.get("cat")}
+                   for x in sources_list(kind="cms", enabled_only=True)
+                   if (x.get("url") or "").startswith("http")]
+            ver = hashlib.sha1(
+                json.dumps(src, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()[:12]
+            return _json({
+                "version": ver,
+                "generatedAt": int(time.time()),
+                "sources": src,
+                "ui": {"version": os.environ.get("UI_VERSION", "")},
+            })
         if path == "/api/auth/state":
             return _json(auth.state(self.me()))
         if path == "/api/profiles":

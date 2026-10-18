@@ -1,6 +1,30 @@
 // 接口封装：统一错误处理，页面里只关心数据
 import { getToken, needLogin } from './auth.js';
 import { load as cacheLoad, save as cacheSave, setOffline, indexTitles } from './offline.js';
+import * as agg from './aggregate.js';
+
+// NAS 不可用时，用本地配置包自己去问采集站
+async function tryAggregate(path) {
+  try {
+    const u = new URL(path, location.origin);
+    if (u.pathname === '/api/search') {
+      return await agg.search(u.searchParams.get('q') || '');
+    }
+    // 搜索页实际用的是 /api/online（在线聚合搜索），离线时同样交给客户端
+    if (u.pathname === '/api/online') {
+      const r = await agg.search(u.searchParams.get('kw') || '');
+      if (r) r.items = r.items.map(x => ({ ...x, site_count: x.count || 1 }));
+      return r;
+    }
+    if (u.pathname === '/api/detail') {
+      return await agg.detail(u.searchParams.get('n') || '', u.searchParams.get('y') || '');
+    }
+    if (u.pathname === '/api/browse') {
+      return await agg.listPage(Number(u.searchParams.get('pg') || 1));
+    }
+  } catch (e) { /* 聚合失败就当没有 */ }
+  return null;
+}
 
 console.log('api-build 0.9.10');
 
@@ -24,6 +48,8 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     // 连不上 NAS：交给上层显示「离线模式」横幅，同时让页面用缓存数据继续渲染
     setOffline(true);
     if (cacheable(path, method)) {
+      const live = await tryAggregate(path);
+      if (live) return live;
       const cached = await cacheLoad(path);
       if (cached) {
         setOffline(true);
@@ -39,8 +65,10 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     data = ct.includes('json') ? await res.json() : await res.text();
   } catch (e) { data = null; }
   if (!res.ok) {
-    // 本地服务用 503 表示"NAS 不可达"：有缓存就用缓存，不要给用户看错误
+    // 本地服务用 503 表示"NAS 不可达"：先让客户端自己聚合，再退到缓存
     if ((res.status === 503 || res.status === 502) && cacheable(path, method)) {
+      const live = await tryAggregate(path);
+      if (live) { setOffline(true); return live; }
       const cached = await cacheLoad(path);
       if (cached) {
         setOffline(true);
