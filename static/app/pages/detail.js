@@ -45,6 +45,18 @@ export async function render(root, ctx) {
   try {
     d = await api.detail(name, year);
   } catch (e) {
+    // 离线拿不到线路/集数，但本地索引里还有海报和简介：先把这一页画出来，
+    // 而不是甩一句"没找到"（用户会以为片子丢了）
+    let t = null;
+    try {
+      const m = await import('../core/offline.js');
+      t = await m.getTitle(name);
+    } catch (_) { /* 索引读不到就走原来的兜底 */ }
+    if (t) {
+      root.innerHTML = offlineDetail(t, e.message);
+      root.querySelector('#od-retry')?.addEventListener('click', () => location.reload());
+      return;
+    }
     root.innerHTML = `<div class="page">${emptyState({
       iconName: 'wifi', title: '没找到这部片子', desc: e.message,
       action: `<a class="btn" href="#/search?q=${encodeURIComponent(name)}" data-focus>搜搜看</a>`,
@@ -55,6 +67,28 @@ export async function render(root, ctx) {
   si = 0;
   await syncFavs();
   paint(root, d, ctx);
+}
+
+// 离线详情：只有本地索引里的基本信息，明确告诉用户缺什么
+function offlineDetail(t, msg) {
+  const meta = [t.year, t.area, t.genre].filter(Boolean).join(' · ');
+  return `<div class="page">
+    <div class="offline-detail">
+      ${t.pic ? `<img class="od-pic" src="${esc(t.pic)}" alt="">` : '<div class="od-pic od-pic-empty"></div>'}
+      <div class="od-main">
+        <h2>${esc(t.name)}</h2>
+        ${meta ? `<p class="od-meta">${esc(meta)}</p>` : ''}
+        ${t.desc ? `<p class="od-desc">${esc(t.desc)}</p>` : ''}
+        <p class="od-note">离线模式：这里只有本地记录的基本信息，
+          线路和集数需要连上 NAS 才能加载。</p>
+        <div class="od-actions">
+          <button class="btn primary" id="od-retry" data-focus>重新连接</button>
+          <a class="btn ghost" href="#/home">回首页</a>
+        </div>
+        ${msg ? `<p class="od-msg">${esc(msg)}</p>` : ''}
+      </div>
+    </div>
+  </div>`;
 }
 
 // ── 右侧影片信息 ─────────────────────────────────────────────
