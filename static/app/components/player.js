@@ -781,7 +781,10 @@ function addControls() {
     add('next-ep', `<span class="ap-ctl">${icon('next')}</span>`, '下一集（PgDn）', () => step(1));
   }
   add('ep-list', `<span class="ap-ctl">${icon('list')}</span>`, '线路与选集（↓）', () => toggleSide(true));
-  add('pip', `<span class="ap-ctl">${icon('pip')}</span>`, '画中画', togglePip);
+  // 画中画同理：App 壳里切出去就看不到画面了，这个按钮没有意义
+  if (!inApp()) {
+    add('pip', `<span class="ap-ctl">${icon('pip')}</span>`, '画中画', togglePip);
+  }
   // App 里已经是全屏了，这个按钮只会让人困惑
   if (!inApp()) {
     add('fullscreen', `<span class="ap-ctl">${icon('expand')}</span>`, '全屏（F）', toggleFullscreen);
