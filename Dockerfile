@@ -12,6 +12,10 @@ ENV DB_PATH=/data/media.db \
 
 EXPOSE 8899
 
+# 容器健康检查：只打 /healthz（不查远程片源，永远秒回）
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8899/healthz || exit 1
+
 # 需要访问外网片源站与宿主机 qBittorrent，建议 host 网络：
 #   docker run -d --name projection-room --restart unless-stopped --network host \
 #     -e QBT_URL=http://127.0.0.1:8080 -e QBT_USER=<用户名> -e QBT_PASS=<密码> \

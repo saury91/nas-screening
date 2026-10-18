@@ -1,0 +1,19 @@
+{
+  "name": "放映室 · 私人放映",
+  "short_name": "放映室",
+  "description": "跑在 NAS 上的私人放映室：影视聚合、电视直播、音乐。",
+  "start_url": "/#/home",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#07080b",
+  "theme_color": "#07080b",
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

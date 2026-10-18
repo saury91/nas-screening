@@ -12,23 +12,33 @@ from .config import UA, TIMEOUT
 
 
 def idna(url):
-    """中文域名转 punycode —— urllib 只认 ASCII 主机名。
-    TVBox 生态里大量用中文域名（http://www.例子.测试/tv），不转直接失败。
+    """把 URL 变成 urllib 能直接请求的 ASCII 形式。
+
+    两件事：
+    1. 中文域名转 punycode —— urllib 只认 ASCII 主机名。
+       TVBox 生态里大量用中文域名（http://www.例子.测试/tv），不转直接失败。
+    2. 路径/查询里的中文按 UTF-8 百分号编码 —— 采集站的播放地址经常是
+       `/video/shaqiu/HD中字/index.m3u8` 这种，不转的话 urllib 组装请求行时
+       会抛 UnicodeEncodeError，表现为「代理 502、播放器一直缓冲」。
     """
     try:
         p = urllib.parse.urlsplit(url)
         host = p.hostname or ""
-        if not host or host.isascii():
-            return url
-        ascii_host = host.encode("idna").decode("ascii")
-        netloc = ascii_host
+        netloc = host
+        if host and not host.isascii():
+            netloc = host.encode("idna").decode("ascii")
         if p.port:
             netloc += ":%d" % p.port
         if p.username:
             auth = p.username + (":" + p.password if p.password else "") + "@"
             netloc = auth + netloc
+        # 已经编码过的 %XX 保留，不要二次编码
+        path = urllib.parse.quote(p.path, safe="/%:@!$&'()*+,;=-._~")
+        query = urllib.parse.quote(p.query, safe="=&%:@!$'()*+,;/?-._~")
+        if not netloc:
+            return url
         return urllib.parse.urlunsplit(
-            (p.scheme, netloc, p.path, p.query, p.fragment))
+            (p.scheme, netloc, path, query, p.fragment))
     except Exception:
         return url
 

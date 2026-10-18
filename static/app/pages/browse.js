@@ -17,6 +17,8 @@ const DESC = {
 let st = null;
 let io = null;
 let phNodes = [];          // 正在加载的骨架占位，跟着网格流走
+let rootRef = null;        // 当前页面的根节点，滚动监听只认它
+let scrollTimer = null;
 const B_TTL = 10 * 60 * 1000;
 
 const bkey = () => `browse|${st.cat}|${st.year}|${st.area}|${st.src}`;
@@ -26,7 +28,9 @@ const sigOf = items => [items.length, items[0] && items[0].name,
 function hydrate(cached) {
   st.items = cached.items || [];
   st.seen = new Set(st.items.map(itemKey));
-  st.pg = cached.pg || 2;
+  // 缓存只负责"先画出来"。页码必须从 1 重新要——
+  // 以前把 st.pg 恢复成 2，回访时会直接拉第 2 页，第一页永远被跳过。
+  st.pg = 1;
   st.more = !!cached.more;
   st.sig = sigOf(st.items);
 }
@@ -37,6 +41,7 @@ export function destroy() {
   st && st.ctrl && st.ctrl.abort();
   st = null;
   phNodes = [];
+  rootRef = null;
 }
 
 // 骨架卡直接插进真实网格：会从最后一个卡片的下一个格子开始，不会另起一行
@@ -67,7 +72,7 @@ function normName(s) {
     .replace(/[（(【\[].*?[）)】\]]/g, '')
     .replace(/(19|20)\d{2}$/, '');
 }
-const itemKey = x => normName(x.name) + '|' + String(x.year || '');
+const itemKey = x => normName(x.name) + '|' + String(x.year || '').trim();
 
 export async function render(root, ctx) {
   const slug = ctx.seg[1] || 'movie';
@@ -181,18 +186,35 @@ async function resetFilters(root) {
   }
 }
 
-function watchScroll(root) {
-  io && io.disconnect();
+// 滚动加载：不用 IntersectionObserver。
+// 那个方案在「sentinel 一直留在视口里」时只会触发一次回调，
+// 筛选后结果很短就再也不加载了；改成滚动 + 每次请求结束主动检查一次，
+// 行为是确定的：只要底部进入视野、还有下一页，就继续要。
+function maybeLoad() {
+  const root = rootRef;
+  if (!st || !root || !root.isConnected || st.loading || !st.more) return;
   const sentinel = root.querySelector('#sentinel');
-  if (!sentinel || !('IntersectionObserver' in window)) {
-    showFallbackButton(root);
-    return;
+  if (!sentinel) return;
+  if (sentinel.getBoundingClientRect().top < window.innerHeight + 400) {
+    fetchPage(root, { replace: false });
   }
-  io = new IntersectionObserver(entries => {
-    if (!st || st.loading || !st.more) return;
-    if (entries.some(en => en.isIntersecting)) fetchPage(root, { replace: false });
-  }, { rootMargin: '600px 0px' });
-  io.observe(sentinel);
+}
+
+function onScroll() {
+  if (scrollTimer) return;
+  scrollTimer = setTimeout(() => {
+    scrollTimer = null;
+    maybeLoad();
+  }, 140);
+}
+
+function watchScroll(root) {
+  rootRef = root;
+  if (!watchScroll.bound) {
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    watchScroll.bound = true;
+  }
 }
 
 function showFallbackButton(root) {
@@ -239,6 +261,9 @@ async function fetchPage(root, { replace = false, first = false, silent = false 
     });
     st.more = !!d.more;
     st.pg += 1;
+    // 这一页没有任何新条目（接口没货，或全是前面已经见过的）：
+    // 继续往后翻只会拿到同一批，直接收手，避免无限重复。
+    if (!items.length || (!replace && !added.length)) st.more = false;
     st.sig = sigOf(st.items);
     removeSkeletons();
     // 追加时只插新卡片，不整块重建：否则已加载的封面会一起闪一下
@@ -251,7 +276,7 @@ async function fetchPage(root, { replace = false, first = false, silent = false 
     }
     // 只缓存第一页，回访时秒出；后续翻页不落缓存，避免越滚越大
     if (replace) {
-      cacheSet(bkey(), { items: st.items.map(slimItem), pg: st.pg, more: st.more });
+      cacheSet(bkey(), { items: st.items.map(slimItem), pg: 1, more: st.more });
     }
     slot.innerHTML = st.more ? '' : (st.items.length > 12
       ? `<p class="load-end">已经到底了 · 共 ${st.items.length} 部</p>` : '');
@@ -278,19 +303,28 @@ async function fetchPage(root, { replace = false, first = false, silent = false 
     if (st.ctrl === ctrl) {
       st.loading = false;
       list.classList.remove('is-busy');
+      // 如果底部还在视野里（内容还不够高），接着加载下一页
+      setTimeout(maybeLoad, 160);
     }
   }
 }
 
 function cardHTML(x) {
-  return posterCard(x, { sub: [x.year, x.type, x.site].filter(Boolean).join(' · ') });
+  return posterCard(x, { sub: [x.year, x.type, x.site].filter(Boolean).join(' · '),
+                         key: itemKey(x) });
 }
 
 function appendCards(root, added) {
   if (!added.length) return;
   const box = root.querySelector('#list .grid');
   if (!box) { paintList(root); return; }
-  box.insertAdjacentHTML('beforeend', added.map(cardHTML).join(''));
+  // 最后一道闸：DOM 里已经有这个 key 就不插。
+  // 状态层的 st.seen 只要漏一条（比如接口两次返回的写法不一致），
+  // 这里也不会出现两张一样的卡。
+  const have = new Set([...box.querySelectorAll('.card-wrap')]
+    .map(n => n.dataset.key).filter(Boolean));
+  const html = added.filter(x => !have.has(itemKey(x))).map(cardHTML).join('');
+  if (html) box.insertAdjacentHTML('beforeend', html);
 }
 
 function paintList(root) {
@@ -302,5 +336,13 @@ function paintList(root) {
     });
     return;
   }
+  // 渲染前再按 key 收一遍：即使前面的去重有漏，也不会画出重复卡片
+  const seen = new Set();
+  st.items = st.items.filter(x => {
+    const k = itemKey(x);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
   box.innerHTML = `<div class="grid">${st.items.map(cardHTML).join('')}</div>`;
 }

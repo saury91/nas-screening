@@ -11,12 +11,17 @@ from ..config import (BROWSE_SITES, CAT_ORDER, CATMAP_TTL, FALLBACK_HOT,
                       RECOMMEND_TTL, SEARCH_DEADLINE, TIMEOUT)
 from ..db import dbrun
 from ..log import log
-from ..net import raw_get
+from ..net import http_get, raw_get
 from ..providers import active_sites
 from ..providers.cms import (_by_type, _cms_query, _extract_meta,
                              _latest, _parse_play_url, _qs)
 from ..text import (_desc_better, _norm_key, _relevance, _score_max,
                     Q_RANK, guess_quality)
+
+# 全局搜索池：以前每次搜索都新建 13 个线程再 shutdown(wait=False)，
+# 连续搜几次就有一堆线程还在跑。复用池子能自然形成背压。
+_SEARCH_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=16, thread_name_prefix="cms-search")
 
 
 def _taste():
@@ -77,7 +82,7 @@ def _dedup(items, limit=0):
     for it in items:
         k = _norm_key(it.get("name", ""))
         k = re.sub(r"(19|20)\d{2}$", "", k) or k
-        key = (k, str(it.get("year") or ""))
+        key = (k, str(it.get("year") or "").strip())
         if k and key not in seen:
             seen.add(key)
             out.append(it)
@@ -129,11 +134,36 @@ def detect_catmap(site):
 
     各站 t 的排法完全不同（暴风 t=20 才是电影，别家 t=6 就是），而且会变。
     所以不写死映射——探一次记下来缓存一天，浏览时才知道该拉哪个 t。
+
+    优先走 MacCMS 的 `ac=list`：它直接把 class 表（type_id + type_name）返回，
+    一次请求就够。早期版本盲探 30 个 ID × 每个源，首点「电影」实测 26 秒。
     """
     key = "catmap|" + site["name"]
     c = cache_peek(key)
     if c and cache_valid(key, CATMAP_TTL):
         return c
+
+    try:
+        api = site["api"]
+        sep = "&" if "?" in api else "?"
+        d = json.loads(http_get(api + sep + "ac=list", timeout=8))
+        classes = []
+        if isinstance(d, dict):
+            classes = d.get("class") or d.get("classes") or []
+        out = {}
+        for x in classes:
+            if not isinstance(x, dict):
+                continue
+            tid = x.get("type_id", x.get("id"))
+            c2 = _cat(x.get("type_name") or x.get("name") or "")
+            if tid is not None and c2:
+                out[str(tid)] = c2
+        if out:
+            cache_put(key, out)
+            log("分类映射 %s：ac=list 拿到 %d 个分类" % (site["name"], len(out)))
+            return out
+    except Exception:
+        pass                     # 有的站不支持 ac=list，退回盲探
 
     def probe(t):
         try:
@@ -157,12 +187,20 @@ def detect_catmap(site):
 
 
 def catmap_warm():
-    """启动时后台把分类映射预热掉，免得第一次点「浏览」要干等十几秒"""
-    for s in active_sites()[:BROWSE_SITES]:
+    """启动时后台把分类映射预热掉，免得第一次点「浏览」要干等。
+
+    各站之间并发，站内 ac=list 一次搞定；不支持 ac=list 的站才走盲探。
+    """
+    def one(s):
         try:
             detect_catmap(s)
         except Exception:
             pass
+    sites = active_sites()[:BROWSE_SITES]
+    if not sites:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(sites)) as ex:
+        list(ex.map(one, sites))
 
 
 def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None):
@@ -311,17 +349,16 @@ def search_online(kw, deadline=None):
         return out
 
     rows = []
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=13)
+    futs = [_SEARCH_POOL.submit(one, s) for s in active_sites()]
     try:
-        futs = [ex.submit(one, s) for s in active_sites()]
         done, _ = concurrent.futures.wait(futs, timeout=deadline)
         for f in done:
             try:
                 rows.extend(f.result())
             except Exception:
                 pass
-    finally:
-        ex.shutdown(wait=False)   # 不等还在跑的慢站
+    except Exception:
+        pass
 
     merged = {}
     for r in rows:

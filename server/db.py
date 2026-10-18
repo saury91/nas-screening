@@ -57,6 +57,26 @@ CREATE TABLE IF NOT EXISTS live(
 
 CREATE TABLE IF NOT EXISTS cache(
   k TEXT PRIMARY KEY, val TEXT, ts INTEGER);
+
+-- 家庭账户：一个 admin 管配置，其余家人各自一份记录与收藏。
+-- 只做 PIN，不做密码体系——内网自用，够用且省事。
+CREATE TABLE IF NOT EXISTS profiles(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  avatar TEXT DEFAULT '',
+  role TEXT NOT NULL DEFAULT 'member',
+  pin TEXT DEFAULT '',
+  pin_lookup TEXT,
+  created_at INTEGER,
+  last_seen INTEGER);
+
+-- 登录会话：token 存库，NAS 重启后不用重新登录
+CREATE TABLE IF NOT EXISTS sessions(
+  token TEXT PRIMARY KEY,
+  profile TEXT NOT NULL,
+  created_at INTEGER,
+  expires_at INTEGER,
+  ua TEXT);
 """
 
 # 老库平滑升级：sources 早期只有 kind/name/url/enabled/pri/meta
@@ -69,7 +89,62 @@ _MIGRATIONS = [
     # 直播频道探活：NULL 未测 / 1 可播 / 0 不可播
     ("live_alive", "ALTER TABLE live ADD COLUMN alive INTEGER"),
     ("live_probed", "ALTER TABLE live ADD COLUMN probed_at INTEGER"),
+    # 连续失效次数：每天自动巡检时累加，达到阈值才清理，避免一次抽风就删源
+    ("live_dead_hits", "ALTER TABLE live ADD COLUMN dead_hits INTEGER DEFAULT 0"),
 ]
+
+
+def _rebuild_profile_scope(con):
+    """给 history / fav 加 profile 并把唯一键改成 (profile, kind, key)。
+
+    SQLite 不支持删表级约束，只能建新表 → 拷数据 → 删旧表 → 改名。
+    存量数据统一归到 admin，升级不丢记录。
+    """
+    cols = {r[1] for r in con.execute("PRAGMA table_info(history)")}
+    if "profile" not in cols:
+        con.executescript("""
+        CREATE TABLE history_v2(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          profile TEXT NOT NULL DEFAULT 'admin',
+          kind TEXT NOT NULL, key TEXT NOT NULL,
+          title TEXT, cover TEXT, source TEXT, ep TEXT, url TEXT,
+          position REAL DEFAULT 0, duration REAL DEFAULT 0,
+          plays INTEGER DEFAULT 1, genre TEXT, year TEXT, updated_at INTEGER,
+          UNIQUE(profile, kind, key));
+        INSERT INTO history_v2(id,profile,kind,key,title,cover,source,ep,url,
+                               position,duration,plays,genre,year,updated_at)
+          SELECT id,'admin',kind,key,title,cover,source,ep,url,
+                 position,duration,plays,genre,year,updated_at FROM history;
+        DROP TABLE history;
+        ALTER TABLE history_v2 RENAME TO history;
+        """)
+        log("数据迁移：history 增加 profile 维度（存量归 admin）")
+
+    cols = {r[1] for r in con.execute("PRAGMA table_info(fav)")}
+    if "profile" not in cols:
+        con.executescript("""
+        CREATE TABLE fav_v2(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          profile TEXT NOT NULL DEFAULT 'admin',
+          kind TEXT NOT NULL, key TEXT NOT NULL,
+          title TEXT, cover TEXT, payload TEXT, added_at INTEGER,
+          UNIQUE(profile, kind, key));
+        INSERT INTO fav_v2(id,profile,kind,key,title,cover,payload,added_at)
+          SELECT id,'admin',kind,key,title,cover,payload,added_at FROM fav;
+        DROP TABLE fav;
+        ALTER TABLE fav_v2 RENAME TO fav;
+        """)
+        log("数据迁移：fav 增加 profile 维度（存量归 admin）")
+
+    # profiles：PIN 查找列（老库补列）＋ 唯一索引（PIN 不允许重复）
+    pcols = {r[1] for r in con.execute("PRAGMA table_info(profiles)")}
+    if pcols and "pin_lookup" not in pcols:
+        con.execute("ALTER TABLE profiles ADD COLUMN pin_lookup TEXT")
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_pin ON profiles(pin_lookup)")
+
+    con.execute("CREATE INDEX IF NOT EXISTS ix_hist_p ON history(profile, updated_at DESC)")
+    con.execute("CREATE INDEX IF NOT EXISTS ix_fav_p ON fav(profile, added_at DESC)")
+    con.commit()
 
 
 def db_init():
@@ -85,6 +160,10 @@ def db_init():
         except Exception:
             pass                      # 已经存在这一列
     con.commit()
+    try:
+        _rebuild_profile_scope(con)
+    except Exception as e:
+        log("profile 迁移失败：%s" % str(e)[:120])
     return con
 
 
@@ -104,10 +183,14 @@ def dbrun(sql, args=(), fetch=False):
             rows = cur.fetchall() if fetch else None
             con.commit()
             return rows
-        except Exception:
+        except Exception as e:
             _TLS.con = None
             if attempt == 0:
                 time.sleep(0.08)
+            else:
+                # 以前这里完全静默：库出问题时页面只显示"没有内容"，无从排查
+                log("SQL 失败：%s | %s" % (str(e)[:80],
+                                       " ".join(sql.split())[:90]))
     return [] if fetch else None
 
 
@@ -149,12 +232,12 @@ def note_search(kw):
           (k, int(time.time())))
 
 
-def touch_history(kind, key, **kw):
+def touch_history(kind, key, profile="admin", **kw):
     now = int(time.time())
-    dbrun("""INSERT INTO history(kind,key,title,cover,source,ep,url,position,duration,
+    dbrun("""INSERT INTO history(profile,kind,key,title,cover,source,ep,url,position,duration,
              genre,year,updated_at)
-             VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-             ON CONFLICT(kind,key) DO UPDATE SET
+             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+             ON CONFLICT(profile,kind,key) DO UPDATE SET
                title=COALESCE(excluded.title,history.title),
                cover=COALESCE(excluded.cover,history.cover),
                source=COALESCE(excluded.source,history.source),
@@ -164,17 +247,20 @@ def touch_history(kind, key, **kw):
                genre=COALESCE(excluded.genre,history.genre),
                year=COALESCE(excluded.year,history.year),
                plays=history.plays+1, updated_at=excluded.updated_at""",
-          (kind, key, kw.get("title"), kw.get("cover"), kw.get("source"),
+          (profile, kind, key, kw.get("title"), kw.get("cover"), kw.get("source"),
            kw.get("ep"), kw.get("url"), float(kw.get("position") or 0),
            float(kw.get("duration") or 0), kw.get("genre"), kw.get("year"), now))
 
 
-def toggle_fav(kind, key, title="", cover="", payload=""):
-    if dbrun("SELECT id FROM fav WHERE kind=? AND key=?", (kind, key), fetch=True):
-        dbrun("DELETE FROM fav WHERE kind=? AND key=?", (kind, key))
+def toggle_fav(kind, key, title="", cover="", payload="", profile="admin"):
+    if dbrun("SELECT id FROM fav WHERE profile=? AND kind=? AND key=?",
+             (profile, kind, key), fetch=True):
+        dbrun("DELETE FROM fav WHERE profile=? AND kind=? AND key=?",
+              (profile, kind, key))
         return False
-    dbrun("INSERT INTO fav(kind,key,title,cover,payload,added_at) VALUES(?,?,?,?,?,?)",
-          (kind, key, title, cover, payload, int(time.time())))
+    dbrun("""INSERT INTO fav(profile,kind,key,title,cover,payload,added_at)
+             VALUES(?,?,?,?,?,?,?)""",
+          (profile, kind, key, title, cover, payload, int(time.time())))
     return True
 
 
