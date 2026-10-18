@@ -56,7 +56,7 @@ async function request(path, { method = 'GET', body, signal } = {}) {
         return cached;
       }
     }
-    throw new Error('连不上 NAS，正在使用离线数据');
+    throw new Error('暂时连不上服务器，先显示本地缓存');
   }
   setOffline(false);
   let data = null;

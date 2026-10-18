@@ -79,8 +79,7 @@ function offlineDetail(t, msg) {
         <h2>${esc(t.name)}</h2>
         ${meta ? `<p class="od-meta">${esc(meta)}</p>` : ''}
         ${t.desc ? `<p class="od-desc">${esc(t.desc)}</p>` : ''}
-        <p class="od-note">离线模式：这里只有本地记录的基本信息，
-          线路和集数需要连上 NAS 才能加载。</p>
+        <p class="od-note">线路和集数暂时取不到，联网后会自动补全。</p>
         <div class="od-actions">
           <button class="btn primary" id="od-retry" data-focus>重新连接</button>
           <a class="btn ghost" href="#/home">回首页</a>
