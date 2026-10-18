@@ -1,8 +1,20 @@
 # 放映室 · NAS 个人娱乐中心
 
-把**影视、电视直播、音乐**收进一个网页，跑在你自己的 NAS 上。
+把**影视、电视直播、音乐**收进一个网页，跑在你自己的 NAS 上；同一个界面也能装到电视上。
 
 搜片名 → 点开 → 直接播。片源、直播、下载任务都在设置里管理，主页只留内容。
+
+| 能力 | 状态 |
+|---|---|
+| 影视聚合 · 多片源合并 · 断点续播 | ✅ |
+| 电视直播 · 每日自动汇总探活 | ✅ |
+| 音乐 · 本地/Subsonic · 在线歌单 · 歌词 | ✅ |
+| 家庭账户 · 每人一份记录与收藏 | ✅ |
+| 配置导出/导入（可分享、跨版本） | ✅ |
+| Android TV 端（侧载 · 自动发现 · 内网自升级） | ✅ 0.2.0 |
+| 手机端 App · 投屏到电视 | 🚧 下一步 |
+
+网页、电视盒子用的是同一套界面：**UI 只有一份**，App 只是把网页装进壳里，再加原生播放器。
 
 > ## ⚠️ 使用前必读
 >
@@ -127,7 +139,7 @@ python3 tools/account.py kick              # 踢掉所有已登录设备
 
 ![电视端](docs/screenshot-tv.png)
 
-P0 已经有了 Android TV 的壳：一个全屏 WebView 装现有前端，播放交给原生 ExoPlayer。
+Android TV 端已经能日常用了（0.2.0）：一个全屏 WebView 装现有前端，播放交给原生 ExoPlayer。
 **电视上没有"注册/建管理员"**——初始化是 NAS 上一次性的事，电视只输 PIN。
 
 ![电视配对](docs/screenshot-tv-pair.png)
@@ -144,6 +156,11 @@ P0 已经有了 Android TV 的壳：一个全屏 WebView 装现有前端，播�
 - **内核自检**：WebView 低于 55 直接给出说明页，不会白屏
 
 最低 Android 5.0（API 21），编译目标 34。
+
+> 如果 NAS 开了防火墙，记得放行 **UDP 8897**（自动发现）和 **TCP 8898**（扫码配对），
+> 否则电视只能用第三条路手动填地址。
+
+手机端：同一套前端，下一步做设备自适应（竖屏、会话 30 天）和投屏，目前请直接用手机浏览器打开。
 
 ### 签名与内网自升级
 
@@ -228,11 +245,14 @@ docker run -d --name projection-room --restart unless-stopped --network host \
   projection-room
 ```
 
-### 第一次打开，建议做三件事
+### 第一次打开，建议做四件事
 
-1. **加片源**：设置 → 片源管理。粘贴一个 TVBox 配置地址批量导入，或者点「自动发现片源」让它自己去找。
-2. **加直播**：设置 → 直播源。填几个候选源地址，之后每天会自动帮你重新抓取和筛选。
-3. **接音乐**（可选）：不接也能听在线歌单；想听自己的歌，再填 NAS 音乐目录或 Navidrome 地址。
+1. **改掉默认 PIN**：设置 → 家庭账户 → 改 PIN。默认是 `admin / 123456`，全家都靠它认人。
+2. **加片源**：设置 → 片源管理。粘贴一个 TVBox 配置地址批量导入，或者点「自动发现片源」让它自己去找。
+3. **加直播**：设置 → 直播源。填几个候选源地址，之后每天会自动帮你重新抓取和筛选。
+4. **接音乐**（可选）：不接也能听在线歌单；想听自己的歌，再填 NAS 音乐目录或 Navidrome 地址。
+
+> 想让电视也能用？见上面的「电视 / 手机 App」，装个 APK 就行。
 
 ---
 
@@ -254,6 +274,40 @@ docker run -d --name projection-room --restart unless-stopped --network host \
 - 遥控器、键盘、鼠标、触屏都能用
 - 宽屏有版心，不会把内容拉得又扁又长
 - 字体自托管，不依赖任何 CDN
+
+---
+
+## 项目结构
+
+```
+app.py                  启动入口：建库、预热、UDP 发现应答
+server/
+  api.py                路由 + 鉴权守卫（只做参数解析与序列化）
+  db.py                 SQLite 建表与迁移（含 profile 维度）
+  services/
+    auth.py             家庭账户：PIN 哈希、会话、节流
+    config_io.py        配置包导出/导入（schema 版本 + 迁移）
+    musicbox.py         在线歌单（推荐、分类、歌单详情）
+    proxy.py            HLS 同源代理（含私网防护）
+static/
+  app/                  零构建前端：原生 ES Modules + 手写 CSS
+  index.html            单页入口
+android/                Android TV 壳（Kotlin + ExoPlayer + ZXing）
+  keystore/             发布密钥（固定签名，见上文说明）
+tools/                  account.py 救急命令、publish-apk.sh 发版、cdp.js 截图自检
+tests/                  纯函数单测（不依赖网络与真实数据库）
+docs/                   截图、配置包格式说明、审计记录
+```
+
+## 测试
+
+```bash
+python3 -m unittest discover -s tests -v     # 40 条纯函数单测
+cd android && gradle assembleRelease         # 编译即校验
+```
+
+CI（`.github/workflows/ci.yml`）会跑 Python 编译 + 单测 + 前端 ESM 语法检查；
+`android.yml` 负责出 APK。
 
 ---
 
