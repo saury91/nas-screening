@@ -30,7 +30,6 @@
             android:configChanges="orientation|screenSize|keyboardHidden|navigation"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="landscape"
             android:theme="@style/AppTheme.Fullscreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -45,7 +44,6 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="false"
             android:label="@string/setup_title"
-            android:screenOrientation="landscape"
             android:theme="@style/AppTheme" />
 
         <activity

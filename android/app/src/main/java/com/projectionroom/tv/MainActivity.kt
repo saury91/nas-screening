@@ -2,6 +2,7 @@ package com.projectionroom.tv
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -37,8 +38,13 @@ class MainActivity : AppCompatActivity() {
     private val server: String
         get() = Prefs.server(this)
 
+    /** 电视：横屏 + 每次冷启动重输 PIN；手机：跟随系统 + 30 天免登录 */
+    private var isTv = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        isTv = Device.isTv(this)
+        if (isTv) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 
         val url = server
         if (url.isBlank()) {
@@ -54,8 +60,8 @@ class MainActivity : AppCompatActivity() {
         errorDesc = findViewById(R.id.error_desc)
         findViewById<Button>(R.id.error_btn).setOnClickListener { loadHome() }
 
-        // 冷启动：清掉 WebView 里的 localStorage / Cookie，等于每次开机都要重输 PIN
-        if (App.freshProcess) {
+        // 只有电视需要「每次开机重输 PIN」；手机上清掉等于每次都要重来，绝不能做
+        if (isTv && App.freshProcess) {
             WebStorage.getInstance().deleteAllData()
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
@@ -132,7 +138,7 @@ class MainActivity : AppCompatActivity() {
             allowContentAccess = false
             setSupportZoom(false)
             // 让前端能识别"这是电视端"，从而切到大屏/遥控器布局
-            userAgentString = userAgentString + " ProomTV/" + BuildConfig.VERSION_NAME
+            userAgentString = userAgentString + " " + Device.uaTag(this@MainActivity) + BuildConfig.VERSION_NAME
         }
 
         web.addJavascriptInterface(NativeBridge(this), "ProomNative")
@@ -182,10 +188,11 @@ class MainActivity : AppCompatActivity() {
             (function(){
               // 错误页（chrome-error://）没有 documentElement，别在这里抛异常
               if (!document.documentElement) return;
-              document.documentElement.classList.add('tv');
+              ${if (isTv) "document.documentElement.classList.add('tv');" else ""}
               window.ProomTV = {
                 version: '${BuildConfig.VERSION_NAME}',
                 webview: ${webViewMajor()},
+                tv: ${isTv},
                 play: function(url, title){ window.ProomNative.play(url || '', title || ''); },
                 stop: function(){ window.ProomNative.stop(); },
                 server: function(){ return window.ProomNative.server(); }

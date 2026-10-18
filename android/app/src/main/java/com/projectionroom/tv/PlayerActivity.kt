@@ -25,6 +25,9 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Device.isTv(this)) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
         setContentView(R.layout.activity_player)
 
         val url = intent.getStringExtra("url").orEmpty()

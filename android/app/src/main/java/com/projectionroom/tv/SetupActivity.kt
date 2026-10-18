@@ -33,19 +33,31 @@ class SetupActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val isTv = Device.isTv(this)
+        if (isTv) requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         setContentView(R.layout.activity_setup)
 
         stateText = findViewById(R.id.state)
 
-        // 二维码指向电视自己的配对页：手机扫码后能把地址"发"回电视
-        val ip = Discovery.localIp(this)
+        // 二维码只在电视上出现：手机上扫自己屏幕没有意义
+        val ip = if (isTv) Discovery.localIp(this) else null
         val qrView = findViewById<ImageView>(R.id.qr)
         if (ip != null) {
             qrView.setImageBitmap(makeQr("http://$ip:8898/", 480))
             pair = PairServer(::save).also { it.start() }
         } else {
-            qrView.visibility = View.GONE
-            stateText.text = getString(R.string.setup_waiting)
+            // 手机：把扫码区去掉，表单铺满
+            findViewById<View>(R.id.qrBox).visibility = View.GONE
+            val formBox = findViewById<View>(R.id.formBox)
+            formBox.layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            formBox.setPadding(0, 0, 0, 0)
+            // 手机上 72dp 的左右留白会把手输框挤没，收窄到 24dp
+            val pad = (24 * resources.displayMetrics.density).toInt()
+            findViewById<View>(R.id.root).setPadding(pad, pad, pad, pad)
+            stateText.text = getString(R.string.setup_searching)
         }
 
         // 同时开始自动发现，谁先成功用谁
@@ -56,7 +68,9 @@ class SetupActivity : AppCompatActivity() {
                     stateText.text = getString(R.string.setup_found)
                     save(found)
                 } else if (!done) {
-                    stateText.text = getString(R.string.setup_waiting)
+                    stateText.text = getString(
+                        if (isTv) R.string.setup_waiting else R.string.setup_waiting_phone
+                    )
                 }
             }
         }, "discovery").start()
