@@ -118,7 +118,10 @@ export function initFocus() {
       return;
     }
     if (e.key === 'Enter' || e.key === ' ') {
-      const el = current && current.isConnected ? current : null;
+      // 遥控器用 current；Tab 进来的情况 current 是空的，退回到 activeElement
+      const ae = document.activeElement;
+      const el = (current && current.isConnected) ? current
+        : (ae && ae.closest ? ae.closest(FOCUSABLE) : null);
       if (!el) return;
       e.preventDefault();
       el.click();

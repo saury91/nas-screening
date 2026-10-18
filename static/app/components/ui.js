@@ -1,10 +1,13 @@
 // 卡片 / 货架 / 网格：全站统一的视觉单元
 import { esc, icon, timeAgo } from '../core/dom.js';
 
-export function imgTag(src, name, cls = '') {
+export function imgTag(src, name, cls = '', eager = false) {
   const ph = `<div class="ph fill">${esc((name || '?').slice(0, 1))}</div>`;
   if (!src) return ph;
-  return `${ph}<img src="${esc(src)}" alt="" loading="lazy" class="${cls}"
+  // 首屏 Hero 用 eager + 高优先级，列表才懒加载：否则 LCP 图也要排队
+  const load = eager ? 'fetchpriority="high" decoding="async"'
+                     : 'loading="lazy" decoding="async"';
+  return `${ph}<img src="${esc(src)}" alt="" ${load} class="${cls}"
     onerror="this.remove()">`;
 }
 
@@ -18,14 +21,17 @@ export function posterCard(it, o = {}) {
   const sub = o.sub !== undefined ? o.sub : [year, it.type].filter(Boolean).join(' · ');
   const badge = o.badge || (it.site_count > 1 ? `${it.site_count} 源` : '');
   const prog = o.progress;
-  return `<div class="card-wrap grid-enter">
-    <div class="card" data-focus data-open="${o.open || titleLink(name, year)}">
+  const href = o.open || titleLink(name, year);
+  // 用 <a href> 而不是 <div>：Tab 能走到、中键能开新标签、读屏能读
+  return `<div class="card-wrap grid-enter"${o.key ? ` data-key="${esc(o.key)}"` : ''}>
+    <a class="card" href="${href}" data-focus data-open="${href}"
+       aria-label="${esc(name)}${year ? '（' + esc(year) + '）' : ''}">
       ${imgTag(it.pic || it.cover, name)}
       ${badge ? `<span class="card-badge">${esc(badge)}</span>` : ''}
       ${it.remarks ? `<span class="card-badge r">${esc(String(it.remarks).slice(0, 10))}</span>` : ''}
       <span class="card-play"><span>${icon('play')}</span></span>
       ${prog ? `<span class="card-progress"><i style="width:${Math.min(100, prog)}%"></i></span>` : ''}
-    </div>
+    </a>
     <div class="card-meta">
       <p class="card-title">${esc(name)}</p>
       ${sub ? `<p class="card-sub">${esc(sub)}</p>` : ''}
@@ -39,12 +45,13 @@ export function continueCard(rec) {
     (rec.ep ? `&ep=${encodeURIComponent(rec.ep)}` : '') +
     (rec.position ? `&t=${Math.floor(rec.position)}` : '');
   return `<div class="card-wrap grid-enter">
-    <div class="card" data-focus data-open="${open}">
+    <a class="card" href="${open}" data-focus data-open="${open}"
+       aria-label="继续观看 ${esc(rec.title || rec.key)}${rec.ep ? '（' + esc(rec.ep) + '）' : ''}">
       ${imgTag(rec.cover, rec.title)}
       <span class="card-play"><span>${icon('play')}</span></span>
       ${rec.ep ? `<span class="continue-ep">${esc(rec.ep)}</span>` : ''}
       ${pct ? `<span class="card-progress"><i style="width:${pct}%"></i></span>` : ''}
-    </div>
+    </a>
     <div class="card-meta">
       <p class="card-title">${esc(rec.title || rec.key)}</p>
       <p class="card-sub">${pct ? `已看 ${Math.round(pct)}%` : timeAgo(rec.at)}</p>

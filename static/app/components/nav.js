@@ -19,6 +19,8 @@ const TABS = [
 let searchOpen = false;
 let lastScroll = 0;
 
+import { currentUser, openSwitcher } from '../core/auth.js';
+
 export function initNav() {
   const tabs = $('#tabs');
   tabs.innerHTML = TABS.map(([href, label]) =>
@@ -35,12 +37,36 @@ export function initNav() {
 // 于是 input.value 变成 "[object PointerEvent]"，还会被记进搜索历史
 $('#btn-search').addEventListener('click', () => openSearch());
   $('#search-close').addEventListener('click', closeSearch);
+  const meBtn = $('#btn-me');
+  if (meBtn) {
+    const u = currentUser();
+    const av = $('#me-avatar');
+    if (u && av) {
+      av.textContent = (u.avatar || u.name || '?').slice(0, 1);
+      meBtn.title = u.name + (u.role === 'admin' ? '（管理员）' : '') + ' · 点这里切换账户';
+    }
+    meBtn.addEventListener('click', () => openSwitcher());
+  }
   $('#searchlayer').addEventListener('click', e => {
     if (e.target.id === 'searchlayer') closeSearch();
   });
+  // 焦点陷阱：Tab 在浮层里循环，不会跑到背后的页面上
+  $('#searchlayer').addEventListener('keydown', e => {
+    if (e.key !== 'Tab' || !searchOpen) return;
+    const f = Array.from($('#searchlayer').querySelectorAll(
+      'a[href],button,input,[data-focus]')).filter(el => el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  });
 
   const input = $('#search-input');
-  input.addEventListener('input', debounce(() => runSearch(input.value.trim()), 380));
+  // 只在这里 debounce 一次；以前外层 380ms 套内层 480ms，实际要等 860ms 才发请求
+  input.addEventListener('input', debounce(() => runSearch(input.value.trim()), 300));
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter' && input.value.trim()) {
       go('/search?q=' + encodeURIComponent(input.value.trim()));
@@ -115,10 +141,13 @@ export async function openSearch(prefill = '') {
 export function closeSearch() {
   if (!searchOpen) return;
   const layer = $('#searchlayer');
+  const hadFocus = layer.contains(document.activeElement);
   layer.hidden = true;
   document.body.classList.remove('locked');
   searchOpen = false;
   clearFocus();
+  // 关闭后把焦点还给触发按钮，键盘用户不会丢失位置
+  if (hadFocus) $('#btn-search')?.focus();
 }
 
 export function searchVisible() { return searchOpen; }
@@ -135,7 +164,7 @@ document.addEventListener('click', e => {
   }
 });
 
-const runSearch = debounce(async kw => {
+const runSearch = async kw => {
   const body = $('#search-body');
   if (!kw || kw.length < 1) return;
   body.innerHTML = `<div class="skl" style="height:200px;border-radius:14px"></div>`;
@@ -148,18 +177,19 @@ const runSearch = debounce(async kw => {
     }
     body.innerHTML = `<div class="search-section"><h5>搜索结果 · ${items.length}</h5>
       <div class="search-results">${items.map(it => `
-        <div class="sr-card" data-focus data-open="${titleLink(it.name, it.year)}">
-          ${it.pic ? `<img src="${esc(it.pic)}" alt="" loading="lazy" onerror="this.remove()">`
+        <a class="sr-card" href="${titleLink(it.name, it.year)}" data-focus
+           data-open="${titleLink(it.name, it.year)}" aria-label="${esc(it.name)}">
+          ${it.pic ? `<img src="${esc(it.pic)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">`
                    : `<div class="ph">${esc(it.name.slice(0, 1))}</div>`}
           <h6>${esc(it.name)}</h6>
           <p>${esc([it.year, it.site_count + ' 源'].filter(Boolean).join(' · '))}</p>
-        </div>`).join('')}</div></div>
+        </a>`).join('')}</div></div>
       <p class="search-empty">回车查看完整结果页</p>`;
     $('#search-body [data-focus]')?.classList.remove('focused');
   } catch (e) {
     body.innerHTML = `<p class="search-empty">${esc(e.message)}</p>`;
   }
-}, 480);
+};
 
 // 全局快捷键
 document.addEventListener('keydown', e => {
