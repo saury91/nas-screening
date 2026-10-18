@@ -6,7 +6,7 @@ import { getToken } from './auth.js';
 const ID_KEY = 'pr.dev';
 const isTv = () => /ProomTV\//.test(navigator.userAgent) ||
   document.documentElement.classList.contains('tv');
-const isPhone = () => /ProomMobile\//.test(navigator.userAgent);
+const isPhone = () => /Proom(Phone|Mobile)\//.test(navigator.userAgent);
 
 function deviceId() {
   try {

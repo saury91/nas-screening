@@ -32,7 +32,7 @@ object Updater {
         val base = Prefs.server(ctx).trimEnd('/')
         if (base.isBlank()) return null
         return try {
-            val json = get("$base/api/app/latest?kind=tv") ?: return null
+            val json = get("$base/api/app/latest?kind=" + BuildConfig.KIND) ?: return null
             val o = JSONObject(json)
             val code = o.optInt("versionCode")
             if (code <= BuildConfig.VERSION_CODE) return null
@@ -47,7 +47,7 @@ object Updater {
         val base = Prefs.server(ctx).trimEnd('/')
         val dir = File(ctx.cacheDir, "apk").apply { mkdirs() }
         val out = File(dir, "update.apk")
-        val conn = (URL("$base/api/app/download?kind=tv").openConnection() as HttpURLConnection).apply {
+        val conn = (URL("$base/api/app/download?kind=" + BuildConfig.KIND).openConnection() as HttpURLConnection).apply {
             connectTimeout = CONNECT_TIMEOUT
             readTimeout = READ_TIMEOUT
             instanceFollowRedirects = true
