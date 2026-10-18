@@ -373,6 +373,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._deny(401, "auth", "需要登录")
                 if path.startswith(_ADMIN_PREFIX) and not self._is_admin():
                     return self._deny(403, "admin", "只有管理员能做这个")
+            if path in ("/tv", "/tv/"):
+                # 电视浏览器里手输地址很痛苦，给一个短路径 + 大按钮
+                return self._serve_file("tv.html", cache="no-cache")
             if path.startswith("/static/"):
                 rel = path[len("/static/"):]
                 # 应用代码不缓存：升级后刷新即生效，避免旧 JS 和新 API 打架
