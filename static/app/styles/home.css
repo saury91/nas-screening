@@ -131,3 +131,23 @@
   .hero-copy{max-width:min(720px,52vw)}
   .hero-title{font-size:clamp(54px,4.6vw,88px)}
 }
+
+/* 手机端：底部圆点和「立即观看/详情」按钮会撞在一起，
+   把 Hero 底部让出更多空间，同时把圆点做小。 */
+@media (max-width:600px){
+  .hero{min-height:min(46vh,420px);padding-bottom:86px}
+  .hero-dots{bottom:18px;gap:6px}
+  .hero-step{width:26px;height:26px}
+  .hero-pips button{width:16px}
+  .hero-pips button.on{width:30px}
+  .hero-actions{gap:8px;flex-wrap:wrap}
+  .hero-meta{gap:6px;font-size:12px}
+}
+
+/* 沉浸式：首页的 .view 本来就没有顶部内边距（body[data-hero=1]），
+   Hero 天然贴顶，**不要再加负 margin**，否则会把标题顶到导航栏后面。
+   这里只需要把状态栏高度补进 padding，让文字落在导航下方。 */
+.page.bleed > .hero{
+  margin-top:0;
+  padding-top:calc(var(--hdr) + var(--safe-top) + 22px);
+}
