@@ -24,6 +24,17 @@ object HttpMini {
 
     data class Response(val code: Int, val ctype: String, val body: ByteArray)
 
+    /** 直接按绝对地址请求，可带 Referer（媒体代理用） */
+    fun fetch(url: String, referer: String?, userAgent: String?, timeoutMs: Int = 15_000): Response {
+        val u = URI(url)
+        val extra = StringBuilder()
+        if (!referer.isNullOrBlank()) extra.append("Referer: $referer\r\n")
+        if (!userAgent.isNullOrBlank()) extra.append("User-Agent: $userAgent\r\n")
+        return request(u.scheme + "://" + u.host + (if (u.port > 0) ":" + u.port else ""),
+            "GET", u.rawPath ?: "/", u.rawQuery ?: "",
+            emptyMap(), ByteArray(0), timeoutMs, extra.toString())
+    }
+
     fun request(
         base: String,
         method: String,
@@ -32,6 +43,7 @@ object HttpMini {
         headers: Map<String, String>,
         body: ByteArray,
         timeoutMs: Int = 12_000,
+        extraHeaders: String = "",
     ): Response {
         val uri = URI(base)
         val https = uri.scheme.equals("https", true)
@@ -56,6 +68,7 @@ object HttpMini {
         sb.append("\r\n")
         sb.append("Connection: close\r\n")     // 一次一条连接，绝不复用
         sb.append("Accept: */*\r\n")
+        if (extraHeaders.isNotEmpty()) sb.append(extraHeaders)
         headers["cookie"]?.let { sb.append("Cookie: $it\r\n") }
         headers["x-token"]?.let { sb.append("X-Token: $it\r\n") }
         headers["range"]?.let { sb.append("Range: $it\r\n") }
