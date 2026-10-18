@@ -86,6 +86,11 @@ function rememberLine() {
 
 export function playerOpen() { return state !== null; }
 
+// App 壳（手机/电视）本身就是全屏，不需要"全屏"这个动作；只有浏览器才需要
+function inApp() {
+  try { return !!window.ProomNative || !!window.ProomTV; } catch (e) { return false; }
+}
+
 export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false, key = '' } = {}) {
   if (!item || !item.sources || !item.sources.length) {
     toast('没有可播放的线路', 'err');
@@ -777,7 +782,10 @@ function addControls() {
   }
   add('ep-list', `<span class="ap-ctl">${icon('list')}</span>`, '线路与选集（↓）', () => toggleSide(true));
   add('pip', `<span class="ap-ctl">${icon('pip')}</span>`, '画中画', togglePip);
-  add('fullscreen', `<span class="ap-ctl">${icon('expand')}</span>`, '全屏（F）', toggleFullscreen);
+  // App 里已经是全屏了，这个按钮只会让人困惑
+  if (!inApp()) {
+    add('fullscreen', `<span class="ap-ctl">${icon('expand')}</span>`, '全屏（F）', toggleFullscreen);
+  }
 }
 
 // ── 画中画 ────────────────────────────────────────────────
@@ -952,7 +960,7 @@ function wireClickGesture(host) {
       undoClick = null;
       lastClickAt = 0;
       clearTimeout(clickResetTimer);
-      toggleFullscreen();
+      if (!inApp()) toggleFullscreen();
       return;
     }
     const wasPlaying = !v.paused;
