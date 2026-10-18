@@ -1,6 +1,8 @@
 // 接口封装：统一错误处理，页面里只关心数据
 import { getToken, needLogin } from './auth.js';
-import { load as cacheLoad, save as cacheSave, setOffline } from './offline.js';
+import { load as cacheLoad, save as cacheSave, setOffline, indexTitles } from './offline.js';
+
+console.log('api-build 0.9.10');
 
 // 只缓存幂等的 GET；带 token 的接口也缓存，离线时靠它把界面撑起来
 function cacheable(path, method) {
@@ -54,6 +56,9 @@ async function request(path, { method = 'GET', body, signal } = {}) {
   }
   if (cacheable(path, method) && data && typeof data === 'object') {
     cacheSave(path, data);
+    // 顺手把片名收进本地索引：离线时详情页能画出海报和简介
+    if (Array.isArray(data.items)) indexTitles(data.items);
+    if (Array.isArray(data.rails)) data.rails.forEach(r => indexTitles(r && r.items));
   }
   return data;
 }

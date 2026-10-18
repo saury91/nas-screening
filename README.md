@@ -220,6 +220,7 @@ cd android && gradle assembleDebug
 格式与迁移规则见 [`docs/config-schema.md`](docs/config-schema.md)。
 
 > 离线（NAS 关机仍能打开 App / 投屏）的规划见 [`docs/offline-plan.md`](docs/offline-plan.md)。
+> **目标架构（NAS 只做配置分发，App 独立运行、无账户）见 [`docs/standalone-arch.md`](docs/standalone-arch.md)。**
 
 ---
 

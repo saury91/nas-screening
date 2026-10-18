@@ -59,6 +59,26 @@ export function clear() {
   return tx('readwrite', s => s.clear()).catch(() => {});
 }
 
+// ── 影片索引：把看过的片名/海报/年份记下来，离线时详情页至少能画出基本信息 ──
+const TTL_TITLE = 30 * 86400 * 1000;
+
+export function indexTitles(items) {
+  if (!Array.isArray(items)) return;
+  for (const it of items) {
+    if (!it || !it.name) continue;
+    save('title:' + it.name, {
+      name: it.name, year: it.year || '', pic: it.pic || '',
+      genre: it.genre || it.type || '', area: it.area || '',
+      desc: it.desc || '', score: it.score || '',
+    });
+  }
+}
+
+export function getTitle(name) {
+  if (!name) return Promise.resolve(null);
+  return load('title:' + name, TTL_TITLE);
+}
+
 export function isOffline() { return offline; }
 
 export function setOffline(v) {
