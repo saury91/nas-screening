@@ -6,6 +6,7 @@
 """
 import gzip
 import hashlib
+import traceback
 import json
 import mimetypes
 import os
@@ -411,7 +412,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._proxy_stream(u, self.headers.get("Range"),
                                           extra={"Referer": musicbox.REFERER})
             if path.startswith("/api/"):
-                code, body, ctype = self._api_get(path, qs)
+                r = self._api_get(path, qs)
+                # 少数分支（升级包）自己就把响应发出去了，返回 None；
+                # 这里不判空会去解包 None，抛 TypeError，变成 500
+                if r is None:
+                    return
+                code, body, ctype = r
                 if code == "__RANGE__":
                     return self._range_file(body, ctype)
                 return self._send(code, body, ctype)
@@ -424,7 +430,7 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             return
         except Exception as e:
-            log("GET %s 失败：%s" % (path, e))
+            log("GET %s 失败：%s\n%s" % (path, e, traceback.format_exc()))
             return self._send(500, json.dumps({"error": str(e)[:200]},
                                               ensure_ascii=False))
 
@@ -797,7 +803,7 @@ class Handler(BaseHTTPRequestHandler):
             b = self._body()
             return self._api_post(path, b)
         except Exception as e:
-            log("POST %s 失败：%s" % (path, e))
+            log("POST %s 失败：%s\n%s" % (path, e, traceback.format_exc()))
             return self._send(500, json.dumps({"ok": False, "msg": str(e)[:200]},
                                               ensure_ascii=False))
 
