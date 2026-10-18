@@ -651,7 +651,7 @@ async function musicPanel(panel) {
     </div>`;
 
   let chosen = provider;
-  panel.querySelector('#m-prov').addEventListener('click', e => {
+  panel.querySelector('#m-prov')?.addEventListener('click', e => {
     const c = e.target.closest('[data-p]');
     if (!c) return;
     chosen = c.dataset.p;
@@ -760,7 +760,7 @@ async function accountsPanel(panel) {
       } catch (e) { tip.textContent = e.message; }
     };
     panel.querySelector('#pf-add').onclick = add;
-    panel.querySelector('#pf-pin').addEventListener('keydown', e => {
+    panel.querySelector('#pf-pin')?.addEventListener('keydown', e => {
       if (e.key === 'Enter') add();
     });
 

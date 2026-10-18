@@ -40,7 +40,7 @@ export async function render(root, ctx) {
     return;
   }
 
-  root.querySelector('#tabs').addEventListener('click', e => {
+  root.querySelector('#tabs')?.addEventListener('click', e => {
     const b = e.target.closest('[data-tab]');
     if (!b) return;
     st.tab = b.dataset.tab;
