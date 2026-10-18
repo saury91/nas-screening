@@ -145,12 +145,28 @@ P0 已经有了 Android TV 的壳：一个全屏 WebView 装现有前端，播�
 
 最低 Android 5.0（API 21），编译目标 34。
 
-本地构建（需要 JDK 17 + Android SDK 34 + Gradle 8.7）：
+### 签名与内网自升级
+
+APK 用固定密钥签名（`android/keystore/proom.jks`，密码 `proom-release`），
+**签名必须一致才能覆盖安装**，所以这份密钥跟着仓库走，保证谁构建都是同一条升级链。
+
+> 它只保证升级不被"签名不一致"挡住，不提供安全强度：密钥是公开的。
+> 想更稳妥就在 CI/本地用 `PROOM_KEYSTORE`、`PROOM_KEYSTORE_PASS` 换成你自己的。
+
+发布新版本：
 
 ```bash
-cd android
-gradle assembleDebug
-# 产物：app/build/outputs/apk/debug/app-debug.apk
+cd android && gradle assembleRelease        # 产物 5.3MB，比 debug 小
+cd .. && ./tools/publish-apk.sh             # 拷到 data/apps/ 并写版本信息
+```
+
+App 启动时会问一句 `GET /api/app/latest?kind=tv`，比本地 `versionCode` 新就弹窗，
+点「更新」从 NAS 下载并交给系统安装器。电视第一次装需要允许「安装未知应用」。
+
+本地构建（JDK 17 + Android SDK 34 + Gradle 8.7）：
+
+```bash
+cd android && gradle assembleDebug
 ```
 
 推送到 `main` 会自动编译并上传 APK 产物；打 `tv-v*` 标签会自动发 Release。
