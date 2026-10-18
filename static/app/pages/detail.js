@@ -152,6 +152,9 @@ function paint(root, d, ctx) {
   si = start;
   const fav = isFav(d.name);
   root.innerHTML = `<div class="page bleed" style="padding:0">
+    <button class="back-pill" id="btn-back" data-focus aria-label="返回上一页">
+      ${icon('back')}<span>返回</span>
+    </button>
     <section class="detail-hero">
       <div class="hero-bg" style="${d.pic ? `background-image:url('${esc(d.pic)}')` : ''}"></div>
       <div class="hero-veil"></div>
@@ -203,6 +206,15 @@ function paint(root, d, ctx) {
     const open = p.classList.toggle('open');
     toggle.textContent = open ? '收起' : '展开简介';
   };
+
+  // 返回：优先回上一页，直接打开的深链接就回首页
+  const backBtn = root.querySelector('#btn-back');
+  if (backBtn) {
+    backBtn.onclick = () => {
+      if (history.length > 1) history.back();
+      else location.hash = '#/home';
+    };
+  }
 
   root.querySelector('#btn-play').onclick = () => play(ctx);
   root.querySelector('#btn-fav').onclick = async () => {
