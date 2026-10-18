@@ -123,6 +123,33 @@ python3 tools/account.py kick              # 踢掉所有已登录设备
 
 ---
 
+## 电视 / 手机 App（Android）
+
+![电视端](docs/screenshot-tv.png)
+
+P0 已经有了 Android TV 的壳：一个全屏 WebView 装现有前端，播放交给原生 ExoPlayer。
+
+- **侧载安装**：从 CI 产物或 Release 拿 APK，U 盘拷到电视，或用 `adb install`。不上任何应用商店
+- **首次启动**填 NAS 地址（如 `http://192.168.1.10:8899`），之后记住；按遥控器「菜单」键可重设
+- **遥控器**：方向键移动焦点、OK 确认、返回键回上一页，焦点环和电脑端一致
+- **每次冷启动要重输 PIN**：TV 端不持久化会话，切后台回来不用重输
+- **原生播放**：HLS 走 ExoPlayer 硬解，不在 WebView 里软解（老电视软解 4K 会卡死）
+- **内核自检**：WebView 低于 55 直接给出说明页，不会白屏
+
+最低 Android 5.0（API 21），编译目标 34。
+
+本地构建（需要 JDK 17 + Android SDK 34 + Gradle 8.7）：
+
+```bash
+cd android
+gradle assembleDebug
+# 产物：app/build/outputs/apk/debug/app-debug.apk
+```
+
+推送到 `main` 会自动编译并上传 APK 产物；打 `tv-v*` 标签会自动发 Release。
+
+---
+
 ## 配置备份与分享
 
 ![配置备份](docs/screenshot-backup.png)

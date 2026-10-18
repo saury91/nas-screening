@@ -19,7 +19,7 @@
 .detail-hero{position:relative;overflow:hidden;padding:calc(var(--hdr) + 30px) var(--pad) 26px;
   min-height:min(46vh,520px);display:flex;align-items:flex-end;isolation:isolate;
 }
-.detail-hero .hero-bg{inset:-10%;filter:blur(46px) saturate(150%) brightness(.72);
+.detail-hero .hero-bg{top:-10%;right:-10%;bottom:-10%;left:-10%;filter:blur(46px) saturate(150%) brightness(.72);
   /* 让模糊背板在底部自己消失，而不是被 hero 的边界硬切一刀 */
   -webkit-mask-image:linear-gradient(180deg,#000 30%,rgba(0,0,0,.5) 58%,transparent 82%);
   mask-image:linear-gradient(180deg,#000 30%,rgba(0,0,0,.5) 58%,transparent 82%)}
@@ -110,7 +110,7 @@ button.ch-card{width:100%;text-align:left}
 .ch-name{font-size:14px;font-weight:600;margin:0;line-height:1.3;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ch-sub{font-size:11px;color:#8a919e;margin:4px 0 0}
-.live-play{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:.25s;
+.live-play{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;opacity:0;transition:.25s;
   background:rgba(0,0,0,.35)}
 .ch-card:hover .live-play,.ch-card.focused .live-play{opacity:1}
 .ch-sub .st{font-style:normal;margin-left:6px;font-size:10px}
@@ -133,7 +133,7 @@ button.ch-card{width:100%;text-align:left}
 .album-art{position:relative;aspect-ratio:1;border-radius:14px;overflow:hidden;
   background:linear-gradient(140deg,#2a2340,#141219);box-shadow:0 12px 30px rgba(0,0,0,.4);
   transition:transform .3s var(--ease),box-shadow .3s}
-.album-art .ph{position:absolute;inset:0;display:grid;place-items:center;font-size:30px;font-weight:700;
+.album-art .ph{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;font-size:30px;font-weight:700;
   color:rgba(255,255,255,.35)}
 .album:hover .album-art{transform:translateY(-5px);box-shadow:0 22px 44px rgba(0,0,0,.55)}
 .album.focused .album-art{transform:translateY(-5px) scale(1.03);
@@ -159,7 +159,7 @@ button.ch-card{width:100%;text-align:left}
 .album-detail .art{width:clamp(180px,22vw,270px);aspect-ratio:1;border-radius:20px;overflow:hidden;
   box-shadow:0 30px 70px rgba(0,0,0,.6);flex:none;position:relative;
   background:linear-gradient(140deg,#2a2340,#141219)}
-.album-detail .art .ph{position:absolute;inset:0;display:grid;place-items:center;font-size:52px;
+.album-detail .art .ph{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;font-size:52px;
   color:rgba(255,255,255,.3);font-weight:700}
 .album-detail h1{font-size:clamp(26px,3.6vw,44px);margin:8px 0 10px;letter-spacing:-.02em}
 .tracklist{border-top:1px solid var(--line)}
@@ -192,7 +192,7 @@ body.has-mini .toast{bottom:96px}
 .mp-art{width:46px;height:46px;border-radius:10px;overflow:hidden;flex:none;
   background:linear-gradient(140deg,#3a2f56,#16141b);position:relative;cursor:pointer}
 .mp-art img{width:100%;height:100%;object-fit:cover}
-.mp-art .ph{position:absolute;inset:0;display:grid;place-items:center;font-size:16px;
+.mp-art .ph{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;font-size:16px;
   font-weight:700;color:rgba(255,255,255,.4)}
 .mp-info{min-width:0;flex:0 1 200px;cursor:pointer}
 .mp-title{font-size:13px;font-weight:560;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -202,7 +202,7 @@ body.has-mini .toast{bottom:96px}
 .mp-mid{flex:1;min-width:120px;display:flex;flex-direction:column;gap:5px}
 .mp-bar{height:4px;border-radius:3px;background:rgba(255,255,255,.15);
   cursor:pointer;position:relative;touch-action:none}
-.mp-bar::before{content:"";position:absolute;inset:-8px 0}
+.mp-bar::before{content:"";position:absolute;top:-8px;right:0;bottom:-8px;left:0}
 .mp-bar i{display:block;height:100%;background:var(--accent);border-radius:3px;width:0;
   position:relative}
 .mp-bar i::after{content:"";position:absolute;right:-5px;top:50%;width:10px;height:10px;
@@ -221,11 +221,11 @@ body.has-mini .toast{bottom:96px}
 .mp-sep{width:1px;height:20px;background:var(--line);margin:0 6px}
 
 /* ═══════════ 全屏 Now Playing ═══════════ */
-.now-playing{position:fixed;inset:0;z-index:220;background:#07070b;overflow:hidden}
-.now-playing .np-bg{position:absolute;inset:-16%;background-size:cover;
+.now-playing{position:fixed;top:0;right:0;bottom:0;left:0;z-index:220;background:#07070b;overflow:hidden}
+.now-playing .np-bg{position:absolute;top:-16%;right:-16%;bottom:-16%;left:-16%;background-size:cover;
   background-position:center;filter:blur(92px) brightness(.44) saturate(160%);
   transform:scale(1.12);opacity:.9}
-.now-playing::before{content:"";position:absolute;inset:0;z-index:1;
+.now-playing::before{content:"";position:absolute;top:0;right:0;bottom:0;left:0;z-index:1;
   background:radial-gradient(ellipse at 30% 20%,rgba(255,207,122,.06),transparent 55%),
              linear-gradient(180deg,rgba(6,6,10,.35),rgba(6,6,10,.88))}
 .np-wrap{position:relative;z-index:2;height:100%;max-width:1360px;margin:0 auto;
@@ -245,13 +245,13 @@ body.has-mini .toast{bottom:96px}
   background:radial-gradient(circle at 50% 50%,#16161d 26%,#0b0b10 60%,#000 100%);
   box-shadow:0 34px 80px rgba(0,0,0,.72),0 0 0 1px rgba(255,255,255,.07),
              inset 0 0 40px rgba(0,0,0,.9)}
-.np-disc::before{content:"";position:absolute;inset:6%;border-radius:50%;
+.np-disc::before{content:"";position:absolute;top:6%;right:6%;bottom:6%;left:6%;border-radius:50%;
   background:repeating-radial-gradient(circle at center,
     rgba(255,255,255,.055) 0 1px,transparent 1px 5px)}
-.np-disc::after{content:"";position:absolute;inset:0;border-radius:50%;
+.np-disc::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;border-radius:50%;
   background:conic-gradient(from 0deg,rgba(255,255,255,.09),transparent 22%,
     transparent 55%,rgba(255,255,255,.05) 70%,transparent 88%)}
-.np-disc-art{position:absolute;inset:15%;border-radius:50%;overflow:hidden;z-index:2;
+.np-disc-art{position:absolute;top:15%;right:15%;bottom:15%;left:15%;border-radius:50%;overflow:hidden;z-index:2;
   box-shadow:0 0 0 1px rgba(255,255,255,.14),0 12px 30px rgba(0,0,0,.6)}
 .np-disc-art img,.np-disc-art .ph{width:100%;height:100%;object-fit:cover;
   display:grid;place-items:center;font-size:clamp(28px,4vw,44px);font-weight:700;
@@ -286,7 +286,7 @@ body.has-mini .toast{bottom:96px}
 .np-foot{margin-top:auto;padding-top:clamp(10px,2vh,22px)}
 .np-progress{height:5px;border-radius:3px;background:rgba(255,255,255,.15);
   cursor:pointer;position:relative;touch-action:none}
-.np-progress::before{content:"";position:absolute;inset:-9px 0}
+.np-progress::before{content:"";position:absolute;top:-9px;right:0;bottom:-9px;left:0}
 .np-progress i{display:block;height:100%;border-radius:3px;background:var(--accent);
   width:0;position:relative}
 .np-progress i::after{content:"";position:absolute;right:-6px;top:50%;width:12px;height:12px;
@@ -728,7 +728,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radiu
 /* 迷你条：整条可点开播放页，封面上给一个展开角标（悬停/聚焦时出现） */
 .miniplayer{cursor:pointer}
 .mp-art{position:relative}
-.mp-expand{position:absolute;inset:0;display:grid;place-items:center;border-radius:10px;
+.mp-expand{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;border-radius:10px;
   background:rgba(6,7,11,.55);color:#fff;opacity:0;transition:opacity .2s var(--ease)}
 .mp-expand svg{width:16px;height:16px}
 .miniplayer:hover .mp-expand,.mp-art.focused .mp-expand{opacity:1}
@@ -790,7 +790,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radiu
 .np-fx{left:-44px;width:calc(100% + 88px)}
 
 /* ═══════════ 登录门 ═══════════ */
-.auth-gate{position:fixed;inset:0;z-index:400;display:grid;place-items:center;padding:24px;
+.auth-gate{position:fixed;top:0;right:0;bottom:0;left:0;z-index:400;display:grid;place-items:center;padding:24px;
   background:rgba(6,7,11,.88);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
 .auth-gate[hidden]{display:none}
 body.gated{overflow:hidden}
