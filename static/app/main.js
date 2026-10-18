@@ -65,7 +65,12 @@ function resolve(route) {
   return name ? { name, module: ROUTES[name] } : { name: 'home', module: home };
 }
 
+let lastRoute = null;
+let freshTimer = null;
+let lastFreshAt = 0;
+
 async function renderPage(route) {
+  lastRoute = route;
   const token = ++rendering;
   const { name, module } = resolve(route);
   const routeKey = route.raw || route.path;
@@ -198,6 +203,18 @@ window.addEventListener('unhandledrejection', e => {
 async function boot() {
   // 在线时同步一次配置包（片源清单），离线才有"自己问源站"的依据
   import('./core/aggregate.js').then(m => m.syncBundle()).catch(() => {});
+
+  // 后台拿到新数据后，安静地把当前页重画一次（播放中不打扰）
+  window.addEventListener('app:fresh', () => {
+    if (!lastRoute) return;
+    if (document.querySelector('.playerlayer')) return;      // 正在播，别动
+    if (Date.now() - lastFreshAt < 8000) return;               // 8 秒内只刷一次
+    clearTimeout(freshTimer);
+    freshTimer = setTimeout(() => {
+      lastFreshAt = Date.now();
+      renderPage(lastRoute);
+    }, 500);
+  });
 
   // 不再提示"离线模式"：App 本来就在本地跑，NAS 只是用来更新资源。
   // 连不上就一直用本地缓存，安静地继续即可。

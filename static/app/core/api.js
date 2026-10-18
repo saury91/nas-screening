@@ -26,11 +26,32 @@ async function tryAggregate(path) {
   return null;
 }
 
-console.log('api-build 0.9.10');
 
 // 只缓存幂等的 GET；带 token 的接口也缓存，离线时靠它把界面撑起来
 function cacheable(path, method) {
   return method === 'GET' && !path.startsWith('/api/proxy');
+}
+
+// 后台刷新：拿到新数据就更新缓存，并通知页面重绘一次
+const refreshing = new Set();
+async function revalidate(path, init) {
+  if (refreshing.has(path)) return;
+  refreshing.add(path);
+  try {
+    const res = await fetch(path, init);
+    if (!res.ok) return;
+    const ct = res.headers.get('Content-Type') || '';
+    const data = ct.includes('json') ? await res.json() : await res.text();
+    if (!data || typeof data !== 'object') return;
+    const before = await cacheLoad(path);
+    const next = JSON.stringify(data);
+    const same = before && JSON.stringify(before) === next;
+    cacheSave(path, data);
+    if (Array.isArray(data.items)) indexTitles(data.items);
+    // 数据真的变了才通知页面重绘，否则会白白跳一下滚动位置
+    if (!same) window.dispatchEvent(new CustomEvent('app:fresh', { detail: { path } }));
+  } catch (e) { /* 拉不到就算了，缓存继续用 */ }
+  finally { refreshing.delete(path); setTimeout(() => refreshing.delete(path), 1000); }
 }
 
 async function request(path, { method = 'GET', body, signal } = {}) {
@@ -41,6 +62,16 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
+
+  // 先用缓存把界面画出来，网络在后台跑 —— 启动不再等任何请求
+  if (cacheable(path, method)) {
+    const cached = await cacheLoad(path);
+    if (cached) {
+      revalidate(path, init);
+      return cached;
+    }
+  }
+
   let res;
   try {
     res = await fetch(path, init);
