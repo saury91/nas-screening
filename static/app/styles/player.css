@@ -246,3 +246,11 @@
 /* 兜底：视频元素与容器都不允许出现白底（某些电视 WebView 会把空的 <video> 画成白色） */
 .pl-stage video{background:#07080b!important}
 .pl-stage .art-video-player{background:#07080b!important}
+
+/* 电视端：video 在出画之前不显示。部分 WebView（如创维 8R713）会把
+   还没拿到画面的 <video> 画成「灰底 + 大播放键」的占位图，盖住模糊海报。 */
+.pl-stage video{opacity:0;transition:opacity .25s var(--ease)}
+.pl-stage.playing video{opacity:1}
+/* 模糊海报压在 video 之上、控制条之下 */
+.pl-poster{z-index:2;pointer-events:none}
+#art-host{position:relative;z-index:1}

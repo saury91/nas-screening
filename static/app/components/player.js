@@ -148,6 +148,24 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
   bindUI();
   // 手机端：进播放器就横屏全屏（电视本来就是横屏，浏览器没有这个桥）
   try { window.ProomNative?.setLandscape?.(true); } catch (e) {}
+  pingChrome();
+  setTimeout(() => {
+    if (!state) return;
+    if ($('#pl-side')?.classList.contains('open')) return;
+    $('#pl-top')?.classList.add('hide');
+  }, 2600);
+  // 返回键：播放器开着就关播放器，别退到上一个页面
+  window.__proomMenu = () => {
+    if (!state) return false;
+    toggleSide(!$('#pl-side').classList.contains('open'));
+    pingChrome();
+    return true;
+  };
+  window.__proomBack = () => {
+    if (!state) return false;
+    closePlayer();
+    return true;
+  };
   const castBtn = layer().querySelector('#pl-cast');
   if (castBtn) {
     castBtn.onclick = () => {
@@ -216,7 +234,7 @@ function sideHTML() {
       <div class="line-chips">${it.sources.map((s, i) => `
         <button class="line-chip ${i === state.si ? 'on' : ''}" data-si="${i}" data-focus
           title="${esc(s.remarks || '')}">
-          <b>${esc(s.site)}</b>${s.q ? `<u>${esc(s.q)}</u>` : ''}<i>${s.count} 集</i>
+          <b>${esc(s.site)}</b>${s.q ? `<u>${esc(s.q)}</u>` : ''}<i>${s.count || (s.eps ? s.eps.length : '')} 集</i>
         </button>`).join('')}</div>
     </div>
     ${src.eps.length > 1 ? `<div class="blk">
@@ -260,6 +278,8 @@ function onEscape(e) {
 
 function onKeys(e) {
   if (!state) return;
+  // 电视遥控器没有 mousemove：任何一次按键都当成"用户还在操作"
+  pingChrome();
   if (e.key === 'Escape') {
     e.stopPropagation();
     if (fsElement()) toggleFullscreen();
@@ -269,7 +289,9 @@ function onKeys(e) {
   const tag = document.activeElement.tagName;
   if (/INPUT|TEXTAREA/.test(tag)) return;
 
-  if (e.key === ' ') { e.preventDefault(); art && art.toggle(); }
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); art && art.toggle(); }
+  // 方向键上：把顶部信息栏叫回来
+  if (e.key === 'ArrowUp') { e.preventDefault(); }
   if (e.key === 'ArrowLeft' && art) { e.preventDefault(); art.currentTime = Math.max(0, art.currentTime - 10); }
   if (e.key === 'ArrowRight' && art) { e.preventDefault(); art.currentTime = art.currentTime + 10; }
   if (e.key.toLowerCase() === 'f') { e.preventDefault(); toggleFullscreen(); }
@@ -566,7 +588,8 @@ function mountArt(url, position) {
     endSwitch();
     settleBuffer();
     hideCenter();
-    // 画面出来了就把背后的模糊海报收掉
+    // 画面出来了才让 video 显形，并把背后的模糊海报收掉
+    $('.pl-stage')?.classList.add('playing');
     const poster = $('#pl-poster');
     if (poster) poster.classList.add('gone');
   });
