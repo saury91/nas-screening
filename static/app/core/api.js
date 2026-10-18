@@ -20,7 +20,7 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     res = await fetch(path, init);
   } catch (e) {
     // 连不上 NAS：交给上层显示「离线模式」横幅，同时让页面用缓存数据继续渲染
-    window.dispatchEvent(new CustomEvent('app:offline', { detail: { path } }));
+    setOffline(true);
     if (cacheable(path, method)) {
       const cached = await cacheLoad(path);
       if (cached) {
@@ -30,7 +30,7 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     }
     throw new Error('连不上 NAS，正在使用离线数据');
   }
-  window.dispatchEvent(new CustomEvent('app:online'));
+  setOffline(false);
   let data = null;
   const ct = res.headers.get('Content-Type') || '';
   try {

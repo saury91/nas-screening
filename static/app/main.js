@@ -1,5 +1,5 @@
 // 应用入口：装配路由、导航、焦点系统，负责页面切换
-import { $ } from './core/dom.js';
+import { $, toast } from './core/dom.js';
 import { api } from './core/api.js';
 import { go, onRoute, parseRoute, startRouter } from './core/router.js';
 import { initFocus, clearFocus, focusFirst } from './core/focus.js';
@@ -7,6 +7,7 @@ import { syncFavs, store } from './core/store.js';
 import { initNav, markActive, openSearch, closeSearch, searchVisible } from './components/nav.js';
 import { initMusicPlayer } from './components/musicplayer.js';
 import { startReceiver } from './core/cast.js';
+
 import { fetchState, showGate, hideGate, onAuthLost, currentUser, autoTvLogin } from './core/auth.js';
 
 import * as home from './pages/home.js';
@@ -183,24 +184,16 @@ function showOfflineGate() {
 }
 
 async function boot() {
-  // 离线横幅：NAS 连不上时页面仍然可用（本地前端 + 缓存数据）
-  let offlineBar = null;
+  // 离线提示：只弹一条 toast，几秒后自动消失。
+  // 之前做成顶部横幅，正好压住导航条，想点"电影/剧集"都点不到。
+  let lastOfflineToast = 0;
   const showOffline = () => {
-    if (offlineBar) return;
-    offlineBar = document.createElement('div');
-    offlineBar.className = 'offline-bar';
-    offlineBar.innerHTML = '<b>离线模式</b><span>连不上 NAS，显示的是上次缓存的内容</span>';
-    document.body.appendChild(offlineBar);
-    document.body.classList.add('is-offline');
-  };
-  const hideOffline = () => {
-    if (!offlineBar) return;
-    offlineBar.remove();
-    offlineBar = null;
-    document.body.classList.remove('is-offline');
+    const now = Date.now();
+    if (now - lastOfflineToast < 20000) return;   // 20 秒内不重复弹
+    lastOfflineToast = now;
+    toast('离线模式 · 显示缓存内容');
   };
   window.addEventListener('app:offline', showOffline);
-  window.addEventListener('app:online', hideOffline);
 
   // 内网也要个门：没登录就不装配页面，避免满屏 401
   try {
