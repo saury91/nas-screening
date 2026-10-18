@@ -163,6 +163,7 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
   };
   window.__proomBack = () => {
     if (!state) return false;
+    if ($('#pl-side')?.classList.contains('open')) { toggleSide(false); return true; }
     closePlayer();
     return true;
   };
@@ -261,6 +262,10 @@ function bindUI() {
   };
 
   document.addEventListener('keydown', onKeys, true);
+  document.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') stopSeekHold();
+  }, true);
+  document.addEventListener('blur', () => stopSeekHold());
   document.addEventListener('mousemove', pingChrome);
   document.addEventListener('app:escape', onEscape);
 }
@@ -290,16 +295,88 @@ function onKeys(e) {
   if (/INPUT|TEXTAREA/.test(tag)) return;
 
   if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); art && art.toggle(); }
-  // 方向键上：把顶部信息栏叫回来
-  if (e.key === 'ArrowUp') { e.preventDefault(); }
-  if (e.key === 'ArrowLeft' && art) { e.preventDefault(); art.currentTime = Math.max(0, art.currentTime - 10); }
-  if (e.key === 'ArrowRight' && art) { e.preventDefault(); art.currentTime = art.currentTime + 10; }
   if (e.key.toLowerCase() === 'f') { e.preventDefault(); toggleFullscreen(); }
   if (e.key === 'PageUp') { e.preventDefault(); step(-1); }
   if (e.key === 'PageDown') { e.preventDefault(); step(1); }
-  if (e.key === 'ArrowDown') {
-    if (!$('#pl-side').classList.contains('open')) { e.preventDefault(); toggleSide(true); }
+
+  // 侧栏打开时方向键归焦点系统：想选线路时不该在拖进度
+  const panelOpen = $('#pl-side')?.classList.contains('open');
+  if (panelOpen && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+
+  if (e.key === 'ArrowUp') { e.preventDefault(); }                    // 叫出控制层
+  if (e.key === 'ArrowDown') { e.preventDefault(); toggleSide(true); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); startSeekHold(-1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); startSeekHold(1); }
+}
+
+// ── 快进/快退（遥控器长按左右键）────────────────────────────
+const SEEK_STEP = 10;        // 单步 10 秒
+const SEEK_HOLD_DELAY = 420; // 按住多久开始连发
+const SEEK_REPEAT = 200;     // 连发间隔
+
+let seekTimer = null, seekRepeat = null, seekHide = null, seekAcc = 0;
+
+function seekBy(delta) {
+  if (!art) return;
+  const dur = Number.isFinite(art.duration) ? art.duration : 0;
+  let t = (art.currentTime || 0) + delta;
+  t = Math.max(0, dur ? Math.min(dur - 0.4, t) : t);
+  art.currentTime = t;
+  seekAcc += delta;
+  showSeekOsd(seekAcc, t);
+  pingChrome();
+}
+
+let lastSeekAt = 0;
+function startSeekHold(dir) {
+  if (!art) return;
+  // 连续按（遥控器连发）算同一次操作，累计显示「+30 秒」而不是每次重置
+  const now = Date.now();
+  if (now - lastSeekAt > 420) seekAcc = 0;
+  lastSeekAt = now;
+  seekBy(dir * SEEK_STEP);
+  clearTimeout(seekTimer);
+  clearInterval(seekRepeat);
+  seekTimer = setTimeout(() => {
+    seekRepeat = setInterval(() => seekBy(dir * SEEK_STEP), SEEK_REPEAT);
+  }, SEEK_HOLD_DELAY);
+}
+
+function stopSeekHold() {
+  clearTimeout(seekTimer);
+  clearInterval(seekRepeat);
+  seekTimer = seekRepeat = null;
+  clearTimeout(seekHide);
+  seekHide = setTimeout(() => {
+    const el = $('.pl-seek');
+    if (el) el.classList.remove('on');
+  }, 1600);
+}
+
+function fmtClock(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const mm = h ? String(m % 60).padStart(2, '0') : String(m);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+function showSeekOsd(acc, target) {
+  const host = $('.pl-stage');
+  if (!host) return;
+  let el = host.querySelector('.pl-seek');
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'pl-seek';
+    host.appendChild(el);
   }
+  const back = acc < 0;
+  el.innerHTML = `<b>${back ? '◀◀' : '▶▶'} ${Math.abs(acc)} 秒</b>`
+    + `<span>${fmtClock(art ? art.currentTime : 0)}</span>`;
+  el.classList.add('on', back ? 'back' : 'fwd');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('on'), 1600);
 }
 
 function pingChrome() {

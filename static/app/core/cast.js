@@ -9,6 +9,12 @@ const isTv = () => /ProomTV\//.test(navigator.userAgent) ||
 const isPhone = () => /Proom(Phone|Mobile)\//.test(navigator.userAgent);
 
 function deviceId() {
+  // 原生给了稳定 id 就用它：电视端每次冷启动都会清 WebView 存储，
+  // 靠 localStorage 生成的话投屏目标会变成一个"新设备"
+  try {
+    const nid = window.ProomNative?.deviceId?.();
+    if (nid) return nid;
+  } catch (e) { /* 浏览器里没有这个桥 */ }
   try {
     let id = localStorage.getItem(ID_KEY);
     if (!id) {

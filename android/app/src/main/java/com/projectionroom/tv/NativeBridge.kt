@@ -22,6 +22,10 @@ class NativeBridge(private val act: MainActivity) {
     @JavascriptInterface
     fun server(): String = Prefs.server(act)
 
+    /** 稳定的设备 id（前端拿它做投屏标识） */
+    @JavascriptInterface
+    fun deviceId(): String = Prefs.deviceId(act)
+
     @JavascriptInterface
     fun play(url: String, title: String) {
         main.post { act.playNative(url, title) }

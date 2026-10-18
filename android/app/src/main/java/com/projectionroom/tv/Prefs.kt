@@ -11,6 +11,17 @@ object Prefs {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getString(KEY_SERVER, "")?.trim().orEmpty()
 
+    /** 设备 id：存在原生侧，冷启动清 WebView 存储也不会变（投屏靠它认设备） */
+    fun deviceId(ctx: Context): String {
+        val sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        var id = sp.getString("device_id", "") ?: ""
+        if (id.isBlank()) {
+            id = "d" + java.util.UUID.randomUUID().toString().replace("-", "").take(9)
+            sp.edit().putString("device_id", id).apply()
+        }
+        return id
+    }
+
     fun setServer(ctx: Context, url: String) {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .edit().putString(KEY_SERVER, url.trim().trimEnd('/')).apply()
