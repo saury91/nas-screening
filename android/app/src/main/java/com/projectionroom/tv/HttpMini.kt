@@ -25,14 +25,15 @@ object HttpMini {
     data class Response(val code: Int, val ctype: String, val body: ByteArray)
 
     /** 直接按绝对地址请求，可带 Referer（媒体代理用） */
-    fun fetch(url: String, referer: String?, userAgent: String?, timeoutMs: Int = 15_000): Response {
+    fun fetch(url: String, referer: String?, userAgent: String?,
+              timeoutMs: Int = 15_000, maxBytes: Int = 8 * 1024 * 1024): Response {
         val u = URI(url)
         val extra = StringBuilder()
         if (!referer.isNullOrBlank()) extra.append("Referer: $referer\r\n")
         if (!userAgent.isNullOrBlank()) extra.append("User-Agent: $userAgent\r\n")
         return request(u.scheme + "://" + u.host + (if (u.port > 0) ":" + u.port else ""),
             "GET", u.rawPath ?: "/", u.rawQuery ?: "",
-            emptyMap(), ByteArray(0), timeoutMs, extra.toString())
+            emptyMap(), ByteArray(0), timeoutMs, extra.toString(), maxBytes)
     }
 
     fun request(
@@ -44,6 +45,7 @@ object HttpMini {
         body: ByteArray,
         timeoutMs: Int = 12_000,
         extraHeaders: String = "",
+        maxBytes: Int = 8 * 1024 * 1024,
     ): Response {
         val uri = URI(base)
         val https = uri.scheme.equals("https", true)
@@ -105,10 +107,11 @@ object HttpMini {
                 }
             }
 
+            // 上限保护：源站返回超大内容时别把手机内存吃光
             val data = when {
-                chunked -> readChunked(input)
-                contentLength >= 0 -> readN(input, contentLength.toInt())
-                else -> input.readBytes()
+                chunked -> readChunked(input).let { if (it.size > maxBytes) it.copyOf(maxBytes) else it }
+                contentLength >= 0 -> readN(input, minOf(contentLength.toInt(), maxBytes))
+                else -> readN(input, maxBytes)
             }
             return Response(code, ctype, data)
         }
