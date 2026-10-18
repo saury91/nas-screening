@@ -124,9 +124,8 @@ class LocalServer(
                 } else ByteArray(0)
 
                 when {
-                    // 媒体代理：NAS 不可达时由手机自己拉流并补 Referer
-                    path == "/api/proxy" && (!onLan() || Prefs.server(ctx).isBlank()) ->
-                        localMedia(sock, query)
+                    // 没配置 NAS 时，媒体只能本地代拉
+                    path == "/api/proxy" && Prefs.server(ctx).isBlank() -> localMedia(sock, query)
                     path == "/__local/status" -> json(sock, statusJson())
                     path == "/__local/log" -> json(sock,
                         recent.joinToString(",", "[", "]") { "\"$it\"" })
@@ -203,24 +202,8 @@ class LocalServer(
 
     // ── 反代到 NAS ────────────────────────────────────────────
 
-    /** 当前是否在局域网（Wi-Fi / 有线）。NAS 是私网地址，蜂窝网络下不可能连上 */
-    private fun onLan(): Boolean {
-        return try {
-            val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
-                as android.net.ConnectivityManager
-            val n = cm.activeNetwork ?: return false
-            val caps = cm.getNetworkCapabilities(n) ?: return false
-            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
-                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
-        } catch (e: Exception) { true }
-    }
-
-    private fun isPrivateHost(url: String): Boolean {
-        val host = try { java.net.URI(url).host ?: return false } catch (e: Exception) { return false }
-        return host.startsWith("192.168.") || host.startsWith("10.") ||
-            Regex("^172\\.(1[6-9]|2\\d|3[01])\\.").containsMatchIn(host) ||
-            host == "localhost" || host.startsWith("127.")
-    }
+    /** 断电熔断：刚连不上 NAS 的 5 秒内直接快速失败，避免每个请求都等超时 */
+    @Volatile private var nasDownUntil = 0L
 
     private fun proxy(
         sock: Socket,
@@ -235,17 +218,26 @@ class LocalServer(
             json(sock, """{"ok":false,"offline":true,"msg":"还没设置 NAS 地址"}""", 503)
             return
         }
-        // 蜂窝网络 + 私网 NAS = 一定连不上，立刻回 503，让前端马上走离线分支
-        if (isPrivateHost(base) && !onLan()) {
-            json(sock, """{"ok":false,"offline":true,"msg":"当前不在局域网"}""", 503)
+        // 熔断期内不再尝试（刚失败过），直接走离线分支，避免每个请求都等超时
+        if (System.currentTimeMillis() < nasDownUntil) {
+            if (path == "/api/proxy") localMedia(sock, query)
+            else json(sock, """{"ok":false,"offline":true,"msg":"连不上 NAS"}""", 503)
             return
         }
+        // 搜索要同时问十几个源，12 秒不够；给它单独放宽
+        val tmo = if (path.startsWith("/api/search")) 45_000 else 12_000
         val resp = try {
-            HttpMini.request(base, method, path, query, headers, body)
+            HttpMini.request(base, method, path, query, headers, body, tmo)
         } catch (e: Exception) {
-            json(sock, """{"ok":false,"offline":true,"msg":"连不上 NAS"}""", 503)
+            nasDownUntil = System.currentTimeMillis() + 5000
+            // 媒体请求：NAS 不通就由手机自己拉（补 Referer / 重写 m3u8）
+            if (path == "/api/proxy") localMedia(sock, query)
+            else json(sock, """{"ok":false,"offline":true,"msg":"连不上 NAS"}""", 503)
             return
         }
+        nasDownUntil = 0L
+        // NAS 对片源报错时也让本地代理再试一次（Referer 不同，有时就能过）
+        if (path == "/api/proxy" && resp.code >= 400) { localMedia(sock, query); return }
 
         val out = sock.getOutputStream()
         val ctype = if (resp.ctype.isBlank() || resp.code >= 400) {
