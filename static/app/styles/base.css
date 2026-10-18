@@ -459,3 +459,15 @@ a.card:focus-visible{outline-offset:4px;border-radius:var(--r-md)}
   margin-top:calc(-1 * (var(--hdr) + var(--safe-top) + 16px));
   padding-top:calc(var(--hdr) + var(--safe-top) + 22px);
 }
+
+/* 离线提示条：NAS 连不上时贴在顶部，但不挡住导航 */
+.offline-bar{
+  position:fixed;left:50%;transform:translateX(-50%);
+  top:calc(var(--safe-top) + 8px);z-index:200;
+  display:flex;align-items:center;gap:10px;height:34px;padding:0 16px;
+  border-radius:999px;background:rgba(70,40,14,.94);border:1px solid rgba(255,207,122,.35);
+  color:#ffd79a;font-size:12.5px;white-space:nowrap;
+  box-shadow:0 10px 30px rgba(0,0,0,.45);animation:offlineIn .3s var(--ease) both}
+.offline-bar b{font-weight:650;color:#ffcf7a}
+.offline-bar span{color:rgba(255,215,154,.72)}
+@keyframes offlineIn{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1;transform:translate(-50%,0)}}

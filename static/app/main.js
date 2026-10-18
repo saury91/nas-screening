@@ -164,10 +164,30 @@ window.addEventListener('player:closed', () => {
   }
 });
 
+/** NAS 连不上：页面本身是本地来的，所以这里只说明情况并给重试 */
+function showOfflineGate() {
+  const box = document.querySelector('#auth-gate');
+  if (!box) return;
+  box.hidden = false;
+  document.body.classList.add('gated');
+  box.innerHTML = `<div class="gate-card gate-solo">
+    <div class="gate-brand">
+      <div class="gate-logo">${'▶'}</div>
+      <div>
+        <h2>连不上 NAS</h2>
+        <p class="hint">放映室的服务没有响应。检查 NAS 是否开机、网络是否正常。</p>
+      </div>
+    </div>
+    <button class="btn primary" style="margin-top:18px" onclick="location.reload()">重新连接</button>
+  </div>`;
+}
+
 async function boot() {
   // 内网也要个门：没登录就不装配页面，避免满屏 401
   try {
     const st = await fetchState();
+    // 本地服务告诉我们 NAS 不可达：给一个明确的离线页，别显示成"没初始化"
+    if (st && st.offline) { showOfflineGate(); return; }
     if (!st.initialized || !st.me) {
       // 电视端：先用固定账户自动登录，省得每次开机都要按遥控器输 PIN
       const isTv = /ProomTV\//.test(navigator.userAgent) ||
@@ -181,7 +201,7 @@ async function boot() {
     }
     hideGate();
   } catch (e) {
-    showGate();
+    showOfflineGate();
     return;
   }
   onAuthLost(() => showGate());
@@ -189,6 +209,25 @@ async function boot() {
   // 本地有 token 但 Cookie 可能丢了（WebView 重启/清缓存）：
   // 让服务端补发一次，视频分片和封面图才带得上认证
   api.post('/api/auth/touch', {}).catch(() => {});
+  // 离线横幅：NAS 连不上时页面仍然可用（本地前端 + 缓存数据）
+  let offlineBar = null;
+  const showOffline = () => {
+    if (offlineBar) return;
+    offlineBar = document.createElement('div');
+    offlineBar.className = 'offline-bar';
+    offlineBar.innerHTML = '<b>离线模式</b><span>连不上 NAS，显示的是上次缓存的内容</span>';
+    document.body.appendChild(offlineBar);
+    document.body.classList.add('is-offline');
+  };
+  const hideOffline = () => {
+    if (!offlineBar) return;
+    offlineBar.remove();
+    offlineBar = null;
+    document.body.classList.remove('is-offline');
+  };
+  window.addEventListener('app:offline', showOffline);
+  window.addEventListener('app:online', hideOffline);
+
   // 遥控器菜单键：播放器开着就切「选集/线路」面板，否则打开地址设置
   window.addEventListener('app:menu', () => {
     if (window.__proomMenu && window.__proomMenu()) return;

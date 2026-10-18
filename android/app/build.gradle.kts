@@ -12,8 +12,8 @@ android {
         // 老电视普遍是 5.x / 6.x，能装就先让它装
         minSdk = 21
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.4.3"
+        versionCode = 25
+        versionName = "0.5.15"
     }
 
     buildFeatures {
@@ -21,6 +21,7 @@ android {
     }
 
     // 一套代码出两个包：电视端和手机端不再靠运行时猜，行为在编译期就定死
+    // 前端打进 APK：NAS 关机时 App 还能打开界面（本地服务从 assets 起）
     flavorDimensions += "device"
     productFlavors {
         create("tv") {
@@ -106,3 +107,10 @@ dependencies {
     // 生成配对二维码（纯 Java，不依赖 Android 框架）
     implementation("com.google.zxing:core:3.5.3")
 }
+
+// 把仓库根目录的 static/ 同步进 assets/www（构建产物，不要提交）
+val copyWebAssets by tasks.registering(Copy::class) {
+    from(rootProject.file("../static"))
+    into(layout.projectDirectory.dir("src/main/assets/www"))
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(copyWebAssets) }
