@@ -15,7 +15,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from .cache import cache_peek
-from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, SLUG_CAT, STATIC)
+from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, SLUG_CAT, STATIC)
 from .db import (dbrun, note_search, pref_json, source_get, sources_list,
                  toggle_fav, touch_history)
 from .log import log
@@ -36,6 +36,9 @@ _ADMIN_PREFIX = (
     "/api/music/config", "/api/music/test",
     "/api/add", "/api/torrent", "/api/tasks",
 )
+
+# 内网升级包目录：data/apps/tv.apk + tv.json
+APPS_DIR = os.path.join(os.path.dirname(DB_PATH), "apps")
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -363,7 +366,9 @@ class Handler(BaseHTTPRequestHandler):
         path = p.path
         qs = {k: v[0] for k, v in urllib.parse.parse_qs(p.query).items()}
         try:
-            if path.startswith("/api/") and not path.startswith("/api/auth/"):
+            if (path.startswith("/api/")
+                    and not path.startswith("/api/auth/")
+                    and not path.startswith("/api/app/")):
                 if not self.me():
                     return self._deny(401, "auth", "需要登录")
                 if path.startswith(_ADMIN_PREFIX) and not self._is_admin():
@@ -419,6 +424,23 @@ class Handler(BaseHTTPRequestHandler):
                                               ensure_ascii=False))
 
     def _api_get(self, path, qs):
+        if path == "/api/app/latest":
+            kind = (qs.get("kind") or "tv").replace("/", "")
+            meta = os.path.join(APPS_DIR, kind + ".json")
+            if not os.path.exists(meta):
+                return _err("NAS 上还没有发布 %s 端的安装包" % kind, 404)
+            return self._send(200, open(meta, "rb").read(),
+                              "application/json; charset=utf-8")
+        if path == "/api/app/download":
+            kind = (qs.get("kind") or "tv").replace("/", "")
+            apk = os.path.join(APPS_DIR, kind + ".apk")
+            if not os.path.exists(apk):
+                return _err("NAS 上还没有发布 %s 端的安装包" % kind, 404)
+            with open(apk, "rb") as f:
+                data = f.read()
+            return self._send(200, data, "application/vnd.android.package-archive",
+                              extra=[("Content-Disposition",
+                                      'attachment; filename="projection-room-%s.apk"' % kind)])
         if path == "/api/auth/state":
             return _json(auth.state(self.me()))
         if path == "/api/profiles":

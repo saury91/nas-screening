@@ -16,6 +16,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.WebViewCompat
 
@@ -68,6 +70,44 @@ class MainActivity : AppCompatActivity() {
 
         setupWebView()
         loadHome()
+        checkUpdate()
+    }
+
+    /** 内网自升级：后台问一句 NAS，有新版就弹窗（遥控器可直接操作） */
+    private fun checkUpdate() {
+        Thread({
+            val info = Updater.check(this) ?: return@Thread
+            runOnUiThread { askUpdate(info) }
+        }, "update-check").start()
+    }
+
+    private fun askUpdate(info: Updater.Info) {
+        if (isFinishing) return
+        AlertDialog.Builder(this)
+            .setTitle("发现新版本 ${info.name}")
+            .setMessage(info.notes.ifBlank { "更新到 ${info.name}？" })
+            .setPositiveButton("更新") { _, _ -> doUpdate(info) }
+            .setNegativeButton("以后再说", null)
+            .show()
+    }
+
+    private fun doUpdate(info: Updater.Info) {
+        Toast.makeText(this, "正在下载 ${info.name}…", Toast.LENGTH_SHORT).show()
+        Thread({
+            try {
+                val apk = Updater.download(this, info)
+                runOnUiThread {
+                    if (!Updater.install(this, apk)) {
+                        Toast.makeText(this, "请在系统设置里允许安装未知应用后重试",
+                            Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "下载失败：${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }, "update-download").start()
     }
 
     private fun loadHome() {
