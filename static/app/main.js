@@ -199,16 +199,8 @@ async function boot() {
   // 在线时同步一次配置包（片源清单），离线才有"自己问源站"的依据
   import('./core/aggregate.js').then(m => m.syncBundle()).catch(() => {});
 
-  // 离线提示：只弹一条 toast，几秒后自动消失。
-  // 之前做成顶部横幅，正好压住导航条，想点"电影/剧集"都点不到。
-  let lastOfflineToast = 0;
-  const showOffline = () => {
-    const now = Date.now();
-    if (now - lastOfflineToast < 20000) return;   // 20 秒内不重复弹
-    lastOfflineToast = now;
-    toast('离线模式 · 显示缓存内容');
-  };
-  window.addEventListener('app:offline', showOffline);
+  // 不再提示"离线模式"：App 本来就在本地跑，NAS 只是用来更新资源。
+  // 连不上就一直用本地缓存，安静地继续即可。
 
   // 内网也要个门：没登录就不装配页面，避免满屏 401
   try {
@@ -218,8 +210,7 @@ async function boot() {
     if (st && st.offline) {
       if (st.me) {
         hideGate();
-        showOffline();
-        // 离线时别恢复到上次的详情页——那页的数据多半没缓存，会显示"没找到"
+        // 别恢复到上次的详情页——那页的数据多半没缓存，会显示"没找到"
         if (location.hash && !location.hash.startsWith('#/home')) location.hash = '#/home';
       } else {
         showOfflineGate();
