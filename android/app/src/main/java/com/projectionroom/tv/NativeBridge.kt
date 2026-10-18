@@ -22,6 +22,13 @@ class NativeBridge(private val act: MainActivity) {
     @JavascriptInterface
     fun server(): String = Prefs.server(act)
 
+    /** 登录态：存在原生侧，换页面来源（NAS → 本地服务）也不会掉登录 */
+    @JavascriptInterface
+    fun getToken(): String = Prefs.token(act)
+
+    @JavascriptInterface
+    fun setToken(t: String) = Prefs.setToken(act, t)
+
     /** 稳定的设备 id（前端拿它做投屏标识） */
     @JavascriptInterface
     fun deviceId(): String = Prefs.deviceId(act)

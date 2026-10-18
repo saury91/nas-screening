@@ -6,6 +6,7 @@ import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.webkit.CookieManager
@@ -43,6 +44,9 @@ class MainActivity : AppCompatActivity() {
 
     /** 电视：横屏 + 每次冷启动重输 PIN；手机：跟随系统 + 30 天免登录 */
     private var isTv = false
+
+    /** 本地服务：前端从这里加载，NAS 只当接口用 */
+    private var local: LocalServer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -141,7 +145,31 @@ class MainActivity : AppCompatActivity() {
     private fun loadHome() {
         errorBox.visibility = View.GONE
         web.visibility = View.VISIBLE
-        web.loadUrl(server.trimEnd('/') + "/#/home")
+        // 前端由本地服务提供；NAS 只作为 /api 的来源。
+        // 这样 NAS 关机时页面照样能打开（缓存内容 + 顶部离线提示）
+        // 离线改造还在联调：本地服务转发 /api 偶发拿不到响应，
+        // 前端会把"不知道状态"误判成"没初始化"，弹建管理员。
+        // 这里先关掉，页面仍从 NAS 加载（行为与 0.4.x 一致），
+        // 等转发层稳了再打开。
+        val useLocalWeb = false
+        if (!useLocalWeb) {
+            web.loadUrl(server.trimEnd('/') + "/#/home")
+            return
+        }
+        val srv = local ?: run {
+            LocalServer(this) { Prefs.server(this) }.also {
+                it.start()
+                local = it
+            }
+        }
+        // 换了页面来源（NAS → 本地）或升级了内置前端：清一次缓存，
+        // 否则 WebView 可能继续用旧的 index.html
+        val lastVer = Prefs.lastWebVersion(this)
+        if (lastVer != BuildConfig.VERSION_NAME) {
+            web.clearCache(true)
+            Prefs.setLastWebVersion(this, BuildConfig.VERSION_NAME)
+        }
+        web.loadUrl("http://127.0.0.1:${srv.port}/#/home")
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -169,14 +197,26 @@ class MainActivity : AppCompatActivity() {
 
         web.addJavascriptInterface(NativeBridge(this), "ProomNative")
 
+        // 把页面控制台转发到 logcat：排查"页面拿不到数据"这类问题只能靠它
+        web.webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                Log.d("ProomWeb", "${m.messageLevel()} ${m.message()} @ ${m.sourceId()}:${m.lineNumber()}")
+                return true
+            }
+        }
+
         web.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                // 早点打标记，避免首屏闪一下桌面布局
-                web.evaluateJavascript(
-                    "(function(){if(document.documentElement)document.documentElement.classList.add('tv')})()",
-                    null
-                )
+                // 早点打标记，避免首屏闪一下桌面布局。
+                // 注意：只有电视才能加，手机端加了会被前端当成电视
+                // （表现为投屏按钮消失、还自动登录成"电视"账号）
+                if (isTv) {
+                    web.evaluateJavascript(
+                        "(function(){if(document.documentElement)document.documentElement.classList.add('tv')})()",
+                        null
+                    )
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -301,6 +341,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        local?.stop()
         if (::web.isInitialized) {
             web.destroy()
         }
