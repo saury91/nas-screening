@@ -54,7 +54,7 @@ export async function render(root) {
     b.disabled = false;
   };
 
-  root.querySelector('#groups').addEventListener('click', e => {
+  root.querySelector('#groups')?.addEventListener('click', e => {
     const b = e.target.closest('[data-g]');
     if (!b) return;
     st.grp = b.dataset.g;
@@ -62,7 +62,7 @@ export async function render(root) {
     paint(root);
   });
 
-  root.querySelector('#live-kw').addEventListener('input', debounce(e => {
+  root.querySelector('#live-kw')?.addEventListener('input', debounce(e => {
     st.kw = e.target.value.trim();
     paint(root);
   }, 220));

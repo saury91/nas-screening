@@ -99,6 +99,8 @@ async function renderPage(route) {
       if (first) focusFirst(first.parentElement || view);
     }
   } catch (e) {
+    // 页面已经切走了：这是旧页面在 await 之后写 DOM 报的错，不该弹给用户
+    if (token !== rendering || !view.isConnected) return;
     console.error(e);
     view.innerHTML = `<div class="page"><div class="empty">
       <h3>页面出错了</h3><p>${String(e && e.message || e)}</p>
@@ -182,6 +184,16 @@ function showOfflineGate() {
     <button class="btn primary" style="margin-top:18px" onclick="location.reload()">重新连接</button>
   </div>`;
 }
+
+// 页面里没接住的异常：打到控制台（安卓端会转发到 logcat），方便定位
+window.addEventListener('error', e => {
+  try {
+    console.error('[uncaught]', e.message, '@', (e.filename || '').split('/').pop() + ':' + e.lineno);
+  } catch (_) { /* 忽略 */ }
+});
+window.addEventListener('unhandledrejection', e => {
+  try { console.error('[unhandled]', e.reason && (e.reason.message || e.reason)); } catch (_) {}
+});
 
 async function boot() {
   // 离线提示：只弹一条 toast，几秒后自动消失。

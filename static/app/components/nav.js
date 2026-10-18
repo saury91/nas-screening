@@ -35,8 +35,8 @@ export function initNav() {
 
   // 不能直接把 openSearch 当监听器：它会把 click 事件当 prefill，
 // 于是 input.value 变成 "[object PointerEvent]"，还会被记进搜索历史
-$('#btn-search').addEventListener('click', () => openSearch());
-  $('#search-close').addEventListener('click', closeSearch);
+$('#btn-search')?.addEventListener('click', () => openSearch());
+  $('#search-close')?.addEventListener('click', closeSearch);
   const meBtn = $('#btn-me');
   if (meBtn) {
     const u = currentUser();
@@ -47,11 +47,11 @@ $('#btn-search').addEventListener('click', () => openSearch());
     }
     meBtn.addEventListener('click', () => openSwitcher());
   }
-  $('#searchlayer').addEventListener('click', e => {
+  $('#searchlayer')?.addEventListener('click', e => {
     if (e.target.id === 'searchlayer') closeSearch();
   });
   // 焦点陷阱：Tab 在浮层里循环，不会跑到背后的页面上
-  $('#searchlayer').addEventListener('keydown', e => {
+  $('#searchlayer')?.addEventListener('keydown', e => {
     if (e.key !== 'Tab' || !searchOpen) return;
     const f = Array.from($('#searchlayer').querySelectorAll(
       'a[href],button,input,[data-focus]')).filter(el => el.offsetParent !== null);
