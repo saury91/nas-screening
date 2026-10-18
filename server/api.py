@@ -835,6 +835,19 @@ class Handler(BaseHTTPRequestHandler):
                 {"ok": True, "token": tok, "me": prof, "profiles": auth.list_profiles()},
                 ensure_ascii=False), "application/json; charset=utf-8",
                 extra=[_cookie(tok)])
+        if path == "/api/auth/tv":
+            # 电视端免输 PIN：固定账户「电视」/ 999999
+            prof = auth.tv_profile()
+            if not prof:
+                return self._send(409, json.dumps(
+                    {"ok": False, "code": "pin_taken",
+                     "msg": "999999 已被其它账户占用，电视需要手动输 PIN"},
+                    ensure_ascii=False), "application/json; charset=utf-8")
+            tok = auth.issue_token(prof["id"], ua=self.headers.get("User-Agent") or "tv")
+            return self._send(200, json.dumps(
+                {"ok": True, "token": tok, "me": prof, "profiles": auth.list_profiles()},
+                ensure_ascii=False), "application/json; charset=utf-8",
+                extra=[_cookie(tok)])
         if path == "/api/auth/touch":
             # 客户端本地还留着 token 但 Cookie 丢了（WebView 重启、清缓存常见）：
             # 让他拿 X-Token 换一次 Set-Cookie，媒体元素（video/img/audio）才能继续带认证

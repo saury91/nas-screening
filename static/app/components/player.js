@@ -457,9 +457,13 @@ function mountArt(url, position) {
   const isM3u8 = isHlsUrl(url);
   // 走同源代理：采集站几乎都不带 CORS 头，直连必被浏览器拦
   const src = isM3u8 ? '/api/proxy?u=' + encodeURIComponent(url) : url;
+  // 透明 1x1：Artplayer 不传 poster 时会用自带的「灰底大播放键」占位图，
+  // 那个白底跟暗色界面完全不搭，缓冲/换集时尤其明显
+  const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const options = {
     container: host,
     url: src,
+    poster: BLANK,
     type: isM3u8 ? 'm3u8' : '',
     autoplay: true,
     volume: 0.85,
