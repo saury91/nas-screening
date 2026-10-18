@@ -30,6 +30,13 @@ object Prefs {
             .edit().putString("token", t).apply()
     }
 
+    fun localPort(ctx: Context): Int =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getInt("local_port", 0)
+
+    fun setLocalPort(ctx: Context, p: Int) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putInt("local_port", p).apply()
+    }
+
     fun lastWebVersion(ctx: Context): String =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("web_ver", "") ?: ""
 

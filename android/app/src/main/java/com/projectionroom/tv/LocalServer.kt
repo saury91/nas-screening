@@ -33,6 +33,8 @@ class LocalServer(
     companion object {
         private const val TAG = "ProomLocal"
         private const val ASSET_ROOT = "www"
+        private const val UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     }
 
     @Volatile private var server: ServerSocket? = null
@@ -49,13 +51,19 @@ class LocalServer(
     /** 只绑回环地址，不对局域网暴露 */
     fun start(): Int {
         if (server != null) return port
-        // 固定端口：只绑回环，冲突概率低；固定下来方便 adb forward 调试
-        val port = try {
-            ServerSocket(8891, 50, InetAddress.getByName("127.0.0.1"))
-        } catch (e: Exception) {
-            ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        // 端口必须稳定：页面的 origin 含端口，一变 IndexedDB 缓存和登录态就全丢。
+        // 先试上次用过的，再在 8891~8899 里找，最后才退到随机端口。
+        val loopback = InetAddress.getByName("127.0.0.1")
+        val saved = Prefs.localPort(ctx)
+        val candidates = (if (saved > 0) listOf(saved) else emptyList()) +
+            (8891..8899).toList() + listOf(0)
+        var ss: ServerSocket? = null
+        for (p in candidates) {
+            ss = try { ServerSocket(p, 50, loopback) } catch (e: Exception) { null }
+            if (ss != null) break
         }
-        val ss = port
+        if (ss == null) throw IllegalStateException("本地端口全部被占用")
+        Prefs.setLocalPort(ctx, ss.localPort)
         server = ss
         Thread({
             while (!ss.isClosed) {
@@ -116,6 +124,9 @@ class LocalServer(
                 } else ByteArray(0)
 
                 when {
+                    // 媒体代理：NAS 不可达时由手机自己拉流并补 Referer
+                    path == "/api/proxy" && (!onLan() || Prefs.server(ctx).isBlank()) ->
+                        localMedia(sock, query)
                     path == "/__local/status" -> json(sock, statusJson())
                     path == "/__local/log" -> json(sock,
                         recent.joinToString(",", "[", "]") { "\"$it\"" })
@@ -257,6 +268,91 @@ class LocalServer(
             val snippet = if (resp.code >= 400)
                 String(resp.body, Charsets.UTF_8).take(120).replace("\n", " ") else ""
             recent.add("-> $path ${resp.code} ${resp.body.size}b $snippet")
+            if (recent.size > 30) recent.removeAt(0)
+        }
+    }
+
+    // ── 本地媒体代理（NAS 离线时用）──────────────────────────
+    private fun parseQuery(q: String): Map<String, String> =
+        q.split("&").filter { it.contains("=") }.associate {
+            val k = it.substringBefore("=")
+            val v = try { java.net.URLDecoder.decode(it.substringAfter("="), "UTF-8") }
+                    catch (e: Exception) { it.substringAfter("=") }
+            k to v
+        }
+
+    private fun safeDecode(s: String): String =
+        try { java.net.URLDecoder.decode(s, "UTF-8") } catch (e: Exception) { s }
+
+    /** 从源地址推一个合理的 Referer（多数站只校验 host） */
+    private fun deriveReferer(url: String): String = try {
+        val u = java.net.URI(url)
+        "${u.scheme}://${u.host}/"
+    } catch (e: Exception) { "" }
+
+    private fun wrapMedia(url: String): String =
+        "/api/proxy?u=" + java.net.URLEncoder.encode(url, "UTF-8")
+
+    private fun absolutize(link: String, base: java.net.URI): String = try {
+        if (link.startsWith("http://") || link.startsWith("https://")) link
+        else base.resolve(link).toString()
+    } catch (e: Exception) { link }
+
+    /** m3u8 里的分片/key 也要走本地代理，否则 hls.js 直连会 403 */
+    private fun rewritePlaylist(text: String, baseUrl: String): String {
+        val base = try { java.net.URI(baseUrl) } catch (e: Exception) { return text }
+        return text.lineSequence().joinToString("\n") { raw ->
+            val line = raw.trim()
+            when {
+                line.isEmpty() -> raw
+                line.startsWith("#") -> {
+                    // 重写带 URI="..." 的标签（EXT-X-KEY / EXT-X-MAP / EXT-X-MEDIA）
+                    Regex("URI=\"([^\"]+)\"").replace(line) { m ->
+                        val abs = absolutize(m.groupValues[1], base)
+                        "URI=\"${wrapMedia(abs)}\""
+                    }
+                }
+                else -> wrapMedia(absolutize(line, base))
+            }
+        }
+    }
+
+    private fun localMedia(sock: Socket, query: String) {
+        val q = parseQuery(query)
+        val url = q["u"]
+        if (url.isNullOrBlank()) { json(sock, """{"ok":false,"msg":"缺地址"}""", 400); return }
+        val referer = q["r"]?.takeIf { it.isNotBlank() } ?: deriveReferer(url)
+        val resp = try {
+            HttpMini.fetch(url, referer, UA)
+        } catch (e: Exception) {
+            Log.w(TAG, "媒体拉取失败: ${e.message}")
+            json(sock, """{"ok":false,"offline":true,"msg":"片源连不上"}""", 502)
+            return
+        }
+        if (resp.code >= 400) {
+            json(sock, """{"ok":false,"msg":"片源返回 ${resp.code}"}""", resp.code)
+            return
+        }
+        val looksM3u8 = url.contains(".m3u8", true) ||
+            String(resp.body, 0, minOf(16, resp.body.size), Charsets.UTF_8).startsWith("#EXTM3U")
+        val out = sock.getOutputStream()
+        if (looksM3u8) {
+            val text = String(resp.body, Charsets.UTF_8)
+            val body = rewritePlaylist(text, url).toByteArray(Charsets.UTF_8)
+            val head = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\n" +
+                "Content-Length: ${body.size}\r\nCache-Control: no-store\r\n" +
+                "Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n"
+            out.write(head.toByteArray()); out.write(body)
+        } else {
+            val ctype = if (resp.ctype.isBlank()) "application/octet-stream" else resp.ctype
+            val head = "HTTP/1.1 200 OK\r\nContent-Type: $ctype\r\n" +
+                "Content-Length: ${resp.body.size}\r\nCache-Control: no-store\r\n" +
+                "Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n"
+            out.write(head.toByteArray()); out.write(resp.body)
+        }
+        out.flush()
+        synchronized(recent) {
+            recent.add("media $url -> ${resp.code} ${resp.body.size}b m3u8=$looksM3u8")
             if (recent.size > 30) recent.removeAt(0)
         }
     }
