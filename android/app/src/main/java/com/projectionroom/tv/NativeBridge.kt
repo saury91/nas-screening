@@ -39,6 +39,15 @@ class NativeBridge(private val act: MainActivity) {
         main.post { act.setPlayerOrientation(on) }
     }
 
+    /** 打开「设置 NAS 地址」页（遥控器菜单键在没有播放时触发） */
+    @JavascriptInterface
+    fun openSetup() {
+        main.post {
+            act.startActivity(android.content.Intent(act, SetupActivity::class.java))
+            act.finish()
+        }
+    }
+
     @JavascriptInterface
     fun toast(msg: String) {
         main.post { Toast.makeText(act, msg, Toast.LENGTH_SHORT).show() }

@@ -280,16 +280,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         when (keyCode) {
+            // 返回：播放器开着先关播放器，再退页面
             KeyEvent.KEYCODE_BACK -> {
-                if (web.canGoBack()) {
-                    web.goBack()
-                    return true
+                web.evaluateJavascript("window.__proomBack?window.__proomBack():false") { r ->
+                    if (r != "true") {
+                        if (web.canGoBack()) web.goBack() else finish()
+                    }
                 }
+                return true
             }
-            // 遥控器上的菜单键 = 重新设置服务器地址
+            // 菜单键交给页面：播放器里切选集面板，其它地方打开地址设置
             KeyEvent.KEYCODE_MENU -> {
-                startActivity(Intent(this, SetupActivity::class.java))
-                finish()
+                web.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('app:menu'))", null
+                )
                 return true
             }
         }
