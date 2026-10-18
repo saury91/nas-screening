@@ -154,6 +154,7 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
   // 手机端：进播放器就横屏全屏（电视本来就是横屏，浏览器没有这个桥）
   try { window.ProomNative?.setLandscape?.(true); } catch (e) {}
   pingChrome();
+  watchVideoVisible();
   setTimeout(() => {
     if (!state) return;
     if ($('#pl-side')?.classList.contains('open')) return;
@@ -400,6 +401,37 @@ function showSeekOsd(acc, target) {
   el.classList.add('on', back ? 'back' : 'fwd');
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('on'), 1600);
+}
+
+// 视频"有没有画面"用 readyState 判断，比只听 playing 事件可靠：
+// 直播、切源、首帧都可能错过事件，导致 video 一直 opacity:0（有声无画）
+let visTimer = null;
+let audioOnlySince = 0;
+let audioOnlyWarned = false;
+function watchVideoVisible() {
+  clearInterval(visTimer);
+  visTimer = setInterval(() => {
+    const st = $('.pl-stage');
+    const v = art && art.video;
+    if (!st || !v) return;
+    const hasPic = v.readyState >= 2 && v.videoWidth > 0;
+    st.classList.toggle('playing', hasPic);
+    // 有画面了就把背后的模糊海报收掉
+    const poster = $('#pl-poster');
+    if (poster && hasPic) poster.classList.add('gone');
+
+    // 有声音没画面：部分直播源只有音轨。别让用户对着黑屏猜
+    if (state?.isLive && !hasPic && v.readyState >= 2) {
+      if (!audioOnlySince) audioOnlySince = Date.now();
+      if (!audioOnlyWarned && Date.now() - audioOnlySince > 6000) {
+        audioOnlyWarned = true;
+        toast('这个频道只有声音，按 → 键换下一个');
+      }
+    } else {
+      audioOnlySince = 0;
+      audioOnlyWarned = false;
+    }
+  }, 500);
 }
 
 function pingChrome() {
