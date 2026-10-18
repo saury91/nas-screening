@@ -1,5 +1,6 @@
 // 应用入口：装配路由、导航、焦点系统，负责页面切换
 import { $ } from './core/dom.js';
+import { api } from './core/api.js';
 import { go, onRoute, parseRoute, startRouter } from './core/router.js';
 import { initFocus, clearFocus, focusFirst } from './core/focus.js';
 import { syncFavs, store } from './core/store.js';
@@ -175,6 +176,9 @@ async function boot() {
   }
   onAuthLost(() => showGate());
   initNav();
+  // 本地有 token 但 Cookie 可能丢了（WebView 重启/清缓存）：
+  // 让服务端补发一次，视频分片和封面图才带得上认证
+  api.post('/api/auth/touch', {}).catch(() => {});
   // 电视端把自己注册成投屏接收端；收到指令就用同一套播放器播
   startReceiver((cmd) => {
     import('/static/app/components/player.js').then(({ openPlayer }) => {

@@ -147,6 +147,10 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
         web.setBackgroundColor(Color.parseColor("#07080B"))
+        // WebView 的 Cookie 默认只在内存里，进程一结束就没了；
+        // 登录态靠 pr_token Cookie 才能让 <video>/<img> 这些请求带上认证
+        CookieManager.getInstance().setAcceptCookie(true)
+
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
