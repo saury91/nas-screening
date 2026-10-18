@@ -33,6 +33,12 @@ class NativeBridge(private val act: MainActivity) {
         // P0 阶段原生播放是独立 Activity，由它自己的返回键负责退出
     }
 
+    /** 手机播放时切横屏；电视端忽略 */
+    @JavascriptInterface
+    fun setLandscape(on: Boolean) {
+        main.post { act.setPlayerOrientation(on) }
+    }
+
     @JavascriptInterface
     fun toast(msg: String) {
         main.post { Toast.makeText(act, msg, Toast.LENGTH_SHORT).show() }

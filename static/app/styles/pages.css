@@ -874,3 +874,25 @@ body.gated{overflow:hidden}
   .detail-desc{font-size:13px}
   .detail-actions .btn{height:40px;padding:0 16px}
 }
+
+/* ═══════════ 投屏面板 ═══════════ */
+.cast-sheet{position:fixed;top:0;right:0;bottom:0;left:0;z-index:300;display:grid;place-items:center;
+  background:rgba(6,7,11,.72);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);padding:24px}
+.cast-sheet[hidden]{display:none}
+.cast-card{width:min(420px,100%);border-radius:18px;border:1px solid var(--line);
+  background:linear-gradient(180deg,#16181f,#0d0f14);padding:20px;
+  box-shadow:0 40px 90px rgba(0,0,0,.6);animation:gateIn .28s var(--ease) both}
+.cast-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.cast-head h3{margin:0;font-size:16px;font-weight:600}
+.cast-body{display:flex;flex-direction:column;gap:8px}
+.cast-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;
+  border:1px solid var(--line);background:rgba(255,255,255,.03);color:#f4f5f7;
+  font-size:14px;text-align:left;outline:none;cursor:pointer;transition:.18s var(--ease)}
+.cast-item:hover{background:rgba(255,255,255,.09);border-color:var(--line-strong)}
+.cast-item.focused{box-shadow:0 0 0 2px var(--accent)}
+.cast-item:disabled{opacity:.5}
+.cast-ico{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none;
+  background:rgba(255,207,122,.14);color:var(--accent)}
+.cast-ico svg{width:16px;height:16px}
+.cast-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cast-state{font-size:11.5px;color:#7f8694}

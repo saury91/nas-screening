@@ -1,0 +1,147 @@
+// 投屏：手机/电脑把「播这个地址」发给局域网里的电视。
+// 电视端自己就是接收器（同一套网页），不做 DLNA/Cast。
+import { $, esc, icon, toast } from './dom.js';
+import { getToken } from './auth.js';
+
+const ID_KEY = 'pr.dev';
+const isTv = () => /ProomTV\//.test(navigator.userAgent) ||
+  document.documentElement.classList.contains('tv');
+const isPhone = () => /ProomMobile\//.test(navigator.userAgent);
+
+function deviceId() {
+  try {
+    let id = localStorage.getItem(ID_KEY);
+    if (!id) {
+      id = 'd' + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem(ID_KEY, id);
+    }
+    return id;
+  } catch (e) {
+    return 'd' + Math.random().toString(36).slice(2, 10);
+  }
+}
+
+async function post(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getToken() ? { 'X-Token': getToken() } : {}),
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || d.ok === false) throw new Error(d.msg || '投屏失败');
+  return d;
+}
+
+async function getJSON(path) {
+  const res = await fetch(path, {
+    headers: getToken() ? { 'X-Token': getToken() } : {},
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.msg || '请求失败');
+  return d;
+}
+
+function deviceName() {
+  if (isTv()) return '电视';
+  if (isPhone()) return '手机';
+  return '电脑';
+}
+
+/** 电视端：心跳 + 取指令；收到就播 */
+export function startReceiver(onPlay) {
+  if (!isTv()) return;
+  const id = deviceId();
+
+  const beat = () => {
+    post('/api/cast/register', { id, name: deviceName(), kind: 'tv' }).catch(() => {});
+  };
+  const poll = async () => {
+    try {
+      const d = await getJSON('/api/cast/poll?id=' + encodeURIComponent(id));
+      for (const c of (d.commands || [])) {
+        if (c.kind === 'play' && c.url) onPlay(c);
+      }
+    } catch (e) { /* 网络抖一下就算了，下一轮再试 */ }
+  };
+
+  beat();
+  setInterval(beat, 15000);
+  setInterval(poll, 3000);
+}
+
+export async function listTargets() {
+  const id = deviceId();
+  const d = await getJSON('/api/cast/targets?id=' + encodeURIComponent(id));
+  return (d.items || []).filter(x => x.kind === 'tv');
+}
+
+export async function castTo(target, info) {
+  return post('/api/cast/send', {
+    target,
+    url: info.url,
+    title: info.title || '',
+    position: info.position || 0,
+  });
+}
+
+/** 手机/电脑：选一台电视投过去 */
+export async function openCastSheet(info) {
+  const box = $('#cast-sheet');
+  if (!box) return;
+  box.hidden = false;
+  box.innerHTML = `<div class="cast-card">
+    <div class="cast-head">
+      <h3>投屏到</h3>
+      <button class="icon-btn" id="cast-close" data-focus title="关闭">${icon('close')}</button>
+    </div>
+    <div class="cast-body" id="cast-body"><p class="hint">正在查找局域网里的电视…</p></div>
+  </div>`;
+  box.querySelector('#cast-close').onclick = closeCast;
+
+  const body = box.querySelector('#cast-body');
+  let items = [];
+  try {
+    items = await listTargets();
+  } catch (e) {
+    body.innerHTML = `<p class="hint">拿不到设备列表：${esc(e.message)}</p>`;
+    return;
+  }
+
+  if (!items.length) {
+    body.innerHTML = `<p class="hint">没找到在线的电视。<br>
+      电视上打开放映室（保持前台）就会出现在这里。</p>`;
+    return;
+  }
+
+  body.innerHTML = items.map((d, i) => `
+    <button class="cast-item" data-i="${i}" data-focus>
+      <span class="cast-ico">${icon('tv')}</span>
+      <span class="cast-name">${esc(d.name)}</span>
+      <span class="cast-state">在线</span>
+    </button>`).join('');
+
+  body.querySelectorAll('[data-i]').forEach(btn => {
+    btn.onclick = async () => {
+      const d = items[+btn.dataset.i];
+      btn.disabled = true;
+      try {
+        await castTo(d.id, info);
+        closeCast();
+        toast(`已投到「${d.name}」`);
+      } catch (e) {
+        toast(e.message, 'err');
+        btn.disabled = false;
+      }
+    };
+  });
+}
+
+export function closeCast() {
+  const box = $('#cast-sheet');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+}
+
+export { isTv, isPhone };

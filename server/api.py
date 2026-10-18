@@ -24,7 +24,7 @@ from .providers import (active_sites, add_source, all_sites, import_config,
                         test_source)
 from .providers import magnet
 from .providers.cms import fetch_vod
-from .services import auth, catalog, config_io, discover, live, music, musicbox, probe, proxy
+from .services import auth, cast, catalog, config_io, discover, live, music, musicbox, probe, proxy
 from .services.qbt import QBT
 
 # 只有管理员能碰的路由前缀：改配置、管账户、动下载。
@@ -424,6 +424,11 @@ class Handler(BaseHTTPRequestHandler):
                                               ensure_ascii=False))
 
     def _api_get(self, path, qs):
+        if path == "/api/cast/targets":
+            me = self.me() or {}
+            return _json({"ok": True, "items": cast.targets(exclude=qs.get("id") or me.get("id", ""))})
+        if path == "/api/cast/poll":
+            return _json({"ok": True, "commands": cast.poll(qs.get("id") or "")})
         if path == "/api/app/latest":
             kind = (qs.get("kind") or "tv").replace("/", "")
             meta = os.path.join(APPS_DIR, kind + ".json")
@@ -788,6 +793,23 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype = _json(obj)
             self._send(code, body, ctype)
 
+        if path == "/api/cast/register":
+            try:
+                dev = cast.register(b.get("id") or "", b.get("name") or "",
+                                    b.get("kind") or "tv",
+                                    self.headers.get("User-Agent") or "")
+            except ValueError as e:
+                return send({"ok": False, "msg": str(e)})
+            return send({"ok": True, "device": dev})
+        if path == "/api/cast/send":
+            try:
+                cast.send(b.get("target") or "", b.get("url") or "",
+                          b.get("title") or "", b.get("position") or 0)
+            except KeyError as e:
+                return send({"ok": False, "msg": str(e).strip("'")})
+            except ValueError as e:
+                return send({"ok": False, "msg": str(e)})
+            return send({"ok": True})
         if path == "/api/auth/setup":
             try:
                 prof, tok = auth.setup(b.get("name") or "管理员", b.get("pin") or "")
