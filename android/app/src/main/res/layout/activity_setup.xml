@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="64dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/setup_title"
+        android:textColor="@color/text"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:text="@string/setup_hint"
+        android:textColor="@color/dim"
+        android:textSize="15sp" />
+
+    <EditText
+        android:id="@+id/url"
+        android:layout_width="560dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="26dp"
+        android:background="@color/panel"
+        android:hint="http://192.168.1.10:8899"
+        android:inputType="textUri"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:singleLine="true"
+        android:textColor="@color/text"
+        android:textColorHint="#5C636F"
+        android:textSize="17sp" />
+
+    <Button
+        android:id="@+id/ok"
+        android:layout_width="200dp"
+        android:layout_height="52dp"
+        android:layout_marginTop="24dp"
+        android:backgroundTint="@color/accent"
+        android:text="@string/setup_ok"
+        android:textColor="@color/bg"
+        android:textSize="16sp" />
+</LinearLayout>

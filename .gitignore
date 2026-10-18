@@ -40,3 +40,16 @@ Thumbs.db
 
 # ── 本地工作记忆（工具生成，不参与部署）──
 .workbuddy/
+
+# ── Android 构建产物 ──
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk
+*.aab
+*.keystore
+
+# 本地构建产物（APK 从 CI 产物或 Release 拿）
+dist/

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">放映室</string>
+    <string name="setup_title">连接 NAS</string>
+    <string name="setup_hint">填 NAS 上放映室的地址，例如\nhttp://192.168.1.10:8899</string>
+    <string name="setup_ok">连接</string>
+    <string name="setup_bad">地址要以 http:// 或 https:// 开头</string>
+    <string name="unsupported_title">这台电视的浏览器内核太旧</string>
+    <string name="unsupported_desc">放映室需要 Android System WebView 55 以上，当前是 %1$d。\n可以升级「Android System WebView」后再试，或者用手机投屏到这个电视。</string>
+    <string name="retry">重试</string>
+</resources>

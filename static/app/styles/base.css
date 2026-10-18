@@ -51,7 +51,7 @@ img{display:block;max-width:100%}
 
 /* 背景氛围光 */
 .ambient{
-  position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;
+  position:fixed;top:0;right:0;bottom:0;left:0;z-index:0;pointer-events:none;overflow:hidden;
   background:
     radial-gradient(900px 520px at 18% -10%, rgba(255,164,92,.16), transparent 65%),
     radial-gradient(760px 480px at 92% 4%, rgba(96,124,255,.10), transparent 62%),
@@ -62,7 +62,7 @@ img{display:block;max-width:100%}
 /* 当前这张片子的封面：直接当背景图模糊掉，色调跟着内容走。
    不读像素（跨域图片取色会污染 canvas），只让浏览器自己晕染。 */
 .ambient::before{
-  content:"";position:absolute;inset:-18%;
+  content:"";position:absolute;top:-18%;right:-18%;bottom:-18%;left:-18%;
   background-image:var(--ambient-poster,none);
   background-size:cover;background-position:center;
   filter:blur(78px) saturate(170%) brightness(.72);
@@ -71,7 +71,7 @@ img{display:block;max-width:100%}
 }
 /* 全局胶片颗粒：只覆盖内容层，播放器与弹窗在它上面 */
 body::after{
-  content:"";position:fixed;inset:0;z-index:40;pointer-events:none;
+  content:"";position:fixed;top:0;right:0;bottom:0;left:0;z-index:40;pointer-events:none;
   opacity:.045;mix-blend-mode:overlay;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.34'/%3E%3C/svg%3E");
 }
@@ -111,7 +111,7 @@ body[data-page="live"] .ambient{
   box-shadow:0 6px 22px rgba(255,159,90,.34), inset 0 0 0 1px rgba(255,255,255,.28);
 }
 .brand-mark i{
-  position:absolute;inset:9px 0 0 12px;width:0;height:0;
+  position:absolute;top:9px;right:0;bottom:0;left:12px;width:0;height:0;
   border-left:9px solid rgba(30,18,6,.82);
   border-top:6px solid transparent;border-bottom:6px solid transparent;
 }
@@ -236,7 +236,7 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
   transition:transform .32s var(--ease),box-shadow .32s var(--ease),filter .32s;
   outline:none;cursor:pointer;isolation:isolate;
 }
-.card::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+.card::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;border-radius:inherit;pointer-events:none;
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);transition:box-shadow .3s}
 .card img,.hero-poster img,.detail-poster img,.sr-card img,.album-art img,
 .album-detail .art img,.np-art img,.mp-art img{
@@ -246,7 +246,7 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
   color:rgba(255,255,255,.28);
   background:linear-gradient(140deg,rgba(255,207,122,.22),rgba(120,110,255,.14) 55%,rgba(255,255,255,.04))}
 /* 图片加载前的占位：必须脱离文档流，否则会把图片挤到可视区外 */
-.ph.fill{position:absolute;inset:0;display:grid;place-items:center;font-size:clamp(24px,3vw,40px);
+.ph.fill{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;font-size:clamp(24px,3vw,40px);
   font-weight:700;color:rgba(255,255,255,.3);
   background:linear-gradient(140deg,rgba(255,207,122,.2),rgba(120,110,255,.13) 55%,rgba(255,255,255,.04))}
 .card:hover{transform:translateY(-8px) scale(1.045);z-index:3;
@@ -277,7 +277,7 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
 .card-badge.r{left:auto;right:9px;color:#fff;border-color:rgba(255,255,255,.18)}
 .card-progress{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.16);z-index:2}
 .card-progress i{display:block;height:100%;background:linear-gradient(90deg,var(--accent-2),var(--accent))}
-.card-play{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:opacity .25s;
+.card-play{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;opacity:0;transition:opacity .25s;
   background:linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.5));z-index:1}
 .card-play span{width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.94);
   display:grid;place-items:center;box-shadow:0 8px 24px rgba(0,0,0,.4);
@@ -311,7 +311,7 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
 .skl-hero{height:min(74vh,700px);border-radius:0}
 
 /* ═══════════ 浮层 / Toast / 弹窗 ═══════════ */
-.overlay{position:fixed;inset:0;z-index:120;background:rgba(4,5,8,.86);
+.overlay{position:fixed;top:0;right:0;bottom:0;left:0;z-index:120;background:rgba(4,5,8,.86);
   -webkit-backdrop-filter:blur(28px) saturate(140%);backdrop-filter:blur(28px) saturate(140%)}
 .overlay[hidden]{display:none}
 .toast{
@@ -326,7 +326,7 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
 .toast.ok{border-color:rgba(126,226,168,.4)}
 .toast.err{border-color:rgba(255,107,107,.45)}
 #modal-root:empty{display:none}
-.modal-mask{position:fixed;inset:0;z-index:200;background:rgba(3,4,7,.7);
+.modal-mask{position:fixed;top:0;right:0;bottom:0;left:0;z-index:200;background:rgba(3,4,7,.7);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
   display:grid;place-items:center;padding:24px;animation:fade .25s var(--ease)}
 @keyframes fade{from{opacity:0}to{opacity:1}}

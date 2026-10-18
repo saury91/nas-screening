@@ -12,7 +12,7 @@
 #art-host video{touch-action:manipulation}
 /* 缓冲时用它背后的模糊海报打底，纯黑画面里任何加载动画都显得孤零零 */
 .pl-poster{
-  position:absolute;inset:-8%;z-index:0;
+  position:absolute;top:-8%;right:-8%;bottom:-8%;left:-8%;z-index:0;
   background-size:cover;background-position:center;
   filter:blur(34px) saturate(140%) brightness(.42);
   transform:scale(1.14);
@@ -20,7 +20,7 @@
 }
 /* 边缘压暗，让中间那块光更突出 */
 .pl-poster::after{
-  content:"";position:absolute;inset:0;
+  content:"";position:absolute;top:0;right:0;bottom:0;left:0;
   background:radial-gradient(ellipse at center,rgba(0,0,0,.1) 16%,rgba(0,0,0,.72) 96%);
 }
 .pl-poster.gone{opacity:0}
@@ -33,7 +33,7 @@
 .art-video-player.switching .art-mask{opacity:0!important;pointer-events:none}
 
 /* ArtPlayer 的容器需要明确高度，否则 video 高度为 0（只剩声音） */
-#art-host{position:absolute;inset:0;width:100%;height:100%;z-index:1}
+#art-host{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;z-index:1}
 #art-host .art-video-player{width:100%;height:100%}
 .pl-top{position:absolute;top:0;left:0;right:0;z-index:20;display:flex;align-items:flex-start;
   gap:16px;padding:22px 28px 60px;
@@ -132,7 +132,7 @@
 
 /* 点画面时的中央状态反馈：毛玻璃圆 + 白色图标 */
 .pl-flash{
-  position:absolute;inset:0;display:grid;place-items:center;z-index:16;
+  position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;z-index:16;
   pointer-events:none;opacity:0;transition:opacity .32s var(--ease);
 }
 .pl-flash.on{opacity:1}
@@ -152,7 +152,7 @@
 /* ArtPlayer 自带的转圈隐藏：只留自己的缓冲条 */
 .art-video-player .art-loading,
 .art-video-player .art-loading-icon{display:none!important}
-.pl-err{position:absolute;inset:0;display:grid;place-items:center;z-index:12;background:#05060a;
+.pl-err{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;z-index:12;background:#05060a;
   text-align:center;padding:30px}
 .pl-err h3{margin:0 0 8px;font-size:17px}
 .pl-err p{margin:0 0 20px;color:#8a919e;font-size:13px;line-height:1.7;max-width:440px}
