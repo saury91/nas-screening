@@ -40,6 +40,25 @@ function readJSON(res) {
 }
 
 export async function fetchState() {
+  // 缓存优先：有上次的状态就先把界面放出来，网络在后台补
+  const { load: cl, save: cs } = await import('./offline.js');
+  const cached = await cl('/api/auth/state');
+  if (cached && cached.me) {
+    initialized = !!cached.initialized;
+    me = cached.me;
+    profiles = cached.profiles || [];
+    // 后台刷新（不阻塞）
+    (async () => {
+      try {
+        const r = await fetch('/api/auth/state');
+        if (!r.ok) return;
+        const d2 = await r.json();
+        if (d2 && !d2.offline) { initialized = !!d2.initialized; me = d2.me || me; profiles = d2.profiles || profiles; cs('/api/auth/state', d2); }
+      } catch (e) { /* 拉不到就用缓存的 */ }
+    })();
+    return { ...cached };
+  }
+
   let d = null;
   try {
     const res = await fetch('/api/auth/state', {
