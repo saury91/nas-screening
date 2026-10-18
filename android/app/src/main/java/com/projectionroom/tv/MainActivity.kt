@@ -48,6 +48,9 @@ class MainActivity : AppCompatActivity() {
     /** 本地服务：前端从这里加载，NAS 只当接口用 */
     private var local: LocalServer? = null
 
+    /** 电视端收投屏（同一局域网、不需要 NAS） */
+    private var castServer: CastServer? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         isTv = Device.isTv()
@@ -103,6 +106,27 @@ class MainActivity : AppCompatActivity() {
         setupWebView()
         loadHome()
         checkUpdate()
+        startCastReceiver()
+    }
+
+    /** 给桥用的：在 UI 线程执行一段 JS */
+    fun bridgeEval(js: String) {
+        runOnUiThread { if (::web.isInitialized) web.evaluateJavascript(js, null) }
+    }
+
+    /** 只有电视需要当投屏接收端 */
+    private fun startCastReceiver() {
+        if (!isTv) return
+        castServer = CastServer { json ->
+            val quoted = org.json.JSONObject.quote(json)
+            runOnUiThread {
+                if (::web.isInitialized) {
+                    web.evaluateJavascript(
+                        "window.__proomCastPlay && window.__proomCastPlay($quoted)", null
+                    )
+                }
+            }
+        }.also { it.start() }
     }
 
     /** 内网自升级：后台问一句 NAS，有新版就弹窗（遥控器可直接操作） */
@@ -174,6 +198,8 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
+        // 允许 adb 连 WebView 控制台排查问题（仅本机 USB/模拟器可达）
+        android.webkit.WebView.setWebContentsDebuggingEnabled(true)
         web.setBackgroundColor(Color.parseColor("#07080B"))
         // WebView 的 Cookie 默认只在内存里，进程一结束就没了；
         // 登录态靠 pr_token Cookie 才能让 <video>/<img> 这些请求带上认证
@@ -342,6 +368,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         local?.stop()
+        castServer?.stop()
         if (::web.isInitialized) {
             web.destroy()
         }

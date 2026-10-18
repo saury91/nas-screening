@@ -12,8 +12,8 @@ android {
         // 老电视普遍是 5.x / 6.x，能装就先让它装
         minSdk = 21
         targetSdk = 34
-        versionCode = 35
-        versionName = "0.7.2"
+        versionCode = 37
+        versionName = "0.8.1"
     }
 
     buildFeatures {
