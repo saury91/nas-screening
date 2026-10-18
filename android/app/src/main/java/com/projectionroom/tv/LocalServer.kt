@@ -101,6 +101,7 @@ class LocalServer(
                 if (path.startsWith("/api/")) apiHits.incrementAndGet()
                 synchronized(recent) {
                     recent.add("$method $path")
+                    // 不记录请求头：里面可能带 Cookie/Token
                     if (recent.size > 20) recent.removeAt(0)
                 }
                 val body: ByteArray = if (contentLength > 0) {
@@ -200,76 +201,36 @@ class LocalServer(
         body: ByteArray,
     ) {
         val base = nasUrl().trimEnd('/')
-        if (base.isBlank()) { json(sock, """{"ok":false,"offline":true,"msg":"还没设置 NAS 地址"}"""); return }
-        val urlStr = base + path + (if (query.isNotEmpty()) "?$query" else "")
-        val conn = try {
-            (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                requestMethod = method
-                connectTimeout = 8000
-                readTimeout = 30000
-                instanceFollowRedirects = true
-                // 透传认证与内容协商：Cookie / X-Token / Range 一个都不能少，
-                // 否则媒体元素和 hls.js 的请求会被 NAS 判 401
-                listOf("cookie", "x-token", "range", "accept", "content-type",
-                       "user-agent").forEach { h ->
-                    headers[h]?.let { setRequestProperty(h, it) }
-                }
-                // HttpURLConnection 默认会加 Accept-Encoding: gzip 并「透明解压」，
-                // 但 Content-Length 仍是压缩后的长度 → 转发出去就是半截数据。
-                // 明确要 identity，拿到的长度和内容才对得上。
-                setRequestProperty("Accept-Encoding", "identity")
-                if (body.isNotEmpty()) doOutput = true
-            }
+        if (base.isBlank()) {
+            json(sock, """{"ok":false,"offline":true,"msg":"还没设置 NAS 地址"}""", 503)
+            return
+        }
+        val resp = try {
+            HttpMini.request(base, method, path, query, headers, body)
         } catch (e: Exception) {
             json(sock, """{"ok":false,"offline":true,"msg":"连不上 NAS"}""", 503)
             return
         }
 
-        try {
-            if (body.isNotEmpty()) conn.outputStream.use { it.write(body) }
-            val code = conn.responseCode
-            val stream = if (code >= 400) conn.errorStream else conn.inputStream
-            val out = sock.getOutputStream()
-            val ctype = conn.contentType ?: "application/octet-stream"
+        val out = sock.getOutputStream()
+        val ctype = if (resp.ctype.isBlank() || resp.code >= 400) {
+            if (path.startsWith("/api/")) "application/json; charset=utf-8" else resp.ctype
+        } else resp.ctype
 
-            // 小响应（JSON/文本）先整块读，长度可控；大响应（分片/文件）走 chunked，
-            // 这样即使上游没给 Content-Length 也不会把响应截断
-            val textish = ctype.contains("json") || ctype.contains("text/") ||
-                ctype.contains("javascript") || ctype.contains("mpegurl")
-            val len = conn.contentLengthLong
+        val head = "HTTP/1.1 ${resp.code} OK\r\n" +
+            "Content-Type: $ctype\r\n" +
+            "Content-Length: ${resp.body.size}\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "Connection: close\r\n\r\n"
+        out.write(head.toByteArray())
+        out.write(resp.body)
+        out.flush()
 
-            if (textish || (len in 0..524288)) {
-                val bytes = stream?.readBytes() ?: ByteArray(0)
-                val head = "HTTP/1.1 $code ${conn.responseMessage ?: "OK"}\r\n" +
-                    "Content-Type: $ctype\r\n" +
-                    "Content-Length: ${bytes.size}\r\n" +
-                    "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
-                out.write(head.toByteArray())
-                out.write(bytes)
-            } else {
-                val head = "HTTP/1.1 $code ${conn.responseMessage ?: "OK"}\r\n" +
-                    "Content-Type: $ctype\r\n" +
-                    "Transfer-Encoding: chunked\r\n" +
-                    "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
-                out.write(head.toByteArray())
-                stream?.use { input ->
-                    val buf = ByteArray(32 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n <= 0) break
-                        out.write("${Integer.toHexString(n)}\r\n".toByteArray())
-                        out.write(buf, 0, n)
-                        out.write("\r\n".toByteArray())
-                    }
-                }
-                out.write("0\r\n\r\n".toByteArray())
-            }
-            out.flush()
-            Log.d(TAG, "proxy $path -> $code type=$ctype")
-        } catch (e: Exception) {
-            json(sock, """{"ok":false,"offline":true,"msg":"NAS 请求失败"}""", 503)
-        } finally {
-            conn.disconnect()
+        synchronized(recent) {
+            val snippet = if (resp.code >= 400)
+                String(resp.body, Charsets.UTF_8).take(120).replace("\n", " ") else ""
+            recent.add("-> $path ${resp.code} ${resp.body.size}b $snippet")
+            if (recent.size > 30) recent.removeAt(0)
         }
     }
 

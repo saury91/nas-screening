@@ -151,7 +151,7 @@ class MainActivity : AppCompatActivity() {
         // 前端会把"不知道状态"误判成"没初始化"，弹建管理员。
         // 这里先关掉，页面仍从 NAS 加载（行为与 0.4.x 一致），
         // 等转发层稳了再打开。
-        val useLocalWeb = false
+        val useLocalWeb = true
         if (!useLocalWeb) {
             web.loadUrl(server.trimEnd('/') + "/#/home")
             return
