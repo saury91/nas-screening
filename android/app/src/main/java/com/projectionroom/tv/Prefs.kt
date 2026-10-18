@@ -22,6 +22,21 @@ object Prefs {
         return id
     }
 
+    fun token(ctx: Context): String =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("token", "") ?: ""
+
+    fun setToken(ctx: Context, t: String) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putString("token", t).apply()
+    }
+
+    fun lastWebVersion(ctx: Context): String =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("web_ver", "") ?: ""
+
+    fun setLastWebVersion(ctx: Context, v: String) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString("web_ver", v).apply()
+    }
+
     fun setServer(ctx: Context, url: String) {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .edit().putString(KEY_SERVER, url.trim().trimEnd('/')).apply()

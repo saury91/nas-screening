@@ -10,6 +10,12 @@ let pinIsDefault = false;
 let onNeedLogin = null;
 
 export function getToken() {
+  // 原生侧有一份：页面从 NAS 域换成 127.0.0.1 后 localStorage 是空的，
+  // 靠它把登录态续上，用户不用重输 PIN
+  try {
+    const n = window.ProomNative?.getToken?.();
+    if (n) return n;
+  } catch (e) { /* 浏览器里没有这个桥 */ }
   try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; }
 }
 
@@ -18,6 +24,7 @@ export function setToken(t) {
     if (t) localStorage.setItem(KEY, t);
     else localStorage.removeItem(KEY);
   } catch (e) { /* 隐私模式 */ }
+  try { window.ProomNative?.setToken?.(t || ''); } catch (e) { /* 浏览器里没有这个桥 */ }
 }
 
 export function currentUser() { return me; }

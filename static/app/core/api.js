@@ -13,8 +13,11 @@ async function request(path, { method = 'GET', body, signal } = {}) {
   try {
     res = await fetch(path, init);
   } catch (e) {
-    throw new Error('网络断了，检查一下 NAS 是否在线');
+    // 连不上 NAS：交给上层显示「离线模式」横幅，同时让页面用缓存数据继续渲染
+    window.dispatchEvent(new CustomEvent('app:offline', { detail: { path } }));
+    throw new Error('连不上 NAS，正在使用离线数据');
   }
+  window.dispatchEvent(new CustomEvent('app:online'));
   let data = null;
   const ct = res.headers.get('Content-Type') || '';
   try {

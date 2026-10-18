@@ -53,3 +53,6 @@ android/.idea/
 
 # 本地构建产物（APK 从 CI 产物或 Release 拿）
 dist/
+
+# 构建时从 static/ 复制出来的前端产物
+android/app/src/main/assets/www/
