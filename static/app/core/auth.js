@@ -40,15 +40,36 @@ function readJSON(res) {
 }
 
 export async function fetchState() {
-  const res = await fetch('/api/auth/state', {
-    headers: getToken() ? { 'X-Token': getToken() } : {},
-  });
-  const d = await readJSON(res);
+  let d = null;
+  try {
+    const res = await fetch('/api/auth/state', {
+      headers: getToken() ? { 'X-Token': getToken() } : {},
+    });
+    const raw = await readJSON(res);
+    // 本地服务用 503 表示 NAS 不可达，别把它当成"没初始化"
+    if (res.ok && !raw.offline) d = raw;
+  } catch (e) { /* 网络断了，走缓存 */ }
+
+  if (!d) {
+    // 离线：用上次成功拿到的状态，至少把界面撑起来
+    const { load: cacheLoad } = await import('./offline.js');
+    const cached = await cacheLoad('/api/auth/state');
+    if (cached) {
+      initialized = !!cached.initialized;
+      me = cached.me || null;
+      profiles = cached.profiles || [];
+      return { ...cached, offline: true };
+    }
+    return { offline: true };
+  }
+
   initialized = !!d.initialized;
   pinIsDefault = !!d.needsPinChange;
   me = d.me || null;
   profiles = d.profiles || [];
   if (!me) setToken('');
+  // 存一份状态：离线冷启动靠它判断"已登录"，否则只能弹连不上
+  import('./offline.js').then(m => m.save('/api/auth/state', d)).catch(() => {});
   return d;
 }
 
