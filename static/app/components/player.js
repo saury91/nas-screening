@@ -1013,6 +1013,10 @@ function playUrl(url, position) {
   clearTimeout(switchTimer);
   switchTimer = setTimeout(endSwitch, 9000);   // 兜底：卡住也要恢复 UI
   showBuffer('缓冲中');
+  // 换源的瞬间 <video> 里还没有画面。部分 WebView（安卓）会把空的 video
+  // 画成「灰底大播放键」，所以先把 video 藏起来，并把模糊海报放回来顶上。
+  $('.pl-stage')?.classList.remove('playing');
+  $('#pl-poster')?.classList.remove('gone');
   const isM3u8 = isHlsUrl(url);
   const src = isM3u8 ? '/api/proxy?u=' + encodeURIComponent(url) : url;
   try {
