@@ -9,6 +9,7 @@
     <string name="setup_found">找到 NAS，正在连接…</string>
     <string name="setup_manual">也可以直接填：</string>
     <string name="setup_waiting">没自动找到，用手机扫左边的码</string>
+    <string name="setup_waiting_phone">没自动找到，直接填下面的地址</string>
     <string name="setup_ok">连接</string>
     <string name="setup_bad">地址要以 http:// 或 https:// 开头</string>
     <string name="unsupported_title">这台电视的浏览器内核太旧</string>
