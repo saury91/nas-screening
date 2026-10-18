@@ -12,12 +12,30 @@ android {
         // 老电视普遍是 5.x / 6.x，能装就先让它装
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildFeatures {
         buildConfig = true
+    }
+
+    // 发布签名：仓库里带一份固定密钥，保证每次构建的签名一致，
+    // 否则内网升级会因为"签名不一致"装不上。
+    // 在意安全的话，用环境变量 PROOM_KEYSTORE / PROOM_KEYSTORE_PASS 换成自己的。
+    val ksEnv = System.getenv("PROOM_KEYSTORE")
+    val ksFile = if (ksEnv != null) file(ksEnv) else rootProject.file("keystore/proom.jks")
+    val ksPass = System.getenv("PROOM_KEYSTORE_PASS") ?: "proom-release"
+
+    signingConfigs {
+        create("release") {
+            if (ksFile.exists()) {
+                storeFile = ksFile
+                storePassword = ksPass
+                keyAlias = System.getenv("PROOM_KEY_ALIAS") ?: "proom"
+                keyPassword = System.getenv("PROOM_KEY_PASS") ?: ksPass
+            }
+        }
     }
 
     buildTypes {
@@ -27,10 +45,19 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = if (ksFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
-        // 自带签名，侧载直接装，不用另配 keystore
+        // debug 与 release 同签名，装来装去不会互相覆盖失败
         debug {
-            applicationIdSuffix = ""
+            signingConfig = if (ksFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
