@@ -39,9 +39,12 @@ object LocalCast {
                     socket.receive(p)
                     val text = String(p.data, 0, p.length)
                     if (text.startsWith(PREFIX)) {
-                        val url = text.removePrefix(PREFIX).trim().trimEnd('/')
+                        val body = text.removePrefix(PREFIX).trim()
+                        // 格式：http://ip:port|设备名（设备名可缺省）
+                        val url = body.substringBefore('|').trim().trimEnd('/')
+                        val name = body.substringAfter('|', "").trim().ifEmpty { url.substringAfter("//") }
                         val host = url.substringAfter("//").substringBefore(":")
-                        found[host] = url
+                        found[host] = "$url|$name"
                     }
                 } catch (_: SocketTimeoutException) {
                     // 没回应就再广播一次，直到超时
@@ -53,9 +56,10 @@ object LocalCast {
             try { socket?.close() } catch (_: Exception) {}
         }
 
-        return found.values.joinToString(",", "[", "]") { url ->
-            val host = url.substringAfter("//")
-            """{"name":"$host","url":"$url"}"""
+        return found.values.joinToString(",", "[", "]") { item ->
+            val url = item.substringBefore('|')
+            val name = item.substringAfter('|', url.substringAfter("//"))
+            """{"name":"$name","url":"$url"}"""
         }
     }
 

@@ -113,26 +113,29 @@ export async function openCastSheet(info) {
       <h3>投屏到</h3>
       <button class="icon-btn" id="cast-close" data-focus title="关闭">${icon('close')}</button>
     </div>
-    <div class="cast-body" id="cast-body"><p class="hint">正在查找局域网里的电视…</p></div>
+    <div class="cast-body" id="cast-body">
+      <div id="cast-nas"><p class="hint">正在查找局域网里的电视…</p></div>
+    </div>
   </div>`;
   box.querySelector('#cast-close').onclick = closeCast;
 
   const body = box.querySelector('#cast-body');
+  const nasBox = box.querySelector('#cast-nas');
   let items = [];
   // 面板开着的时候每 2 秒刷一次：电视刚打开也能自己冒出来，不用重开面板
   clearInterval(castTimer);
   castTimer = setInterval(() => {
     if (box.hidden) { clearInterval(castTimer); return; }
-    renderTargets(body, info).catch(() => {});
+    renderTargets(nasBox, info).catch(() => {});
   }, 2000);
   try {
     items = await listTargets();
   } catch (e) {
-    body.innerHTML = `<p class="hint">拿不到设备列表：${esc(e.message)}</p>`;
+    nasBox.innerHTML = `<p class="hint">拿不到设备列表：${esc(e.message)}</p>`;
     return;
   }
 
-  renderTargets(body, info, items);
+  renderTargets(nasBox, info, items);
   renderLocal(body, info);
 }
 
@@ -144,9 +147,13 @@ async function renderLocal(body, info) {
   body.appendChild(box);
 
   const tvs = await discoverLocal();
+  window.__hasLocalCast = tvs.length > 0;
   if (!tvs.length) { box.remove(); return; }
+  // 已经有直连设备了：把上面那句"没找到在线的电视"收掉，免得看着像失败
+  const hint = box.parentElement?.querySelector('#cast-nas .hint');
+  if (hint) hint.remove();
 
-  box.innerHTML = '<div class="cast-group">直连电视<span>不需要 NAS</span></div>' +
+  box.innerHTML = '<div class="cast-group">直连电视<span>· 不需要 NAS</span></div>' +
     tvs.map((t, i) => `
       <button class="cast-item" data-li="${i}" data-focus>
         <span class="cast-ico">${icon('tv')}</span>
@@ -182,6 +189,7 @@ async function renderTargets(body, info, preloaded) {
     }
   }
   if (!items.length) {
+    if (window.__hasLocalCast) { body.innerHTML = ''; return; }
     body.innerHTML = `<p class="hint">没找到在线的电视。<br>
       电视上打开放映室（保持前台）就会出现在这里。</p>`;
     return;

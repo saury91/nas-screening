@@ -112,7 +112,9 @@ class CastServer(
                     val msg = String(p.data, 0, p.length)
                     if (!msg.startsWith("PROOM_TV_DISCOVER")) continue
                     val ip = localIp() ?: continue
-                    val reply = "PROOM_TV http://$ip:$TCP_PORT".toByteArray()
+                    val model = android.os.Build.MODEL?.replace(" ", "") ?: ""
+                    val name = if (model.isEmpty()) "放映室电视" else "放映室电视 · $model"
+                    val reply = "PROOM_TV http://$ip:$TCP_PORT|$name".toByteArray()
                     ds.send(DatagramPacket(reply, reply.size, p.address, p.port))
                 }
             } catch (e: Exception) {
