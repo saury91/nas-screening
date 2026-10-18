@@ -8,7 +8,6 @@ import { initNav, markActive, openSearch, closeSearch, searchVisible } from './c
 import { initMusicPlayer } from './components/musicplayer.js';
 import { startReceiver } from './core/cast.js';
 
-import { fetchState, showGate, hideGate, onAuthLost, currentUser, autoTvLogin } from './core/auth.js';
 
 import * as home from './pages/home.js';
 import * as browse from './pages/browse.js';
@@ -172,24 +171,6 @@ window.addEventListener('player:closed', () => {
   }
 });
 
-/** NAS 连不上：页面本身是本地来的，所以这里只说明情况并给重试 */
-function showOfflineGate() {
-  const box = document.querySelector('#auth-gate');
-  if (!box) return;
-  box.hidden = false;
-  document.body.classList.add('gated');
-  box.innerHTML = `<div class="gate-card gate-solo">
-    <div class="gate-brand">
-      <div class="gate-logo">${'▶'}</div>
-      <div>
-        <h2>连不上 NAS</h2>
-        <p class="hint">放映室的服务没有响应。检查 NAS 是否开机、网络是否正常。</p>
-      </div>
-    </div>
-    <button class="btn primary" style="margin-top:18px" onclick="location.reload()">重新连接</button>
-  </div>`;
-}
-
 // 页面里没接住的异常：打到控制台（安卓端会转发到 logcat），方便定位
 window.addEventListener('error', e => {
   try {
@@ -219,42 +200,8 @@ async function boot() {
   // 不再提示"离线模式"：App 本来就在本地跑，NAS 只是用来更新资源。
   // 连不上就一直用本地缓存，安静地继续即可。
 
-  // 内网也要个门：没登录就不装配页面，避免满屏 401
-  try {
-    const st = await fetchState();
-    // 本地服务告诉我们 NAS 不可达。
-    // 有缓存的登录态就继续渲染（界面能用），否则给明确的离线页
-    if (st && st.offline) {
-      if (st.me) {
-        hideGate();
-        // 别恢复到上次的详情页——那页的数据多半没缓存，会显示"没找到"
-        if (location.hash && !location.hash.startsWith('#/home')) location.hash = '#/home';
-      } else {
-        showOfflineGate();
-        return;
-      }
-    }
-    if (!st.initialized || !st.me) {
-      // 电视端：先用固定账户自动登录，省得每次开机都要按遥控器输 PIN
-      const isTv = /ProomTV\//.test(navigator.userAgent) ||
-        document.documentElement.classList.contains('tv');
-      if (isTv && st.initialized && await autoTvLogin()) {
-        location.reload();
-        return;
-      }
-      showGate();
-      return;
-    }
-    hideGate();
-  } catch (e) {
-    showOfflineGate();
-    return;
-  }
-  onAuthLost(() => showGate());
+  // 没有账户：直接装配页面
   initNav();
-  // 本地有 token 但 Cookie 可能丢了（WebView 重启/清缓存）：
-  // 让服务端补发一次，视频分片和封面图才带得上认证
-  api.post('/api/auth/touch', {}).catch(() => {});
   // 遥控器菜单键：播放器开着就切「选集/线路」面板，否则打开地址设置
   window.addEventListener('app:menu', () => {
     if (window.__proomMenu && window.__proomMenu()) return;
