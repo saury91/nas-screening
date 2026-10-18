@@ -124,6 +124,9 @@ class LocalServer(
                 } else ByteArray(0)
 
                 when {
+                    // 通用 JSON 代发：源站不会给 127.0.0.1 发 CORS 头，
+                    // 必须由原生这边代发，页面才有"离线自己问源站"的可能
+                    path == "/__fetch" -> fetchJson(sock, query)
                     // 没配置 NAS 时，媒体只能本地代拉
                     path == "/api/proxy" && Prefs.server(ctx).isBlank() -> localMedia(sock, query)
                     path == "/__local/status" -> json(sock, statusJson())
@@ -264,6 +267,38 @@ class LocalServer(
         }
     }
 
+    /** /__fetch?u=<url>&r=<referer>：代发 GET，返回 JSON（带 CORS 头） */
+    private fun fetchJson(sock: Socket, query: String) {
+        val q = parseQuery(query)
+        val url = q["u"]
+        if (url.isNullOrBlank() || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            json(sock, """{"ok":false,"msg":"地址不合法"}""", 400); return
+        }
+        // 别把手机变成内网扫描器：不代发内网地址
+        val host = try { java.net.URI(url).host ?: "" } catch (e: Exception) { "" }
+        if (host.startsWith("127.") || host.startsWith("10.") || host.startsWith("192.168.") ||
+            Regex("^172\\.(1[6-9]|2\\d|3[01])\\.").containsMatchIn(host)) {
+            json(sock, """{"ok":false,"msg":"不允许内网地址"}""", 403); return
+        }
+        val referer = q["r"]?.takeIf { it.isNotBlank() }
+            ?: (try { val u = java.net.URI(url); "${u.scheme}://${u.host}/" } catch (e: Exception) { "" })
+        val resp = try {
+            HttpMini.fetch(url, referer, UA, 12000)
+        } catch (e: Exception) {
+            json(sock, """{"ok":false,"msg":"源站连不上"}""", 502); return
+        }
+        val out = sock.getOutputStream()
+        val ctype = if (resp.ctype.isBlank()) "application/json; charset=utf-8" else resp.ctype
+        val head = "HTTP/1.1 ${resp.code} OK\r\nContent-Type: $ctype\r\n" +
+            "Content-Length: ${resp.body.size}\r\nCache-Control: no-store\r\n" +
+            "Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n"
+        out.write(head.toByteArray()); out.write(resp.body); out.flush()
+        synchronized(recent) {
+            recent.add("fetch $url -> ${resp.code} ${resp.body.size}b")
+            if (recent.size > 30) recent.removeAt(0)
+        }
+    }
+
     // ── 本地媒体代理（NAS 离线时用）──────────────────────────
     private fun parseQuery(q: String): Map<String, String> =
         q.split("&").filter { it.contains("=") }.associate {
@@ -282,8 +317,10 @@ class LocalServer(
         "${u.scheme}://${u.host}/"
     } catch (e: Exception) { "" }
 
+    // 用绝对地址：hls.js 解析相对 URI 时会带上 manifest 的 query，
+    // 加密流的 EXT-X-KEY 容易因此解析歪掉
     private fun wrapMedia(url: String): String =
-        "/api/proxy?u=" + java.net.URLEncoder.encode(url, "UTF-8")
+        "http://127.0.0.1:$port/api/proxy?u=" + java.net.URLEncoder.encode(url, "UTF-8")
 
     private fun absolutize(link: String, base: java.net.URI): String = try {
         if (link.startsWith("http://") || link.startsWith("https://")) link

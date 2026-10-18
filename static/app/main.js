@@ -196,6 +196,9 @@ window.addEventListener('unhandledrejection', e => {
 });
 
 async function boot() {
+  // 在线时同步一次配置包（片源清单），离线才有"自己问源站"的依据
+  import('./core/aggregate.js').then(m => m.syncBundle()).catch(() => {});
+
   // 离线提示：只弹一条 toast，几秒后自动消失。
   // 之前做成顶部横幅，正好压住导航条，想点"电影/剧集"都点不到。
   let lastOfflineToast = 0;
