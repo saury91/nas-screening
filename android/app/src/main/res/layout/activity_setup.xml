@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg"
@@ -9,6 +10,7 @@
     android:paddingEnd="72dp">
 
     <LinearLayout
+        android:id="@+id/qrBox"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
@@ -34,6 +36,7 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/formBox"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
