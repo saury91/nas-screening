@@ -357,3 +357,28 @@ def login(pin, ip=""):
     _reset_fail(ip)
     pid = row[0][0]
     return get_profile(pid), issue_token(pid)
+
+
+# ── 电视专用账户 ───────────────────────────────────────────────
+TV_PIN = "999999"
+
+
+def tv_profile():
+    """电视端免输入用的固定账户：没有就建一个。
+
+    为什么不直接复用管理员的 PIN：
+      * 电视是全家人共用的，观看记录不该记到某个人头上；
+      * 管理员 PIN 往往是家里最敏感的那个，不该固定写进电视里。
+
+    注意：这是内网便利优先的设计，999999 是公开的。想更严格就在设置里
+    改掉这个账户的 PIN，电视端会自动回退到输 PIN 的界面。
+    """
+    row = dbrun("SELECT * FROM profiles WHERE pin_lookup=?",
+                (pin_lookup(TV_PIN),), fetch=True)
+    if row:
+        return _row(row[0])
+    try:
+        return create_profile("电视", TV_PIN, role="member")
+    except AuthError:
+        # PIN 被别的账户占了：不抢，让电视退回手动登录
+        return None
