@@ -14,20 +14,15 @@ import android.content.pm.PackageManager
  */
 object Device {
 
-    fun isTv(ctx: Context): Boolean {
-        val pm = ctx.packageManager
-        if (pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) return true
-
-        val ui = ctx.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-        if (ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION) return true
-
-        // 有些盒子既不声明 Leanback 也不报 TELEVISION 模式：
-        // 没有触摸屏 + 屏幕够大，按电视处理（平板有触摸，不会被误判）
-        val noTouch = !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
-        val wide = ctx.resources.configuration.smallestScreenWidthDp >= 600
-        return noTouch && wide
-    }
+    /**
+     * 电视还是手机，**在编译期就定了**（见 build.gradle.kts 的 productFlavors）。
+     *
+     * 以前是运行时猜（Leanback / UiMode / 有没有触摸屏），
+     * 同一个包装到不同设备上行为会飘——手机被当成电视、平板被当成手机。
+     * 现在 tv / phone 是两个独立的包，判断退化成读一个常量。
+     */
+    fun isTv(): Boolean = BuildConfig.IS_TV
 
     /** WebView 的 UA 尾巴：前端靠它决定用哪套布局 */
-    fun uaTag(ctx: Context): String = if (isTv(ctx)) "ProomTV/" else "ProomMobile/"
+    fun uaTag(): String = if (BuildConfig.IS_TV) "ProomTV/" else "ProomPhone/"
 }

@@ -137,9 +137,18 @@ python3 tools/account.py kick              # 踢掉所有已登录设备
 
 ## 电视 / 手机 App（Android）
 
+**两个独立的安装包**：交互差别太大，与其让同一个包在运行时猜设备，不如编译期就分开。
+
+| 安装包 | applicationId | 界面 | 会话 | 投屏 |
+|---|---|---|---|---|
+| `app-tv-release.apk` | `com.projectionroom.tv` | 横屏 · 遥控器 | 每次冷启动重输 PIN | 无（接收端） |
+| `app-phone-release.apk` | `com.projectionroom.phone` | 竖屏 · 触摸 | 30 天免登录 | 有（发送端） |
+
+两者共用同一套 Web 前端，只是外壳行为不同；UA 分别是 `ProomTV/` 与 `ProomPhone/`。
+
 ![电视端](docs/screenshot-tv.png)
 
-Android TV 端已经能日常用了（0.2.0）：一个全屏 WebView 装现有前端，播放交给原生 ExoPlayer。
+Android TV 端已经能日常用了：一个全屏 WebView 装现有前端，播放交给原生 ExoPlayer。
 **电视上没有"注册/建管理员"**——初始化是 NAS 上一次性的事，电视只输 PIN。
 
 ![电视配对](docs/screenshot-tv-pair.png)
@@ -162,16 +171,7 @@ Android TV 端已经能日常用了（0.2.0）：一个全屏 WebView 装现有�
 > 如果 NAS 开了防火墙，记得放行 **UDP 8897**（自动发现）和 **TCP 8898**（扫码配对），
 > 否则电视只能用第三条路手动填地址。
 
-**同一个 APK 也装手机**：启动时自动识别设备（Leanback / UiMode / 无触摸屏），
-
-| | 电视 | 手机 |
-|---|---|---|
-| 方向 | 强制横屏 | 跟随系统 |
-| 会话 | 每次冷启动重输 PIN | 30 天免登录 |
-| 配对页 | 显示二维码，手机扫码发地址 | 不显示二维码（扫自己没意义），直接填 |
-| UA | `ProomTV/x` | `ProomMobile/x` |
-
-手机端的投屏按钮还没做（P1），现在手机就是"随身版网页"。
+手机端：竖屏、长会话，播放时自动横屏全屏，播放器右上角有投屏按钮。
 
 ### 签名与内网自升级
 
@@ -184,8 +184,9 @@ APK 用固定密钥签名（`android/keystore/proom.jks`，密码 `proom-release
 发布新版本：
 
 ```bash
-cd android && gradle assembleRelease        # 产物 5.3MB，比 debug 小
-cd .. && ./tools/publish-apk.sh             # 拷到 data/apps/ 并写版本信息
+cd android && gradle assembleTvRelease assemblePhoneRelease
+cd .. && ./tools/publish-apk.sh tv          # 拷到 data/apps/tv.apk
+cd .. && ./tools/publish-apk.sh phone       # 拷到 data/apps/phone.apk
 ```
 
 App 启动时会问一句 `GET /api/app/latest?kind=tv`，比本地 `versionCode` 新就弹窗，
