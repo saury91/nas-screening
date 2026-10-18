@@ -79,6 +79,20 @@ export async function login(pin) {
   return d;
 }
 
+/** 电视端免输 PIN：用固定账户「电视」/ 999999 登录 */
+export async function autoTvLogin() {
+  try {
+    const res = await fetch('/api/auth/tv', { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d.ok || !d.token) return false;
+    setToken(d.token);
+    me = d.me; profiles = d.profiles || [];
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 export async function logout() {
   try { await post('/api/auth/logout', {}); } catch (e) { /* 忽略 */ }
   setToken('');

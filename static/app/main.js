@@ -7,7 +7,7 @@ import { syncFavs, store } from './core/store.js';
 import { initNav, markActive, openSearch, closeSearch, searchVisible } from './components/nav.js';
 import { initMusicPlayer } from './components/musicplayer.js';
 import { startReceiver } from './core/cast.js';
-import { fetchState, showGate, hideGate, onAuthLost, currentUser } from './core/auth.js';
+import { fetchState, showGate, hideGate, onAuthLost, currentUser, autoTvLogin } from './core/auth.js';
 
 import * as home from './pages/home.js';
 import * as browse from './pages/browse.js';
@@ -168,7 +168,17 @@ async function boot() {
   // 内网也要个门：没登录就不装配页面，避免满屏 401
   try {
     const st = await fetchState();
-    if (!st.initialized || !st.me) { showGate(); return; }
+    if (!st.initialized || !st.me) {
+      // 电视端：先用固定账户自动登录，省得每次开机都要按遥控器输 PIN
+      const isTv = /ProomTV\//.test(navigator.userAgent) ||
+        document.documentElement.classList.contains('tv');
+      if (isTv && st.initialized && await autoTvLogin()) {
+        location.reload();
+        return;
+      }
+      showGate();
+      return;
+    }
     hideGate();
   } catch (e) {
     showGate();

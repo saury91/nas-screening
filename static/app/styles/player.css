@@ -242,3 +242,7 @@
 .pl-stage .art-poster{display:none!important}
 /* 视频还没出画时，让底下的模糊封面透出来，而不是一块纯黑 */
 .pl-stage .art-video-player{background:transparent!important}
+
+/* 兜底：视频元素与容器都不允许出现白底（某些电视 WebView 会把空的 <video> 画成白色） */
+.pl-stage video{background:#07080b!important}
+.pl-stage .art-video-player{background:#07080b!important}
