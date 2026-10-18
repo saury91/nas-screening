@@ -148,7 +148,7 @@ async function loadSources(root) {
 }
 
 function bind(root) {
-  root.querySelector('#filters').addEventListener('click', e => {
+  root.querySelector('#filters')?.addEventListener('click', e => {
     const b = e.target.closest('.chips .chip');
     if (!b) return;
     const group = b.closest('[data-group]')?.dataset.group;
@@ -159,7 +159,7 @@ function bind(root) {
   });
 
   // 兜底：不支持 IntersectionObserver 时仍可点按钮加载
-  root.querySelector('#load-slot').addEventListener('click', e => {
+  root.querySelector('#load-slot')?.addEventListener('click', e => {
     if (e.target.closest('#more')) fetchPage(root, { replace: false });
   });
 }
@@ -231,6 +231,8 @@ async function fetchPage(root, { replace = false, first = false, silent = false 
   const list = root.querySelector('#list');
   const slot = root.querySelector('#load-slot');
   const hint = root.querySelector('#hint');
+  // 页面可能已经被切走（异步返回时 DOM 已换），这时什么都别写
+  if (!list || !slot || !hint) { st.loading = false; return; }
 
   if (first) {
     list.innerHTML = `<div class="grid">${Array(12).fill(

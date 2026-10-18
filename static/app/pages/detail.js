@@ -226,7 +226,7 @@ function paint(root, d, ctx) {
     } catch (e) { toast(e.message, 'err'); }
   };
 
-  root.querySelector('#lines').addEventListener('click', e => {
+  root.querySelector('#lines')?.addEventListener('click', e => {
     const b = e.target.closest('[data-si]');
     if (!b) return;
     userPicked = true;
