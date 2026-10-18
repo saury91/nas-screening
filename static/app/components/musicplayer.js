@@ -6,6 +6,17 @@ import { setFocus, clearFocus } from '../core/focus.js';
 
 const audio = () => $('#audio');
 
+// App 壳里本地服务只负责页面与接口；大媒体文件交给 NAS 直连
+// （10MB 音频经本地转发会被整块缓冲，浏览器等不及会报 error 4）
+function absoluteMedia(u) {
+  if (!u || !u.startsWith('/api/')) return u;
+  try {
+    const nas = window.ProomNative?.server?.();
+    if (nas && /^https?:\/\//.test(nas)) return nas.replace(/\/$/, '') + u;
+  } catch (e) { /* 浏览器里没有这个桥 */ }
+  return u;
+}
+
 let queue = [];
 let idx = -1;
 let playing = false;
@@ -253,7 +264,10 @@ function load(autoplay) {
         url = d.url;
       }
       const a = audio();
-      a.src = url;
+      // 在 App 壳里把媒体地址指回 NAS：
+      // 大文件（10MB 音频）经本地服务转发会被整块缓冲，浏览器等不及直接 error 4；
+      // 音频元素跨域加载不需要 CORS，直接连 NAS 最稳。
+      a.src = absoluteMedia(url);
       // 注意：这里**不要**建音频图。createMediaElementSource 一旦调用，
       // 声音就只从 AudioContext 走；而 Chrome 的自动播放策略会把
       // 非手势上下文创建的 AudioContext 挂起，结果就是「时间在走、没有声音」。
