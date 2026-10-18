@@ -5,6 +5,7 @@ import { initFocus, clearFocus, focusFirst } from './core/focus.js';
 import { syncFavs, store } from './core/store.js';
 import { initNav, markActive, openSearch, closeSearch, searchVisible } from './components/nav.js';
 import { initMusicPlayer } from './components/musicplayer.js';
+import { startReceiver } from './core/cast.js';
 import { fetchState, showGate, hideGate, onAuthLost, currentUser } from './core/auth.js';
 
 import * as home from './pages/home.js';
@@ -174,6 +175,16 @@ async function boot() {
   }
   onAuthLost(() => showGate());
   initNav();
+  // 电视端把自己注册成投屏接收端；收到指令就用同一套播放器播
+  startReceiver((cmd) => {
+    import('/static/app/components/player.js').then(({ openPlayer }) => {
+      openPlayer({
+        name: cmd.title || '投屏播放',
+        sources: [{ site: '投屏', eps: [{ name: '正片', url: cmd.url }] }],
+      }, { position: cmd.position || 0 });
+      // 投屏时把音量/进度留给电视自己，页面不用滚动
+    }).catch(() => {});
+  });
   initFocus();
   initMusicPlayer();
   onRoute(renderPage);

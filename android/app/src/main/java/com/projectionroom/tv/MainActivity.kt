@@ -294,6 +294,16 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    /** 手机上进播放器切横屏全屏，退出时还原 */
+    fun setPlayerOrientation(on: Boolean) {
+        if (isTv) return
+        requestedOrientation = if (on) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
     /** 供 JS 桥调用 */
     fun playNative(url: String, title: String) {
         if (url.isBlank()) return

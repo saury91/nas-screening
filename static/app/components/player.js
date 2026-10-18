@@ -2,6 +2,7 @@
 // 交互统一收进播放器控制栏：上一集/下一集/线路选集；画面只保留缓冲状态（进度 + 网速）。
 import { $, esc, icon, toast, fmtSpeed } from '../core/dom.js';
 import { api } from '../core/api.js';
+import { openCastSheet } from '../core/cast.js';
 import { setFocus, clearFocus } from '../core/focus.js';
 
 let art = null;
@@ -130,6 +131,7 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
           <p>${esc(src.site || '')}${item.year ? ` · ${esc(item.year)}` : ''}${isLive ? ' · 直播' : ''}<span class="pl-res" id="pl-res"></span></p>
         </div>
         <div class="pl-tools">
+          ${isTvDevice() ? '' : `<button class="icon-btn" id="pl-cast" title="投屏到电视" data-focus>${icon('tv')}</button>`}
           <button class="icon-btn" id="pl-close" title="关闭（Esc）" data-focus>${icon('close')}</button>
         </div>
       </div>
@@ -143,6 +145,16 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
       </aside>
     </div>`;
   bindUI();
+  // 手机端：进播放器就横屏全屏（电视本来就是横屏，浏览器没有这个桥）
+  try { window.ProomNative?.setLandscape?.(true); } catch (e) {}
+  const castBtn = layer().querySelector('#pl-cast');
+  if (castBtn) {
+    castBtn.onclick = () => {
+      const info = castInfo();
+      if (!info) { toast('还没有可投的内容', 'err'); return; }
+      openCastSheet(info);
+    };
+  }
   waitState = true;
   booting = true;
   triedLines = new Set();
@@ -154,6 +166,25 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
 }
 
 function currentSource() { return state.item.sources[state.si]; }
+
+// 电视端不显示投屏按钮（它本身就是接收端）
+function isTvDevice() {
+  return /ProomTV\//.test(navigator.userAgent) ||
+    document.documentElement.classList.contains('tv');
+}
+
+/** 投屏用：当前在播的地址、标题、进度 */
+export function castInfo() {
+  if (!state) return null;
+  const src = currentSource();
+  const ep = src && src.eps ? (src.eps[state.ei] || src.eps[0]) : null;
+  if (!ep || !ep.url) return null;
+  return {
+    url: ep.url,
+    title: state.item.name + (ep.name && !state.isLive ? ' · ' + ep.name : ''),
+    position: art && art.currentTime ? Math.floor(art.currentTime) : Math.floor(state.position || 0),
+  };
+}
 
 // 只改高亮和顶部那句「正在播放」，不动 DOM —— 重建会把选集的滚动位置和焦点一起清掉
 function syncSide() {
@@ -920,6 +951,8 @@ async function saveProgress(force = false) {
 
 export function closePlayer(silent = false) {
   if (!state) return;
+  // 退出播放器还原竖屏（手机）
+  try { window.ProomNative?.setLandscape?.(false); } catch (e) {}
   const el = layer();
   // 先摘掉 pip-out，避免 exitPictureInPicture 触发的 leave 事件又调回这里
   if (el) el.classList.remove('pip-out');
