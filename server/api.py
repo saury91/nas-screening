@@ -806,8 +806,7 @@ class Handler(BaseHTTPRequestHandler):
             return send({"ok": True, "device": dev})
         if path == "/api/cast/send":
             try:
-                cast.send(b.get("target") or "", b.get("url") or "",
-                          b.get("title") or "", b.get("position") or 0)
+                cast.send(b.get("target") or "", b)
             except KeyError as e:
                 return send({"ok": False, "msg": str(e).strip("'")})
             except ValueError as e:

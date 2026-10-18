@@ -56,9 +56,13 @@ def targets(exclude=""):
     return out
 
 
-def send(target, url, title="", position=0):
-    if not target or not url:
-        raise ValueError("缺目标或地址")
+def send(target, payload):
+    """payload 是前端给的整包：url/title/position + 整部片的线路与集数"""
+    if not target or not payload:
+        raise ValueError("缺目标或内容")
+    url = payload.get("url") or ""
+    if not url:
+        raise ValueError("缺播放地址")
     now = time.time()
     with _lock:
         dev = _devices.get(target)
@@ -67,8 +71,11 @@ def send(target, url, title="", position=0):
         if now - dev["at"] > ONLINE_TTL:
             raise KeyError("设备不在线")
         q = _commands.setdefault(target, [])
-        q.append({"kind": "play", "url": url, "title": title or "",
-                  "position": float(position or 0), "at": now})
+        item = dict(payload)
+        item.pop("target", None)
+        item["kind"] = "play"
+        item["at"] = now
+        q.append(item)
         del q[:-MAX_COMMANDS]
     return True
 

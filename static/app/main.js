@@ -198,10 +198,17 @@ async function boot() {
   // 电视端把自己注册成投屏接收端；收到指令就用同一套播放器播
   startReceiver((cmd) => {
     import('/static/app/components/player.js').then(({ openPlayer }) => {
-      openPlayer({
-        name: cmd.title || '投屏播放',
-        sources: [{ site: '投屏', count: 1, eps: [{ name: '正片', url: cmd.url }] }],
-      }, { position: cmd.position || 0 });
+      // 手机/电脑会把整部片的线路与集数一起发过来；只有 url 的老格式兜底成单集
+      const item = cmd.item && cmd.item.sources && cmd.item.sources.length
+        ? cmd.item
+        : { name: cmd.title || '投屏播放',
+            sources: [{ site: '投屏', count: 1, eps: [{ name: '正片', url: cmd.url }] }] };
+      openPlayer(item, {
+        si: cmd.si || 0,
+        ei: cmd.ei || 0,
+        position: Math.floor(cmd.position || 0),
+        isLive: !!cmd.isLive,
+      });
       // 投屏时把音量/进度留给电视自己，页面不用滚动
     }).catch(() => {});
   });

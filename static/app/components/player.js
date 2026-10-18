@@ -199,10 +199,27 @@ export function castInfo() {
   const src = currentSource();
   const ep = src && src.eps ? (src.eps[state.ei] || src.eps[0]) : null;
   if (!ep || !ep.url) return null;
+  // 整部片的线路与集数一起带过去：否则电视那边只能看到一个"单集投屏"，
+  // 没法换源、也没法换集
   return {
     url: ep.url,
     title: state.item.name + (ep.name && !state.isLive ? ' · ' + ep.name : ''),
     position: art && art.currentTime ? Math.floor(art.currentTime) : Math.floor(state.position || 0),
+    si: state.si,
+    ei: state.ei,
+    isLive: !!state.isLive,
+    item: {
+      name: state.item.name,
+      pic: state.item.pic || '',
+      year: state.item.year || '',
+      desc: state.item.desc || '',
+      sources: (state.item.sources || []).map(src2 => ({
+        site: src2.site || '',
+        q: src2.q || '',
+        count: (src2.eps || []).length,
+        eps: (src2.eps || []).map(e => ({ name: e.name || '', url: e.url || '' })),
+      })),
+    },
   };
 }
 
