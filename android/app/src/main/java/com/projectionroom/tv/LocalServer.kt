@@ -217,10 +217,13 @@ class LocalServer(
             if (path.startsWith("/api/")) "application/json; charset=utf-8" else resp.ctype
         } else resp.ctype
 
+        // 封面图允许缓存：离线时 WebView 能直接从缓存里拿，不至于全是破图
+        val cacheCtl = if (resp.ctype.startsWith("image/")) "public, max-age=604800"
+                       else "no-store"
         val head = "HTTP/1.1 ${resp.code} OK\r\n" +
             "Content-Type: $ctype\r\n" +
             "Content-Length: ${resp.body.size}\r\n" +
-            "Cache-Control: no-store\r\n" +
+            "Cache-Control: $cacheCtl\r\n" +
             "Connection: close\r\n\r\n"
         out.write(head.toByteArray())
         out.write(resp.body)
