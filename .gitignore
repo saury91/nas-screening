@@ -56,3 +56,10 @@ dist/
 
 # 构建时从 static/ 复制出来的前端产物
 android/app/src/main/assets/www/
+
+# ── 原生工程（KMP）构建产物 ──
+native/.gradle/
+native/build/
+native/*/build/
+native/local.properties
+native/.kotlin/
