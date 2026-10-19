@@ -31,13 +31,15 @@ import com.projectionroom.ui.theme.ProomType
  * 和 TV 刻意不同 —— 电视是「遥控器 + 焦点」，手机是「拇指 + 触摸」。
  * TV 那边靠货架横向滑动，手机这边用网格，一屏能看到更多、手指不用来回甩。
  *
- * tab 只有三个：首页 / 搜索 / 我的。
+ * 四个 tab：影视 / 直播 / 音乐 / 我的。
+ * 搜索不占 tab —— 顶栏那个「搜索」按钮就是入口，键盘弹出即用。
  * 没有「设置」—— 片源、直播源、备份都在 PC 上做，这是产品定死的边界。
  */
 @Composable
 fun PhoneShell(
     home: @Composable () -> Unit,
-    search: @Composable () -> Unit,
+    live: @Composable () -> Unit,
+    music: @Composable () -> Unit,
     mine: @Composable () -> Unit,
 ) {
     var tab by remember { mutableIntStateOf(0) }
@@ -46,7 +48,8 @@ fun PhoneShell(
         Box(Modifier.weight(1f)) {
             when (tab) {
                 0 -> home()
-                1 -> search()
+                1 -> live()
+                2 -> music()
                 else -> mine()
             }
         }
@@ -56,7 +59,7 @@ fun PhoneShell(
 
 @Composable
 private fun PhoneTabBar(current: Int, onSelect: (Int) -> Unit) {
-    val items = listOf("首页", "搜索", "我的")
+    val items = listOf("影视", "直播", "音乐", "我的")
     Column(Modifier.fillMaxWidth()) {
         // 极细的一条分隔：不用描边，靠明度差
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(ProomColor.line))

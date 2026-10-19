@@ -196,10 +196,29 @@ class MainActivity : ComponentActivity() {
                                         onMore = { cat -> screen = Screen.Browse(cat, s) },
                                     )
                                 },
-                                search = {
-                                    SearchScreen(
+                                live = {
+                                    LiveScreen(
                                         api = api,
-                                        onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
+                                        onPlay = { ch ->
+                                            val vod = Vod(
+                                                name = ch.name,
+                                                lines = listOf(
+                                                    com.projectionroom.shared.model.Line(
+                                                        site = "直播",
+                                                        episodes = listOf(
+                                                            com.projectionroom.shared.model.Episode("直播", ch.urls.first())
+                                                        ),
+                                                    )
+                                                ),
+                                            )
+                                            screen = Screen.Play(vod, 0, 0, s)
+                                        },
+                                    )
+                                },
+                                music = {
+                                    MusicScreen(
+                                        api = api,
+                                        onOpenPlaylist = { p -> screen = Screen.Playlist(p.id, s) },
                                     )
                                 },
                                 mine = {
