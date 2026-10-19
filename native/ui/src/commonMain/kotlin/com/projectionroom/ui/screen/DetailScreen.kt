@@ -2,6 +2,10 @@ package com.projectionroom.ui.screen
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -216,19 +220,80 @@ private fun PhoneDetail(
     onSelectLine: (Int) -> Unit,
     onPlay: (lineIndex: Int, epIndex: Int) -> Unit,
     onBack: () -> Unit,
-) {
-    val line = vod.lines.getOrNull(lineIndex)
-    Column(Modifier.fillMaxSize()) {
-        // 顶部标题栏：新页面必须有明确的返回入口和标题（之前只有一个「返回」按钮
-        // 混在操作区里，看着不像一个独立页面）
-        DetailTopBar(title = vod.name, onBack = onBack)
-        Column(
-            Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = ProomSpace.lg)
-                .padding(bottom = ProomSpace.lg)
-        ) {
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
+) {    val line = vod.lines.getOrNull(lineIndex)
+    val scroll = rememberScrollState()
+    // 滚过内容标题后顶栏才显示标题，避免与内容片名重复
+    // 两段式：背景先变实（浅滚），标题等内容标题滚出视野后才淡入 —— 避免同一屏出现两个片名
+    val scrolled by remember { derivedStateOf { scroll.value > 16 } }
+    val titleIn by remember { derivedStateOf { scroll.value > 150 } }
+    val barSolid by animateFloatAsState(if (scrolled) 1f else 0f, tween(180), label = "detailBar")
+    val titleAlpha by animateFloatAsState(if (titleIn) 1f else 0f, tween(220), label = "detailTitle")
+
+    Box(Modifier.fillMaxSize().background(ProomColor.bg)) {
+        // 氛围层：海报自身的模糊光，向下渐隐到页面底色
+        if (vod.pic.isNotBlank()) {
+            androidx.compose.foundation.layout.Box(
+                Modifier.fillMaxWidth().height(420.dp).background(ProomColor.bg)
+            ) {
+                AsyncImage(
+                    model = vod.pic,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    alpha = 0.72f,
+                    modifier = Modifier.fillMaxSize().blur(46.dp),
+                )
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(
+                            0f to ProomColor.bg.copy(alpha = 0.10f),
+                            0.45f to ProomColor.bg.copy(alpha = 0.62f),
+                            1f to ProomColor.bg,
+                        )
+                    )
+                )
+            }
+        }
+
+        Column(Modifier.fillMaxSize()) {
+            // 顶栏：透明 → 实底，标题淡入（滚动后才出现）
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp + topInset)
+                    .background(ProomColor.bg.copy(alpha = barSolid))
+                    .padding(start = 8.dp, end = 20.dp, top = topInset),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = com.projectionroom.ui.component.TabIcons.Back,
+                        contentDescription = "返回",
+                        tint = ProomColor.text,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+                Text(
+                    vod.name,
+                    style = ProomType.title,
+                    color = ProomColor.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 4.dp).alpha(titleAlpha),
+                )
+            }
+
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(scroll)
+                    .padding(horizontal = ProomSpace.lg)
+                    .padding(top = ProomSpace.lg, bottom = ProomSpace.lg)
+            ) {
+
             Spacer(Modifier.height(4.dp))
         Row {
             Poster(vod, Modifier.width(104.dp))
@@ -305,6 +370,7 @@ private fun PhoneDetail(
             }
             Spacer(Modifier.height(8.dp))
         }
+            }
         }
     }
 }
