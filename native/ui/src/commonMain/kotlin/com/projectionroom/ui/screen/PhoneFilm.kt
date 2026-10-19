@@ -94,6 +94,8 @@ fun PhoneFilm(
     loading: Boolean,
     onOpen: (Vod) -> Unit,
     onSearch: () -> Unit,
+    /** 状态栏高度：顶栏画在它下面，Hero 背景通到屏幕最顶 */
+    statusInset: Dp = 0.dp,
     /** 下拉刷新：首页重拉 feed；分类 tab 由内部重拉第一页 */
     onRefresh: () -> Unit = {},
 ) {
@@ -130,6 +132,7 @@ fun PhoneFilm(
                     val i = FILM_TABS.indexOfFirst { it.second == cat }
                     if (i > 0) tab = i
                 },
+                statusInset = statusInset,
                 onScrolled = { homeScrolled = it },
             )
         } else {
@@ -139,6 +142,7 @@ fun PhoneFilm(
                 name = FILM_TABS[tab].first,
                 refreshTick = refreshTick,
                 refreshing = refreshing,
+                topInset = statusInset,
                 onRefresh = ::pull,
                 onOpen = onOpen,
             )
@@ -155,7 +159,7 @@ fun PhoneFilm(
                         1f to Color.Transparent,
                     )
                 )
-                .padding(bottom = if (solid) 0.dp else 8.dp),
+                .padding(top = statusInset, bottom = if (solid) 0.dp else 8.dp),
         ) {
             FilmTopBar(onSearch)
             FilmTabRow(current = tab, onSelect = { tab = it })
@@ -200,17 +204,18 @@ private fun FilmTopBar(onSearch: () -> Unit) {
 
 @Composable
 private fun FilmTabRow(current: Int, onSelect: (Int) -> Unit) {
-    LazyRow(
-        Modifier.fillMaxWidth().height(TabBarH),
-        contentPadding = PaddingValues(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(26.dp),
+    // 六个 tab 平分一行：等分 + 居中，最右的「纪录片」永远完整可见
+    // （之前用 LazyRow + 26dp 间距，第 6 个被切在屏幕外）
+    Row(
+        Modifier.fillMaxWidth().height(TabBarH).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        items(FILM_TABS.size) { index ->
+        FILM_TABS.forEachIndexed { index, _ ->
             val label = FILM_TABS[index].first
             val on = index == current
             Column(
                 Modifier
+                    .weight(1f)
                     // selectable + Role.Tab：读屏能念「已选中」，自动化也能拿到边界
                     .selectable(selected = on, role = Role.Tab, onClick = { onSelect(index) })
                     .padding(bottom = 6.dp),
@@ -219,8 +224,10 @@ private fun FilmTabRow(current: Int, onSelect: (Int) -> Unit) {
                 Text(
                     label,
                     color = if (on) ProomColor.text else ProomColor.muted,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    softWrap = false,
                 )
                 Spacer(Modifier.height(6.dp))
                 Box(
@@ -243,6 +250,7 @@ private fun HomePane(
     feed: NasApi.HomeFeed?,
     loading: Boolean,
     refreshing: Boolean,
+    statusInset: Dp,
     onRefresh: () -> Unit,
     onOpen: (Vod) -> Unit,
     onMore: (String) -> Unit,
@@ -282,7 +290,7 @@ private fun HomePane(
                             onPlay = onOpen,
                             onDetail = onOpen,
                             // 让开浮动顶栏，否则海报会顶到 tab 行上
-                            topInset = TopBarH + TabBarH,
+                            topInset = TopBarH + TabBarH + statusInset,
                         )
                     } else {
                         Spacer(Modifier.height(180.dp))
@@ -363,6 +371,7 @@ private fun CategoryPane(
     name: String,
     refreshTick: Int,
     refreshing: Boolean,
+    topInset: Dp,
     onRefresh: () -> Unit,
     onOpen: (Vod) -> Unit,
 ) {
@@ -414,7 +423,7 @@ private fun CategoryPane(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 20.dp, end = 20.dp,
-                top = TopBarH + TabBarH + 8.dp,
+                top = TopBarH + TabBarH + 8.dp + topInset,
                 bottom = 28.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(10.dp),

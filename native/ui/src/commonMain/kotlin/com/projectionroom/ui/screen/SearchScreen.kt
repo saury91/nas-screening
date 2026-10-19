@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -101,16 +102,23 @@ fun SearchScreen(
     ) {
         // 从任何页面点搜索图标进来，都能一眼退回（不只靠系统返回键）
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // 标准 App Bar 返回：48dp 可点区 + 24dp 图标（原来是个 26sp 的「‹」字符，
+            // 既不符合规范，点击热区也只有 36dp）
             Box(
                 Modifier
-                    .size(36.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .clickable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("‹", color = ProomColor.text, fontSize = 26.sp)
+                Icon(
+                    imageVector = com.projectionroom.ui.component.TabIcons.Back,
+                    contentDescription = "返回",
+                    tint = ProomColor.text,
+                    modifier = Modifier.size(24.dp),
+                )
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(4.dp))
             Box(Modifier.weight(1f)) {
                 SearchField(
                     value = q,

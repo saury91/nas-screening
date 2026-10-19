@@ -80,6 +80,22 @@ object TabIcons {
         }
     }.build()
 
+    /** 返回：24dp 描边箭头，放在 48dp 可点区里（标准 App Bar 规范） */
+    val Back: ImageVector = ImageVector.Builder(
+        name = "back", defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f,
+    ).apply {
+        path(
+            fill = null,
+            stroke = SolidColor(Color.White),
+            strokeLineWidth = 2f,
+            strokeLineCap = StrokeCap.Round,
+            strokeLineJoin = StrokeJoin.Round,
+        ) {
+            moveTo(14.6f, 5.4f); lineTo(8f, 12f); lineTo(14.6f, 18.6f)
+        }
+    }.build()
+
     // ── 构造 ──────────────────────────────────────────────
     private fun icon(name: String, filled: Boolean, block: PathBuilder.() -> Unit): ImageVector =
         ImageVector.Builder(
