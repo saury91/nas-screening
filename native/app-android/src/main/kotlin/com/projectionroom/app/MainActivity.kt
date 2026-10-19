@@ -318,6 +318,8 @@ class MainActivity : ComponentActivity() {
                             startLine = s.lineIndex,
                             startEp = s.epIndex,
                             rotateLandscape = !onTv,
+                            // 源站直链要经 NAS 代理：补 Referer、重写 m3u8
+                            resolveUrl = { api.proxied(it) },
                             onBack = { screen = s.from },
                         )
                     }
