@@ -6,16 +6,18 @@ import { go } from '../core/router.js';
 import { store } from '../core/store.js';
 import { cacheDrop } from '../core/cache.js';
 import { isAdmin } from '../core/auth.js';
+import { isApp } from '../core/platform.js';
 
+// 第四列 scope：user = 消费端也能看，admin = 只在 PC 管理台出现
 const NAV = [
-  ['sources', '片源管理', 'link'],
-  ['favorites', '收藏', 'heart'],
-  ['downloads', '下载任务', 'download'],
-  ['history', '播放记录', 'clock'],
-  ['live', '直播源', 'tv'],
-  ['music', '音乐', 'music'],
-  ['backup', '配置备份', 'upload'],
-  ['about', '关于与自检', 'info'],
+  ['sources', '片源管理', 'link', 'admin'],
+  ['favorites', '收藏', 'heart', 'user'],
+  ['downloads', '下载任务', 'download', 'admin'],
+  ['history', '播放记录', 'clock', 'user'],
+  ['live', '直播源', 'tv', 'admin'],
+  ['music', '音乐', 'music', 'admin'],
+  ['backup', '配置备份', 'upload', 'admin'],
+  ['about', '关于与自检', 'info', 'user'],
 ];
 
 let timer = null;
@@ -25,14 +27,24 @@ export function destroy() { clearInterval(timer); timer = null; }
 const ADMIN_TABS = ['sources', 'downloads', 'live', 'accounts', 'backup'];
 
 export async function render(root, ctx) {
-  // 家人只要看自己的东西，管理类页面直接不出现（后端也会再挡一次）
-  const nav = NAV.filter(([k]) => isAdmin() || !ADMIN_TABS.includes(k));
+  // App 是消费端：只有「我的」（收藏 + 记录）；管理页整体不出现
+  const consumer = isApp();
+  const nav = NAV.filter(([k, , , scope]) => {
+    if (consumer) return scope === 'user';
+    return isAdmin() || !ADMIN_TABS.includes(k);
+  });
+  // 误触深链接（收藏夹里点过来的旧地址等）直接送回「我的」
+  if (consumer && ctx.seg[1] && !nav.some(n => n[0] === ctx.seg[1])) {
+    go('/settings/favorites', { replace: true });
+    return;
+  }
   const tab = nav.some(n => n[0] === ctx.seg[1]) ? ctx.seg[1] : nav[0][0];
   document.body.dataset.hero = '0';
   root.innerHTML = `<div class="page">
     <div class="page-head">
-      <div><div class="eyebrow">设置</div><h1 class="page-title">控制台</h1></div>
-      <p class="page-sub">片源、收藏、下载、音乐都在这里，主页只留内容</p>
+      <div><div class="eyebrow">${consumer ? '我的' : '设置'}</div>
+        <h1 class="page-title">${consumer ? '我的' : '控制台'}</h1></div>
+      <p class="page-sub">${consumer ? '收藏和播放记录都在这儿' : '片源、收藏、下载、音乐都在这里，主页只留内容'}</p>
     </div>
     <div class="settings-layout">
       <aside class="settings-nav">

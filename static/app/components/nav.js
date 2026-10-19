@@ -1,5 +1,6 @@
 // 顶栏：标签导航 + 滚动收起 + 全局搜索浮层
 import { $, $$, esc, icon, debounce, toast } from '../core/dom.js';
+import { isApp } from '../core/platform.js';
 import { api } from '../core/api.js';
 import { go, parseRoute } from '../core/router.js';
 import { setFocus, clearFocus } from '../core/focus.js';
@@ -34,6 +35,9 @@ export function initNav() {
 
   // 不能直接把 openSearch 当监听器：它会把 click 事件当 prefill，
 // 于是 input.value 变成 "[object PointerEvent]"，还会被记进搜索历史
+// App 是消费端：管理入口整体移除（片源/直播源/下载/备份都在 PC 上做）
+if (isApp()) $$('[data-admin-only]').forEach(el => el.remove());
+
 $('#btn-search')?.addEventListener('click', () => openSearch());
   $('#search-close')?.addEventListener('click', closeSearch);
   $('#searchlayer')?.addEventListener('click', e => {

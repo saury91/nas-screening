@@ -2,6 +2,7 @@
 import { api } from '../core/api.js';
 import { esc, icon } from '../core/dom.js';
 import { store } from '../core/store.js';
+import { isApp } from '../core/platform.js';
 import { cacheGet, cacheSet, slimItem } from '../core/cache.js';
 import { heroHTML, mountHero } from '../components/hero.js';
 import { shelf, posterCard, continueCard, emptyState } from '../components/ui.js';
@@ -118,14 +119,18 @@ function paint(root, d) {
       <span class="section-sub">直播、音乐、片源都在这里</span></div>
     <div class="quick-grid">
       <a class="quick live" href="#/live" data-focus>
-        <h4>直播</h4><p>${stat.live ? stat.live + ' 个频道，按分组浏览，点开就看' : '还没有频道，去设置里导入一个 M3U 源'}</p>
+        <h4>直播</h4><p>${stat.live ? stat.live + ' 个频道，按分组浏览，点开就看'
+        : (isApp() ? '还没有频道，等电脑端把直播源配好' : '还没有频道，去设置里导入一个 M3U 源')}</p>
         <span class="q-ico">${icon('tv')}</span></a>
       <a class="quick music" href="#/music" data-focus>
         <h4>音乐</h4><p>接你的 Navidrome，或直接扫 NAS 上的音乐目录</p>
         <span class="q-ico">${icon('music')}</span></a>
-      <a class="quick sources" href="#/settings/sources" data-focus>
+      ${isApp() ? `<a class="quick fav" href="#/settings/favorites" data-focus>
+        <h4>我的收藏</h4><p>点过心的片子都收在这儿</p>
+        <span class="q-ico">${icon('heart')}</span></a>`
+      : `<a class="quick sources" href="#/settings/sources" data-focus>
         <h4>片源管理</h4><p>${stat.sites || 0} 个片源在跑，支持 TVBox 配置一键导入</p>
-        <span class="q-ico">${icon('link')}</span></a>
+        <span class="q-ico">${icon('link')}</span></a>`}
     </div>
   </section>`;
 
@@ -181,7 +186,7 @@ function paint(root, d) {
       ${emptyState({
         iconName: 'film', title: '片库还在预热',
         desc: '首次启动要去十几个采集站拉数据，大约十几秒。点开片源管理可以先看看源的状态。',
-        action: '<a class="btn" href="#/settings/sources" data-focus>去片源管理</a>',
+        action: isApp() ? '' : '<a class="btn" href="#/settings/sources" data-focus>去片源管理</a>',
       })}</div>` : ''}
     ${tastes}
     ${catShelves}
