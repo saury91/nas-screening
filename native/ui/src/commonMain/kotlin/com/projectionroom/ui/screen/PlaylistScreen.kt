@@ -52,6 +52,7 @@ fun PlaylistScreen(
     api: NasApi,
     id: String,
     onPlayTrack: (detail: NasApi.PlaylistDetail, index: Int) -> Unit,
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     var d by remember(id) { mutableStateOf<NasApi.PlaylistDetail?>(null) }
     var loading by remember(id) { mutableStateOf(true) }
@@ -77,7 +78,7 @@ fun PlaylistScreen(
 
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = ProomSpace.xxl),
+            contentPadding = PaddingValues(top = topInset, bottom = ProomSpace.xxl),
         ) {
             item {
                 Row(Modifier.padding(ProomSpace.xxl)) {

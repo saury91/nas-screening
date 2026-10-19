@@ -67,6 +67,8 @@ fun SearchScreen(
     onHistoryCommit: (String) -> Unit = {},
     onHistoryRemove: (String) -> Unit = {},
     onHistoryClear: () -> Unit = {},
+    /** 状态栏高度：本页不是沉浸式，顶部要让开 */
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     var q by remember { mutableStateOf(initialQuery) }
     var committed by remember { mutableStateOf(initialQuery) }
@@ -98,7 +100,7 @@ fun SearchScreen(
             .fillMaxSize()
             .background(ProomColor.bg)
             .padding(horizontal = 20.dp)
-            .padding(top = ProomSpace.sm)
+            .padding(top = ProomSpace.sm + topInset)
     ) {
         // 从任何页面点搜索图标进来，都能一眼退回（不只靠系统返回键）
         Row(verticalAlignment = Alignment.CenterVertically) {

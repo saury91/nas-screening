@@ -69,6 +69,7 @@ fun DetailScreen(
     onToggleFavorite: () -> Unit = {},
     onPlay: (lineIndex: Int, epIndex: Int) -> Unit,
     onBack: () -> Unit = {},
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     var lineIndex by remember(vod.name) {
         mutableIntStateOf(0)
@@ -85,7 +86,12 @@ fun DetailScreen(
         }
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(ProomColor.bg)) {
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(ProomColor.bg)
+            .padding(top = topInset)
+    ) {
     if (!isTv) {
         PhoneDetail(vod, lineIndex, isFavorite, onToggleFavorite, onSelectLine = { lineIndex = it }, onPlay = onPlay, onBack = onBack)
         return@BoxWithConstraints
