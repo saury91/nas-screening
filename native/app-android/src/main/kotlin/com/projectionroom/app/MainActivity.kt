@@ -397,7 +397,10 @@ class MainActivity : ComponentActivity() {
 
                             val vod = full
                             when {
-                                loading && vod == null -> com.projectionroom.ui.component.DetailSkeleton()
+                                loading && vod == null -> com.projectionroom.ui.component.DetailSkeleton(
+                                    topInset = barTop,
+                                    onBack = { screen = s.from },
+                                )
                                 err != null -> CenterHint("读取失败：$err")
                                 vod != null -> DetailScreen(
                                     vod = vod,

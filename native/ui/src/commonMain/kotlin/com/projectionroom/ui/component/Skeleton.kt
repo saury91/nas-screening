@@ -5,11 +5,14 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -79,10 +82,37 @@ fun WideSkeleton(modifier: Modifier = Modifier) {
 
 /** 详情页骨架：海报 + 标题行 + 简介 + 线路 + 集数网格 */
 @Composable
-fun DetailSkeleton(modifier: Modifier = Modifier) {
+fun DetailSkeleton(
+    modifier: Modifier = Modifier,
+    /** 状态栏高度：骨架也要让开，否则会顶到状态栏后面 */
+    topInset: Dp = 0.dp,
+    onBack: () -> Unit = {},
+) {
     androidx.compose.foundation.layout.Column(
-        modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)
+        modifier.fillMaxSize().background(ProomColor.bg)
     ) {
+        // 和真实详情页同一套顶栏：56dp + 状态栏，返回键可点
+        androidx.compose.foundation.layout.Row(
+            Modifier.fillMaxWidth().height(56.dp + topInset)
+                .padding(start = 8.dp, end = 20.dp, top = topInset),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            androidx.compose.foundation.layout.Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(24.dp))
+                    .clickable(onClick = onBack),
+                contentAlignment = androidx.compose.ui.Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = TabIcons.Back,
+                    contentDescription = "返回",
+                    tint = ProomColor.text,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+        androidx.compose.foundation.layout.Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
+        ) {
         androidx.compose.foundation.layout.Row {
             SkeletonBlock(Modifier.width(104.dp).aspectRatio(2f / 3f))
             androidx.compose.foundation.layout.Spacer(Modifier.width(14.dp))
@@ -117,5 +147,6 @@ fun DetailSkeleton(modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
     }
 }
