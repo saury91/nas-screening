@@ -139,25 +139,69 @@ def _parse_play_url(pu):
     return eps
 
 
+def parse_lines(v):
+    """把一个 vod 的播放地址拆成若干线路：[(线路名, [{name,url}])]
+
+    采集站的 vod_play_from / vod_play_url 都是 $$$ 分隔的多线路结构。
+    不拆开就会把四条线路压成一条，集名重复（第01集 ×4）。
+    """
+    raw = (v.get("vod_play_url") or "")
+    froms = [x.strip() for x in (v.get("vod_play_from") or "").split("$$$")]
+    chunks = raw.split("$$$")
+    pairs = list(zip(froms, chunks)) if len(froms) == len(chunks) else \
+        [("", c) for c in chunks]
+    out = []
+    for line_name, chunk in pairs:
+        eps = _dedupe(_parse_play_url(chunk))
+        if eps:
+            out.append((line_name, eps))
+    return out
+
+
 def _mk_items(site, d):
-    """把采集站返回的 list 转成统一结构（有播放地址才要）"""
+    """把采集站返回的 list 转成统一结构（有播放地址才要）。
+
+    关键：`vod_play_from` / `vod_play_url` 是**多线路**结构，用 $$$ 分隔——
+        "线路1$$$线路2" 对应 "第01集$url#...#$$$第01集$url#..."
+    以前直接把整串丢进 _parse_play_url，四条线路会被压成一条，
+    集名就变成「第01集 第01集 第01集 第01集」这种重复。
+    现在按线路拆开，每条线路一条记录。
+    """
     out = []
     for v in (d.get("list") or []):
-        eps = _parse_play_url(v.get("vod_play_url"))
-        if not eps:
+        raw = (v.get("vod_play_url") or "")
+        froms = [x.strip() for x in (v.get("vod_play_from") or "").split("$$$")]
+        chunks = raw.split("$$$")
+        pairs = list(zip(froms, chunks)) if len(froms) == len(chunks) else             [("", c) for c in chunks]
+        for line_name, chunk in pairs:
+            eps = _dedupe(_parse_play_url(chunk))
+            if not eps:
+                continue
+            rec = {
+                "name": (v.get("vod_name") or "").strip(),
+                "year": str(v.get("vod_year") or "").strip(),
+                "pic": (v.get("vod_pic") or "").strip(),
+                "type": (v.get("type_name") or "").strip(),
+                "site": site["name"],
+                "line": line_name,
+                "eps": eps,
+                "count": len(eps),
+                "remarks": (v.get("vod_remarks") or "").strip(),
+            }
+            rec.update(_row_meta(v))
+            out.append(rec)
+    return out
+
+
+def _dedupe(eps):
+    """同一条线路里集名重复时只留第一个（部分站会把备用地址也拼进来）"""
+    seen, out = set(), []
+    for e in eps:
+        key = e.get("name") or ""
+        if key in seen:
             continue
-        rec = {
-            "name": (v.get("vod_name") or "").strip(),
-            "year": str(v.get("vod_year") or "").strip(),
-            "pic": (v.get("vod_pic") or "").strip(),
-            "type": (v.get("type_name") or "").strip(),
-            "site": site["name"],
-            "eps": eps,
-            "count": len(eps),
-            "remarks": (v.get("vod_remarks") or "").strip(),
-        }
-        rec.update(_row_meta(v))
-        out.append(rec)
+        seen.add(key)
+        out.append(e)
     return out
 
 
