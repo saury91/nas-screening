@@ -6,11 +6,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.shared.model.Vod
+import com.projectionroom.shared.net.CachingHttp
 import com.projectionroom.shared.net.OkHttpHttp
 import com.projectionroom.ui.screen.BrowseScreen
 import com.projectionroom.ui.screen.ConnectScreen
@@ -74,6 +77,26 @@ class MainActivity : ComponentActivity() {
         // 调试用：adb ... --ez forcePhone true 可在电视上预览手机布局
         val onTv = (isTvDevice() || intent.getBooleanExtra("forceTv", false)) &&
             !intent.getBooleanExtra("forcePhone", false)
+        // 系统栏高度：onCreate 里 rootWindowInsets 可能还是 null，先按资源兜底，
+        // 拿到真实 insets 后再校正（不然直接解引用会崩在启动）
+        fun statusBarPx(): Int {
+            val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+            return if (id > 0) resources.getDimensionPixelSize(id) else 0
+        }
+        val sysInsets = window.decorView.rootWindowInsets?.let {
+            androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(it, window.decorView)
+                .getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+        val d = resources.displayMetrics.density
+        var barTop = ((sysInsets?.top ?: statusBarPx()) / d).dp
+        var barBottom = ((sysInsets?.bottom ?: 0) / d).dp
+
+        // 状态栏保持可见，图标用浅色（暗底）；颜色跟主题一致，不要黑色断层
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            .isAppearanceLightStatusBars = false
+        window.statusBarColor = 0xFF07080B.toInt()
+        window.navigationBarColor = 0xFF07080B.toInt()
+
         // 电视锁横屏；手机跟随系统（竖屏为主，播放器再单独转）
         if (onTv) requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 
@@ -132,9 +155,16 @@ class MainActivity : ComponentActivity() {
 
                 // 超时给 30 秒：一次搜索要问 60+ 个源，实测 13~15 秒，10 秒会直接 timeout
                 val api = remember(baseUrl) {
-                    NasApi(OkHttpHttp(timeoutSeconds = 30), baseUrl = baseUrl!!)
+                    // 缓存优先：同一个接口第二次进来先用本地，后台再更新
+                    val http = CachingHttp(
+                        delegate = OkHttpHttp(timeoutSeconds = 30),
+                        cache = FileCache(java.io.File(cacheDir, "api")),
+                        scope = scopeTop,
+                    )
+                    NasApi(http, baseUrl = baseUrl!!)
                 }
                 var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+                var searchHistory by remember { mutableStateOf(SearchStore.list(this@MainActivity)) }
 
                 // 首页数据只拉一次，TV 与手机共用同一份
                 var feed by remember { mutableStateOf<NasApi.HomeFeed?>(null) }
@@ -167,7 +197,12 @@ class MainActivity : ComponentActivity() {
                 // 电视首页的滚动位置挂在这里：从详情页返回时位置不丢，焦点也接得上
                 val tvHomeState = androidx.compose.foundation.lazy.rememberLazyListState()
 
-                Box(Modifier.fillMaxSize().background(ProomColor.bg)) {
+                // Android 15+ 强制 edge-to-edge：内容会画到状态栏/手势条下面，
+                // 状态栏还会吃掉那块区域的点击。除播放页（要满屏视频）外统一让开。
+                val insetMod = if (screen is Screen.Play) Modifier
+                    else Modifier.padding(top = barTop, bottom = barBottom)
+
+                Box(Modifier.fillMaxSize().background(ProomColor.bg).then(insetMod)) {
                     when (val s = screen) {
                         is Screen.Home -> if (onTv) {
                             TvHome(
@@ -297,6 +332,11 @@ class MainActivity : ComponentActivity() {
                         is Screen.Search -> SearchScreen(
                             api = api,
                             onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
+                            onBack = { screen = s.from },
+                            history = searchHistory,
+                            onHistoryCommit = { kw -> searchHistory = SearchStore.add(this@MainActivity, kw) },
+                            onHistoryRemove = { kw -> searchHistory = SearchStore.remove(this@MainActivity, kw) },
+                            onHistoryClear = { searchHistory = SearchStore.clear(this@MainActivity) },
                         )
 
                         is Screen.Detail -> {
