@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.togetherWith
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.background
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
@@ -218,19 +219,26 @@ class MainActivity : ComponentActivity() {
                 androidx.compose.animation.AnimatedContent(
                     targetState = screen,
                     transitionSpec = {
-                        // 前进：新页从右进、旧页往左退；返回：反过来
-                        val dir = if (depth(targetState) >= depth(initialState)) 1 else -1
-                        (androidx.compose.animation.slideInHorizontally(
-                            initialOffsetX = { dir * it / 4 },
-                        ) + androidx.compose.animation.fadeIn(
-                            androidx.compose.animation.core.tween(260),
-                        )).togetherWith(
-                            androidx.compose.animation.slideOutHorizontally(
-                                targetOffsetX = { -dir * it / 8 },
-                            ) + androidx.compose.animation.fadeOut(
-                                androidx.compose.animation.core.tween(200),
-                            )
+                        // 页面栈语义：**下层页面永远不动**，只让"进来/出去的那一页"动。
+                        //  前进：新页从右滑入，盖住不动的旧页
+                        //  返回：旧页向右滑出，露出不动的新页（下层）
+                        val fwd = depth(targetState) >= depth(initialState)
+                        val ms = androidx.compose.animation.core.tween<IntOffset>(
+                            280, easing = androidx.compose.animation.core.FastOutSlowInEasing,
                         )
+                        if (fwd) {
+                            (androidx.compose.animation.slideInHorizontally(
+                                initialOffsetX = { it }, animationSpec = ms,
+                            ) + androidx.compose.animation.fadeIn(
+                                androidx.compose.animation.core.tween(160),
+                            )).togetherWith(androidx.compose.animation.ExitTransition.None)
+                        } else {
+                            androidx.compose.animation.EnterTransition.None togetherWith
+                                androidx.compose.animation.slideOutHorizontally(
+                                    targetOffsetX = { it },
+                                    animationSpec = androidx.compose.animation.core.tween(240),
+                                )
+                        }
                     },
                     label = "screen",
                 ) { s ->
