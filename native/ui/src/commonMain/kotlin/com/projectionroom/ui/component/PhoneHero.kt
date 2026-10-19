@@ -69,16 +69,29 @@ fun PhoneHero(
                 val vod = items[page]
                 Box(Modifier.fillMaxSize()) {
                     if (vod.pic.isNotBlank()) {
+                        // 源图只有 270×385，铺满 1080 宽要放大 4 倍。
+                        // Web 版的做法是：背景不当照片看，当**氛围光** —— 重度模糊 + 提饱和 + 压暗，
+                        // 只留颜色情绪；真正的"照片"是下面那张清晰的小海报。
                         AsyncImage(
                             model = vod.pic,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
-                            // 源图 270x385，铺到 390dp 宽要放大近 4 倍：模糊压掉放大的颗粒，
-                            // 但别糊到认不出画面 —— 12dp 是「看得出是哪部片、又不出马赛克」的平衡点
-                            modifier = Modifier.fillMaxSize().blur(12.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .blur(38.dp)
+                                .background(Color.Black.copy(alpha = 0.34f)),
                         )
                     }
-                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.40f)))
+                    // 左下角再压一层径向暗角，文字压在光上才立得住（对应 Web 的 hero::before）
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.radialGradient(
+                                colors = listOf(ProomColor.bg.copy(alpha = 0.86f), Color.Transparent),
+                                center = androidx.compose.ui.geometry.Offset(0.12f, 0.92f),
+                                radius = 1400f,
+                            )
+                        )
+                    )
                     // 顶部压暗：让状态栏/时间在图片上也读得清
                     Box(
                         Modifier.fillMaxSize().background(
@@ -102,38 +115,60 @@ fun PhoneHero(
                         Modifier
                             .align(Alignment.BottomStart)
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 22.dp),
+                            .padding(horizontal = 20.dp)
+                            .padding(bottom = 34.dp),
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(5.dp).height(5.dp).clip(CircleShape).background(ProomColor.accent))
-                            Text(
-                                "今日推荐",
-                                style = ProomType.eyebrow,
-                                color = ProomColor.accent,
-                                modifier = Modifier.padding(start = 7.dp),
-                            )
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            // 清晰竖版海报：这才是视觉锚点，背景只是它的颜色延伸
+                            if (vod.pic.isNotBlank()) {
+                                AsyncImage(
+                                    model = vod.pic,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .width(96.dp)
+                                        .height(144.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(ProomColor.card),
+                                )
+                                Spacer(Modifier.width(14.dp))
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier.width(5.dp).height(5.dp)
+                                            .clip(CircleShape).background(ProomColor.accent)
+                                    )
+                                    Text(
+                                        "今日推荐",
+                                        style = ProomType.eyebrow,
+                                        color = ProomColor.accent,
+                                        modifier = Modifier.padding(start = 7.dp),
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    vod.name,
+                                    color = ProomColor.text,
+                                    fontSize = 23.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 28.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(5.dp))
+                                Text(
+                                    listOf(vod.score, vod.year, vod.area, vod.type)
+                                        .filter { it.isNotBlank() }.joinToString(" · "),
+                                    style = ProomType.meta,
+                                    color = ProomColor.dim,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            vod.name,
-                            color = ProomColor.text,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            lineHeight = 31.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            listOf(vod.score, vod.year, vod.area, vod.type)
-                                .filter { it.isNotBlank() }.joinToString(" · "),
-                            style = ProomType.meta,
-                            color = ProomColor.dim,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
                         if (vod.desc.isNotBlank()) {
-                            Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height(10.dp))
                             Text(
                                 vod.desc,
                                 style = ProomType.body,
@@ -161,7 +196,7 @@ fun PhoneHero(
                 Row(
                     Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp),
+                        .padding(bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     repeat(items.size.coerceAtMost(8)) { i ->

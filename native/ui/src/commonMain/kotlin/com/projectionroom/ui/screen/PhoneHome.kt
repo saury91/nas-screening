@@ -17,15 +17,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -61,8 +68,20 @@ fun PhoneHome(
     onNav: (String?) -> Unit = {},
     onMore: (String) -> Unit = {},
 ) {
-    Column(Modifier.fillMaxSize().background(ProomColor.bg)) {
-        PhoneTopBar(onSearch)
+    // 滚过一屏后顶栏变实底：不然白色海报滑上来，标题和胶囊糊成一片
+    val gridState = rememberLazyGridState()
+    val solidTarget by remember {
+        derivedStateOf {
+            gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 48
+        }
+    }
+    val headerSolid by animateFloatAsState(
+        targetValue = if (solidTarget) 1f else 0f,
+        animationSpec = tween(220),
+        label = "headerBg",
+    )
+
+    Box(Modifier.fillMaxSize().background(ProomColor.bg)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // 横滑卡宽：一屏露 2.4 张，露半张才「提示」还能往右滑
             val wideW = (maxWidth * 0.62f).coerceIn(180.dp, 300.dp)
@@ -70,13 +89,14 @@ fun PhoneHome(
 
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
+                state = gridState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 28.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
             ) {
-                item(span = { GridItemSpan(maxLineSpan) }) { CategoryChips(onNav) }
-
+                // 沉浸式：Hero 是整页第一块，通栏顶到最上面；
+                // 顶栏与分类胶囊浮在它上面（对应 Web 的 .page.bleed > .hero + 浮动导航）
                 if (hot.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         PhoneHero(
@@ -85,6 +105,8 @@ fun PhoneHome(
                             onDetail = { v -> onOpen(v) },
                         )
                     }
+                } else {
+                    item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(96.dp)) }
                 }
 
                 if (continueWatching.isNotEmpty()) {
@@ -127,6 +149,23 @@ fun PhoneHome(
                 }
             }
         }
+
+        // 浮在 Hero 上的头部：一层向上加深的渐变，滚到白底海报上也读得清
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        0f to ProomColor.bg.copy(alpha = 0.55f + 0.41f * headerSolid),
+                        0.62f to ProomColor.bg.copy(alpha = 0.25f + 0.70f * headerSolid),
+                        1f to ProomColor.bg.copy(alpha = headerSolid),
+                    )
+                )
+                .padding(bottom = 10.dp),
+        ) {
+            PhoneTopBar(onSearch)
+            CategoryChips(onNav)
+        }
     }
 }
 
@@ -166,14 +205,14 @@ private fun CategoryChips(onNav: (String?) -> Unit) {
             Box(
                 Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(if (selected) ProomColor.accent else ProomColor.surface)
+                    .background(if (selected) ProomColor.accent else Color.White.copy(alpha = 0.12f))
                     .clickable { onNav(slug) }
                     .padding(horizontal = 14.dp, vertical = 7.dp),
             ) {
                 Text(
                     label,
                     style = ProomType.meta,
-                    color = if (selected) Color(0xFF1B1206) else ProomColor.dim,
+                    color = if (selected) Color(0xFF1B1206) else ProomColor.text.copy(alpha = 0.86f),
                     maxLines = 1,
                     softWrap = false,
                 )
