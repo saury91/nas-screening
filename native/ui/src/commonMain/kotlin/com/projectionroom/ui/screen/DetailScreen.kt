@@ -236,22 +236,23 @@ private fun PhoneDetail(
         // 氛围层：海报自身的模糊光，向下渐隐到页面底色
         if (vod.pic.isNotBlank()) {
             androidx.compose.foundation.layout.Box(
-                Modifier.fillMaxWidth().fillMaxHeight(0.62f).background(ProomColor.bg)
+                Modifier.fillMaxSize().background(ProomColor.bg)
             ) {
                 AsyncImage(
                     model = vod.pic,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    alpha = 0.72f,
+                    alpha = 0.50f,
                     modifier = Modifier.fillMaxSize().blur(46.dp),
                 )
                 Box(
                     Modifier.fillMaxSize().background(
+                        // 只做轻微压暗：整页色调靠那张模糊海报本身，不能被渐变盖掉
                         Brush.verticalGradient(
-                            0f to ProomColor.bg.copy(alpha = 0.06f),
-                            0.40f to ProomColor.bg.copy(alpha = 0.50f),
-                            0.75f to ProomColor.bg.copy(alpha = 0.88f),
-                            1f to ProomColor.bg,
+                            0f to ProomColor.bg.copy(alpha = 0.08f),
+                            0.35f to ProomColor.bg.copy(alpha = 0.22f),
+                            0.70f to ProomColor.bg.copy(alpha = 0.40f),
+                            1f to ProomColor.bg.copy(alpha = 0.55f),
                         )
                     )
                 )
@@ -264,7 +265,7 @@ private fun PhoneDetail(
                 Modifier
                     .fillMaxWidth()
                     .height(56.dp + topInset)
-                    .background(ProomColor.bg.copy(alpha = barAlpha))
+                    .background(ProomColor.bg.copy(alpha = barAlpha * 0.55f))
                     .padding(start = 8.dp, end = 20.dp, top = topInset),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
