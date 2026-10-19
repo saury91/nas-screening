@@ -44,6 +44,7 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.enable');
 await send('Network.setCacheDisabled', { cacheDisabled: true });
+try { await send('Network.clearBrowserCache'); } catch (e) {}
 await send('Log.enable');
 await send('Emulation.setDeviceMetricsOverride', {
   width: Number(process.env.VW || 1440), height: Number(process.env.VH || 900),
@@ -55,6 +56,10 @@ await send('Input.dispatchMouseEvent', {
   y: (process.env.HOVER || '').split(',')[1] ? Number(process.env.HOVER.split(',')[1]) : 1,
   button: 'none',
 });
+// UA 覆盖要在导航之前，否则页面已按 PC 渲染
+if (process.env.UA) {
+  await send('Emulation.setUserAgentOverride', { userAgent: process.env.UA, platform: 'Android' });
+}
 await send('Page.navigate', { url });
 await new Promise(r => setTimeout(r, 300));
 await send('Page.reload', { ignoreCache: true });
