@@ -31,7 +31,7 @@ val NAV_TABS = listOf(
     "剧集" to "series",
     "动漫" to "anime",
     "综艺" to "variety",
-    "纪录片" to "documentary",
+    "纪录片" to "doc",
     "直播" to "live",
     "音乐" to "music",
 )
@@ -45,7 +45,7 @@ val PHONE_CATS = listOf(
     "剧集" to "series",
     "动漫" to "anime",
     "综艺" to "variety",
-    "纪录片" to "documentary",
+    "纪录片" to "doc",
 )
 
 /**

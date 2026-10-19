@@ -47,7 +47,7 @@ import com.projectionroom.ui.theme.ProomType
 
 val CAT_NAMES = mapOf(
     "movie" to "电影", "series" to "剧集", "anime" to "动漫",
-    "variety" to "综艺", "documentary" to "纪录片",
+    "variety" to "综艺", "doc" to "纪录片",
 )
 
 private val YEARS = listOf("", "2026", "2025", "2024", "2023", "2022", "2021", "2020")

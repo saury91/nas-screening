@@ -81,7 +81,7 @@ private val FILM_TABS = listOf(
     "剧集" to "series",
     "动漫" to "anime",
     "综艺" to "variety",
-    "纪录片" to "documentary",
+    "纪录片" to "doc",
 )
 
 private val TopBarH = 56.dp
@@ -479,12 +479,30 @@ private fun CategoryPane(
 
             if (!loading && items.isEmpty() && err == null) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Text(
-                        "这个分类暂时没有内容",
-                        style = ProomType.body,
-                        color = ProomColor.muted,
-                        modifier = Modifier.padding(vertical = 40.dp),
-                    )
+                    // 空态要成块：图标 + 一句解释 + 下一步怎么做，不要孤零零一行文字
+                    Column(
+                        Modifier.fillMaxWidth().padding(top = 96.dp, bottom = 40.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(
+                            Modifier.size(44.dp).clip(CircleShape).background(ProomColor.surface),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("○", color = ProomColor.muted, fontSize = 20.sp)
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            "「$name」暂时没有内容",
+                            style = ProomType.body,
+                            color = ProomColor.dim,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "下拉可以重新拉取，或者回首页看看推荐",
+                            style = ProomType.label,
+                            color = ProomColor.muted,
+                        )
+                    }
                 }
             }
         }
