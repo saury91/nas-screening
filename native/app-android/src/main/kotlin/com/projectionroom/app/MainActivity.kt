@@ -33,7 +33,7 @@ import com.projectionroom.ui.screen.MusicScreen
 import com.projectionroom.ui.screen.PlaylistScreen
 import com.projectionroom.ui.screen.DetailScreen
 import com.projectionroom.ui.screen.PlayerScreen
-import com.projectionroom.ui.screen.PhoneHome
+import com.projectionroom.ui.screen.PhoneFilm
 import com.projectionroom.ui.screen.MineScreen
 import com.projectionroom.ui.screen.PhoneShell
 import com.projectionroom.ui.screen.TvHome
@@ -186,14 +186,12 @@ class MainActivity : ComponentActivity() {
                             // 手机：底部 tab 壳（搜索与「我的」都在壳里）
                             PhoneShell(
                                 home = {
-                                    PhoneHome(
-                                        continueWatching = (feed?.continueWatching.orEmpty() + feed?.liked.orEmpty()).take(8),
-                                        hot = feed?.latest.orEmpty(),
-                                        cats = feed?.cats.orEmpty(),
+                                    PhoneFilm(
+                                        api = api,
+                                        feed = feed,
+                                        loading = loading,
                                         onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
                                         onSearch = { screen = Screen.Search(from = s) },
-                                        onNav = { slug -> if (slug != null) screen = Screen.Browse(slug, s) },
-                                        onMore = { cat -> screen = Screen.Browse(cat, s) },
                                     )
                                 },
                                 live = {
