@@ -242,17 +242,17 @@ private fun PhoneDetail(
                     model = vod.pic,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    alpha = 0.50f,
+                    alpha = 0.75f,
                     modifier = Modifier.fillMaxSize().blur(46.dp),
                 )
                 Box(
                     Modifier.fillMaxSize().background(
                         // 只做轻微压暗：整页色调靠那张模糊海报本身，不能被渐变盖掉
                         Brush.verticalGradient(
-                            0f to ProomColor.bg.copy(alpha = 0.08f),
-                            0.35f to ProomColor.bg.copy(alpha = 0.22f),
-                            0.70f to ProomColor.bg.copy(alpha = 0.40f),
-                            1f to ProomColor.bg.copy(alpha = 0.55f),
+                            0f to ProomColor.bg.copy(alpha = 0.00f),
+                            0.30f to ProomColor.bg.copy(alpha = 0.12f),
+                            0.65f to ProomColor.bg.copy(alpha = 0.34f),
+                            1f to ProomColor.bg.copy(alpha = 0.52f),
                         )
                     )
                 )
