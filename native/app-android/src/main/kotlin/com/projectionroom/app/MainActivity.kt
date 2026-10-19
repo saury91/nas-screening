@@ -224,7 +224,7 @@ class MainActivity : ComponentActivity() {
                         //  返回：旧页向右滑出，露出不动的新页（下层）
                         val fwd = depth(targetState) >= depth(initialState)
                         val ms = androidx.compose.animation.core.tween<IntOffset>(
-                            280, easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                            300, easing = androidx.compose.animation.core.FastOutSlowInEasing,
                         )
                         if (fwd) {
                             (androidx.compose.animation.slideInHorizontally(
