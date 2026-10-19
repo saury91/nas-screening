@@ -5,6 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -53,6 +57,7 @@ fun SearchScreen(
     api: NasApi,
     onOpen: (Vod) -> Unit,
     initialQuery: String = "",
+    onBack: () -> Unit = {},
 ) {
     var q by remember { mutableStateOf(initialQuery) }
     var committed by remember { mutableStateOf(initialQuery) }
@@ -79,11 +84,26 @@ fun SearchScreen(
     }
 
     Column(Modifier.fillMaxSize().background(ProomColor.bg).padding(ProomSpace.xxl)) {
-        SearchField(
-            value = q,
-            onValueChange = { q = it; committed = it },
-            onSearch = { committed = q },
-        )
+        // 从任何页面点搜索图标进来，都能一眼退回（不只靠系统返回键）
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("‹", color = ProomColor.text, fontSize = 26.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.weight(1f)) {
+                SearchField(
+                    value = q,
+                    onValueChange = { q = it; committed = it },
+                    onSearch = { committed = q },
+                )
+            }
+        }
 
         // 电视上遥控器打字太痛苦，给几个热门词，点一下直接搜
         if (!searched && q.isBlank()) {
