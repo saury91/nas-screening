@@ -59,8 +59,10 @@ fun PhoneHero(
     BoxWithConstraints(modifier.fillMaxWidth()) {
         // 竖屏 Hero 取「宽度 × 1.02」，再用屏幕高度兜一次底：
         // 小屏（iPhone SE 那档，~667dp 高）也不能让 Hero 一口吃掉整屏
-        val h = (maxWidth.value * 1.02f + topInset.value)
-            .coerceIn(300f + topInset.value, maxHeight.value * 0.66f).dp
+        // 高度按「内容 + 顶栏」算，不再按屏幕宽度乘系数 ——
+        // 之前 1.02×宽 会在 tab 与海报之间留出一大条空白
+        val h = (300f + topInset.value)
+            .coerceIn(300f + topInset.value, maxHeight.value * 0.62f).dp
 
         val state = rememberPagerState(pageCount = { items.size })
 
