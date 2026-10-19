@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.shared.model.Vod
-import com.projectionroom.ui.component.NAV_TABS
+import com.projectionroom.ui.component.PHONE_CATS
 import com.projectionroom.ui.component.PhoneHero
 import com.projectionroom.ui.component.PosterCard
 import com.projectionroom.ui.component.WideCard
@@ -153,16 +153,16 @@ private fun PhoneTopBar(onSearch: () -> Unit) {
     }
 }
 
-/** 分类胶囊：横向可滑，第一项「首页」常亮。 */
+/** 分类胶囊：横向可滑。首页/直播/音乐不在这里——它们是底部 tab。 */
 @Composable
 private fun CategoryChips(onNav: (String?) -> Unit) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(NAV_TABS) { tab ->
+        items(PHONE_CATS) { tab ->
             val (label, slug) = tab
-            val selected = slug == null
+            val selected = false
             Box(
                 Modifier
                     .clip(RoundedCornerShape(50))

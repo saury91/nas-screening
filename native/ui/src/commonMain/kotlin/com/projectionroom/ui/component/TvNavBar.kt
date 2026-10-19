@@ -37,6 +37,18 @@ val NAV_TABS = listOf(
 )
 
 /**
+ * 手机端分类胶囊：只有内容分类。
+ * 「首页」由底部 tab 承担，「直播 / 音乐」也各自是 tab，这里再列一遍就是重复。
+ */
+val PHONE_CATS = listOf(
+    "电影" to "movie",
+    "剧集" to "series",
+    "动漫" to "anime",
+    "综艺" to "variety",
+    "纪录片" to "documentary",
+)
+
+/**
  * 顶部分类导航。选中项是金色胶囊（和 Web 版一致），
  * 未选中项在聚焦时才浮出背景 —— 干净，但遥控器不会找不到焦点。
  */
