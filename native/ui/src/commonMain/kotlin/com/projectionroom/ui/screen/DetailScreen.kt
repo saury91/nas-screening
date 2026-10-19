@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -221,20 +222,21 @@ private fun PhoneDetail(
     onPlay: (lineIndex: Int, epIndex: Int) -> Unit,
     onBack: () -> Unit,
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
-) {    val line = vod.lines.getOrNull(lineIndex)
+) {
+    val line = vod.lines.getOrNull(lineIndex)
     val scroll = rememberScrollState()
-    // 滚过内容标题后顶栏才显示标题，避免与内容片名重复
-    // 两段式：背景先变实（浅滚），标题等内容标题滚出视野后才淡入 —— 避免同一屏出现两个片名
-    val scrolled by remember { derivedStateOf { scroll.value > 16 } }
-    val titleIn by remember { derivedStateOf { scroll.value > 150 } }
-    val barSolid by animateFloatAsState(if (scrolled) 1f else 0f, tween(180), label = "detailBar")
-    val titleAlpha by animateFloatAsState(if (titleIn) 1f else 0f, tween(220), label = "detailTitle")
+
+    // 跟滚动位置**连续**变化，不用阈值 + 补间：
+    //  0 → 190px：栏底从全透明渐变到实底（不会"突然变黑"）
+    //  150 → 230px：标题淡入（此时内容标题已经滚出视野，不会重复）
+    val barAlpha = (scroll.value / 190f).coerceIn(0f, 1f)
+    val titleAlpha = ((scroll.value - 150f) / 80f).coerceIn(0f, 1f)
 
     Box(Modifier.fillMaxSize().background(ProomColor.bg)) {
         // 氛围层：海报自身的模糊光，向下渐隐到页面底色
         if (vod.pic.isNotBlank()) {
             androidx.compose.foundation.layout.Box(
-                Modifier.fillMaxWidth().height(420.dp).background(ProomColor.bg)
+                Modifier.fillMaxWidth().fillMaxHeight(0.62f).background(ProomColor.bg)
             ) {
                 AsyncImage(
                     model = vod.pic,
@@ -246,8 +248,9 @@ private fun PhoneDetail(
                 Box(
                     Modifier.fillMaxSize().background(
                         Brush.verticalGradient(
-                            0f to ProomColor.bg.copy(alpha = 0.10f),
-                            0.45f to ProomColor.bg.copy(alpha = 0.62f),
+                            0f to ProomColor.bg.copy(alpha = 0.06f),
+                            0.40f to ProomColor.bg.copy(alpha = 0.50f),
+                            0.75f to ProomColor.bg.copy(alpha = 0.88f),
                             1f to ProomColor.bg,
                         )
                     )
@@ -261,7 +264,7 @@ private fun PhoneDetail(
                 Modifier
                     .fillMaxWidth()
                     .height(56.dp + topInset)
-                    .background(ProomColor.bg.copy(alpha = barSolid))
+                    .background(ProomColor.bg.copy(alpha = barAlpha))
                     .padding(start = 8.dp, end = 20.dp, top = topInset),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
