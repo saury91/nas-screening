@@ -41,6 +41,8 @@ import com.projectionroom.ui.theme.ProomType
  */
 @Composable
 fun PhoneShell(
+    /** 状态栏高度：影视页的 Hero 要通栏到顶，其余 tab 需要让开 */
+    statusInset: androidx.compose.ui.unit.Dp = 0.dp,
     home: @Composable () -> Unit,
     live: @Composable () -> Unit,
     music: @Composable () -> Unit,
@@ -52,9 +54,10 @@ fun PhoneShell(
         Box(Modifier.weight(1f)) {
             when (tab) {
                 0 -> home()
-                1 -> live()
-                2 -> music()
-                else -> mine()
+                // 影视页自己处理（Hero 通栏），其余 tab 统一让开状态栏
+                1 -> Box(Modifier.padding(top = statusInset)) { live() }
+                2 -> Box(Modifier.padding(top = statusInset)) { music() }
+                else -> Box(Modifier.padding(top = statusInset)) { mine() }
             }
         }
         PhoneTabBar(current = tab, onSelect = { tab = it })
