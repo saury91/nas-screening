@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 全屏无标题栏：电视端不能让系统 ActionBar 占掉一行 -->
+    <style name="Theme.Proom" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">#07080B</item>
+    </style>
+</resources>
