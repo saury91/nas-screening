@@ -2,6 +2,7 @@ package com.projectionroom.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,7 +23,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 
@@ -57,9 +61,20 @@ fun PhoneShell(
     }
 }
 
+/**
+ * 底部导航条。
+ *
+ * 尺寸按触控规范来：整项 56dp 高（≥48dp 可点区），图标 22dp，文字 11sp。
+ * 选中态**不只靠颜色**（色弱用户要分得清）：图标从描边变实心 + 文字变金色。
+ */
 @Composable
 private fun PhoneTabBar(current: Int, onSelect: (Int) -> Unit) {
-    val items = listOf("影视", "直播", "音乐", "我的")
+    val items = listOf(
+        "影视" to (TabIcons.Movie to TabIcons.MovieOn),
+        "直播" to (TabIcons.Live to TabIcons.LiveOn),
+        "音乐" to (TabIcons.Music to TabIcons.MusicOn),
+        "我的" to (TabIcons.Mine to TabIcons.MineOn),
+    )
     Column(Modifier.fillMaxWidth()) {
         // 极细的一条分隔：不用描边，靠明度差
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(ProomColor.line))
@@ -67,29 +82,30 @@ private fun PhoneTabBar(current: Int, onSelect: (Int) -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .background(ProomColor.bgSoft)
-                .padding(vertical = 10.dp)
+                .padding(top = 8.dp, bottom = 10.dp)
         ) {
-            items.forEachIndexed { i, label ->
+            items.forEachIndexed { i, (label, vectors) ->
                 val on = i == current
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable(onClick = { onSelect(i) })
-                        .padding(vertical = 4.dp),
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(ProomShape.sm))
+                        .clickable(onClick = { onSelect(i) }),
                     horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
-                    // 选中项上方一个小圆点：比图标省事，也比下划线安静
-                    Box(
-                        Modifier
-                            .size(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(if (on) ProomColor.accent else androidx.compose.ui.graphics.Color.Transparent)
+                    Icon(
+                        imageVector = if (on) vectors.second else vectors.first,
+                        contentDescription = label,
+                        tint = if (on) ProomColor.accent else ProomColor.muted,
+                        modifier = Modifier.size(22.dp),
                     )
                     Text(
                         text = label,
                         style = ProomType.label,
                         color = if (on) ProomColor.accent else ProomColor.muted,
-                        modifier = Modifier.padding(top = 6.dp),
+                        modifier = Modifier.padding(top = 3.dp),
                     )
                 }
             }
