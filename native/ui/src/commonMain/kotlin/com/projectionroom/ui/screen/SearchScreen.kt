@@ -99,11 +99,13 @@ fun SearchScreen(
         Modifier
             .fillMaxSize()
             .background(ProomColor.bg)
-            .padding(horizontal = 20.dp)
             .padding(top = ProomSpace.sm + topInset)
     ) {
         // 从任何页面点搜索图标进来，都能一眼退回（不只靠系统返回键）
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             // 标准 App Bar 返回：48dp 可点区 + 24dp 图标（原来是个 26sp 的「‹」字符，
             // 既不符合规范，点击热区也只有 36dp）
             Box(
@@ -133,7 +135,7 @@ fun SearchScreen(
         // 历史：每条右侧一个 ×，右上角「清空」
         if (!searched && q.isBlank() && history.isNotEmpty()) {
             Row(
-                Modifier.fillMaxWidth().padding(top = ProomSpace.md),
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = ProomSpace.md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("最近搜索", style = ProomType.label, color = ProomColor.muted)
@@ -151,6 +153,7 @@ fun SearchScreen(
             LazyRow(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp),
             ) {
                 items(history) { w ->
                     HistoryChip(w, onPick = { q = w; committed = w }, onRemove = { onHistoryRemove(w) })
@@ -162,14 +165,14 @@ fun SearchScreen(
         if (!searched && q.isBlank()) {
             // 用 LazyRow：5 个词在窄屏上放不下，横滑而不是被裁掉
             Row(
-                Modifier.fillMaxWidth().padding(top = ProomSpace.md),
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = ProomSpace.md),
             ) {
                 Text("热门", style = ProomType.label, color = ProomColor.muted)
             }
             LazyRow(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
-                contentPadding = PaddingValues(end = ProomSpace.sm),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp),
             ) {
                 items(HOT_WORDS) { w ->
                     HotChip(w) { q = w; committed = w }
@@ -194,7 +197,7 @@ fun SearchScreen(
                     columns = GridCells.Fixed(3),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
-                    contentPadding = PaddingValues(bottom = 28.dp),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
                 ) {
                     items(results) { vod ->
                         PosterCard(
