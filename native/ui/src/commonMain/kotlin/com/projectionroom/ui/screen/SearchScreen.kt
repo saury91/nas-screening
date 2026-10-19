@@ -61,6 +61,11 @@ fun SearchScreen(
     onOpen: (Vod) -> Unit,
     initialQuery: String = "",
     onBack: () -> Unit = {},
+    /** 本机搜索历史（最近 10 条） */
+    history: List<String> = emptyList(),
+    onHistoryCommit: (String) -> Unit = {},
+    onHistoryRemove: (String) -> Unit = {},
+    onHistoryClear: () -> Unit = {},
 ) {
     var q by remember { mutableStateOf(initialQuery) }
     var committed by remember { mutableStateOf(initialQuery) }
@@ -77,6 +82,7 @@ fun SearchScreen(
             return@LaunchedEffect
         }
         delay(400)                      // 停下再查，别打满 NAS
+        onHistoryCommit(kw)
         loading = true
         err = null
         runCatching { api.search(kw) }
@@ -114,11 +120,44 @@ fun SearchScreen(
             }
         }
 
+        // 历史：每条右侧一个 ×，右上角「清空」
+        if (!searched && q.isBlank() && history.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = ProomSpace.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("最近搜索", style = ProomType.label, color = ProomColor.muted)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "清空",
+                    style = ProomType.label,
+                    color = ProomColor.muted,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(onClick = onHistoryClear)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+            LazyRow(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
+            ) {
+                items(history) { w ->
+                    HistoryChip(w, onPick = { q = w; committed = w }, onRemove = { onHistoryRemove(w) })
+                }
+            }
+        }
+
         // 电视上遥控器打字太痛苦，给几个热门词，点一下直接搜
         if (!searched && q.isBlank()) {
             // 用 LazyRow：5 个词在窄屏上放不下，横滑而不是被裁掉
-            LazyRow(
+            Row(
                 Modifier.fillMaxWidth().padding(top = ProomSpace.md),
+            ) {
+                Text("热门", style = ProomType.label, color = ProomColor.muted)
+            }
+            LazyRow(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
                 contentPadding = PaddingValues(end = ProomSpace.sm),
             ) {
@@ -193,6 +232,36 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit, onSearch
 
 private val HOT_WORDS = listOf("繁花", "沙丘", "庆余年", "奥本海默", "狂飙")
 
+/** 历史词：点正文搜，点 × 删这一条 —— 不用长按，也不藏进二级菜单 */
+@Composable
+private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(ProomSpace.md))
+            .background(ProomColor.surface)
+            .padding(start = 13.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = ProomType.meta,
+            color = ProomColor.text,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.clickable(onClick = onPick).padding(vertical = 4.dp),
+        )
+        Box(
+            Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onRemove),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("×", color = ProomColor.muted, fontSize = 15.sp)
+        }
+    }
+}
+
 @Composable
 private fun HotChip(label: String, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
@@ -204,9 +273,9 @@ private fun HotChip(label: String, onClick: () -> Unit) {
             .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 13.dp, vertical = 8.dp),
     ) {
-        Text(label, style = ProomType.body, color = ProomColor.text)
+        Text(label, style = ProomType.meta, color = ProomColor.text, maxLines = 1, softWrap = false)
     }
 }
 

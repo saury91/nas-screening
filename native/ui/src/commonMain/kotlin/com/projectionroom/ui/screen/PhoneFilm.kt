@@ -56,6 +56,8 @@ import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.PhoneHero
 import com.projectionroom.ui.component.PosterCard
+import com.projectionroom.ui.component.PosterSkeleton
+import com.projectionroom.ui.component.WideSkeleton
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.component.WideCard
 import com.projectionroom.ui.theme.ProomColor
@@ -104,6 +106,8 @@ fun PhoneFilm(
     fun pull() {
         if (refreshing) return
         refreshing = true
+        // 下拉 = 明确要最新数据，让缓存层这次跳过本地
+        com.projectionroom.shared.net.HttpCache.forceNext = true
         refreshTick += 1
         onRefresh()
         scope.launch {
@@ -324,10 +328,22 @@ private fun HomePane(
                     }
                 }
 
-                if (loading) {
+                // 首屏骨架：形状按真实内容摆好，数据一到直接替换
+                if (loading && hot.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Column(Modifier.padding(horizontal = 20.dp)) {
+                            SectionTitle("继续观看", "")
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm)) {
+                                items(3) { WideSkeleton(Modifier.width(wideW)) }
+                            }
+                        }
+                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("热门推荐", "") }
+                    items(9) { PosterSkeleton() }
+                } else if (loading) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Box(
-                            Modifier.fillMaxWidth().height(120.dp),
+                            Modifier.fillMaxWidth().height(72.dp),
                             contentAlignment = Alignment.Center,
                         ) { CircularProgressIndicator(color = ProomColor.accent, strokeWidth = 2.dp) }
                     }
@@ -422,7 +438,10 @@ private fun CategoryPane(
                 )
             }
 
-            if (loading || loadingMore) {
+            if (loading && items.isEmpty()) {
+                // 首次进入：骨架占位，不要一个孤零零的圈
+                items(9) { PosterSkeleton() }
+            } else if (loadingMore) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(Modifier.fillMaxWidth().height(72.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = ProomColor.accent, strokeWidth = 2.dp)
