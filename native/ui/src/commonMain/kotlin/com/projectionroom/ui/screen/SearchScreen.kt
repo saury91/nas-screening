@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.sp
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -83,7 +86,13 @@ fun SearchScreen(
         searched = true
     }
 
-    Column(Modifier.fillMaxSize().background(ProomColor.bg).padding(ProomSpace.xxl)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(ProomColor.bg)
+            .padding(horizontal = 20.dp)
+            .padding(top = ProomSpace.sm)
+    ) {
         // 从任何页面点搜索图标进来，都能一眼退回（不只靠系统返回键）
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -107,11 +116,13 @@ fun SearchScreen(
 
         // 电视上遥控器打字太痛苦，给几个热门词，点一下直接搜
         if (!searched && q.isBlank()) {
-            Row(
+            // 用 LazyRow：5 个词在窄屏上放不下，横滑而不是被裁掉
+            LazyRow(
                 Modifier.fillMaxWidth().padding(top = ProomSpace.md),
                 horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
+                contentPadding = PaddingValues(end = ProomSpace.sm),
             ) {
-                HOT_WORDS.forEach { w ->
+                items(HOT_WORDS) { w ->
                     HotChip(w) { q = w; committed = w }
                 }
             }
@@ -130,10 +141,11 @@ fun SearchScreen(
                 !searched -> Center("输入片名后按确认，会同时问所有片源")
 
                 else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(150.dp),
-                    horizontalArrangement = Arrangement.spacedBy(ProomSpace.md),
-                    verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
-                    contentPadding = PaddingValues(bottom = ProomSpace.xxl),
+                    // 与片库页保持同一套网格：3 列、10dp 横距、18dp 纵距
+                    columns = GridCells.Fixed(3),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    contentPadding = PaddingValues(bottom = 28.dp),
                 ) {
                     items(results) { vod ->
                         PosterCard(
