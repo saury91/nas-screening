@@ -150,11 +150,20 @@ def parse_lines(v):
     chunks = raw.split("$$$")
     pairs = list(zip(froms, chunks)) if len(froms) == len(chunks) else \
         [("", c) for c in chunks]
-    out = []
+    out, seen = [], set()
     for line_name, chunk in pairs:
         eps = _dedupe(_parse_play_url(chunk))
-        if eps:
-            out.append((line_name, eps))
+        if not eps:
+            continue
+        # 同一部片常有多条 CDN 线路，内容一模一样（只是域名不同）——
+        # 全列出来会把「艾旦」重复成 9 行。按集名签名去重，最多留 2 条。
+        sig = (len(eps), eps[0].get("name"))
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append((line_name, eps))
+        if len(out) >= 2:
+            break
     return out
 
 
