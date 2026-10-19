@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -49,6 +50,8 @@ fun PhoneHero(
     items: List<Vod>,
     onPlay: (Vod) -> Unit,
     onDetail: (Vod) -> Unit,
+    /** 浮动顶栏高度：Hero 内容整体让开它，否则会和 tab 行撞在一起 */
+    topInset: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     if (items.isEmpty()) return
@@ -56,7 +59,8 @@ fun PhoneHero(
     BoxWithConstraints(modifier.fillMaxWidth()) {
         // 竖屏 Hero 取「宽度 × 1.02」，再用屏幕高度兜一次底：
         // 小屏（iPhone SE 那档，~667dp 高）也不能让 Hero 一口吃掉整屏
-        val h = (maxWidth.value * 1.02f).coerceIn(280f, maxHeight.value * 0.58f).dp
+        val h = (maxWidth.value * 1.02f + topInset.value)
+            .coerceIn(300f + topInset.value, maxHeight.value * 0.66f).dp
 
         val state = rememberPagerState(pageCount = { items.size })
 
@@ -116,7 +120,7 @@ fun PhoneHero(
                             .align(Alignment.BottomStart)
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .padding(bottom = 34.dp),
+                            .padding(top = topInset, bottom = 34.dp),
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
                             // 清晰竖版海报：这才是视觉锚点，背景只是它的颜色延伸

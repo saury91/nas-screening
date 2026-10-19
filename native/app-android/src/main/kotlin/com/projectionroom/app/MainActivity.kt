@@ -192,6 +192,12 @@ class MainActivity : ComponentActivity() {
                                         loading = loading,
                                         onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
                                         onSearch = { screen = Screen.Search(from = s) },
+                                        // 下拉刷新：重拉首页 feed（分类页各自重拉第一页）
+                                        onRefresh = {
+                                            scope.launch {
+                                                runCatching { api.home() }.onSuccess { feed = it }
+                                            }
+                                        },
                                     )
                                 },
                                 live = {
