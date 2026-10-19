@@ -14,7 +14,7 @@ from ..log import log
 from ..net import http_get, raw_get
 from ..providers import active_sites
 from ..providers.cms import (_by_type, _cms_query, _extract_meta,
-                             _latest, _parse_play_url, _qs)
+                             _latest, _parse_play_url, _qs, parse_lines)
 from ..text import (_desc_better, _norm_key, _relevance, _score_max,
                     Q_RANK, guess_quality)
 
@@ -331,21 +331,25 @@ def search_online(kw, deadline=None):
             # 这里强制要求片名本身包含关键词，否则搜「沙丘」会混进一堆无关片。
             if KEY and KEY not in _norm_key(nm):
                 continue
-            eps = _parse_play_url(v.get("vod_play_url"))
-            if not eps:
-                continue
-            rec = {
-                "name": nm,
-                "year": str(v.get("vod_year") or "").strip(),
-                "pic": (v.get("vod_pic") or "").strip(),
-                "type": (v.get("type_name") or "").strip(),
-                "remarks": (v.get("vod_remarks") or "").strip(),
-                "site": site["name"],
-                "pri": site["pri"],
-                "eps": eps,
-            }
-            rec.update(_extract_meta(v))
-            out.append(rec)
+            # 一条 vod 可能有多条播放线路（$$$ 分隔），逐条生成记录，
+            # 否则集名会重复成「第01集 第01集 第01集 第01集」
+            lines = parse_lines(v)
+            for line_name, eps in lines:
+                label = site["name"]
+                if line_name and len(lines) > 1:
+                    label = "%s · %s" % (label, line_name)
+                rec = {
+                    "name": nm,
+                    "year": str(v.get("vod_year") or "").strip(),
+                    "pic": (v.get("vod_pic") or "").strip(),
+                    "type": (v.get("type_name") or "").strip(),
+                    "remarks": (v.get("vod_remarks") or "").strip(),
+                    "site": label,
+                    "pri": site["pri"],
+                    "eps": eps,
+                }
+                rec.update(_extract_meta(v))
+                out.append(rec)
         return out
 
     rows = []

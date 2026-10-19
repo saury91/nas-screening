@@ -397,7 +397,7 @@ class MainActivity : ComponentActivity() {
 
                             val vod = full
                             when {
-                                loading && vod == null -> CenterHint("正在向 NAS 要线路…", loading = true)
+                                loading && vod == null -> com.projectionroom.ui.component.DetailSkeleton()
                                 err != null -> CenterHint("读取失败：$err")
                                 vod != null -> DetailScreen(
                                     vod = vod,
