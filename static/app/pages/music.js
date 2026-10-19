@@ -1,5 +1,6 @@
 // 音乐：专辑墙 / 歌手 / 专辑详情 + 播放队列
 import { api } from '../core/api.js';
+import { isApp } from '../core/platform.js';
 import { esc, icon, toast, fmtClock, debounce } from '../core/dom.js';
 import { playAlbum, playQueue, nowPlayingTrack } from '../components/musicplayer.js';
 import { emptyState } from '../components/ui.js';
@@ -270,7 +271,7 @@ export async function render(root, ctx) {
   } catch (e) {
     root.querySelector('#mbody').innerHTML = emptyState({
       iconName: 'music', title: '音乐库读不到', desc: e.message,
-      action: '<a class="btn" href="#/settings/music" data-focus>去配置</a>',
+      action: isApp() ? '' : '<a class="btn" href="#/settings/music" data-focus>去配置</a>',
     });
     return;
   }
@@ -289,7 +290,9 @@ function paint(root) {
       <h4>想听自己的歌？</h4>
       <p class="hint" style="margin:6px 0 12px">接一个 Subsonic 服务（Navidrome / Airsonic），
         或直接扫 NAS 上的音乐目录。上面的搜索不需要配置也能用。</p>
-      <a class="btn sm" href="#/settings/music" data-focus>去启用音乐库</a>
+      ${isApp()
+        ? '<p class="hint" style="margin:0">想接自己的音乐库？在电脑上打开管理后台配置。</p>'
+        : '<a class="btn sm" href="#/settings/music" data-focus>去启用音乐库</a>'}
     </div>`;
     return;
   }
@@ -297,7 +300,7 @@ function paint(root) {
     if (sum) sum.textContent = '出错了';
     body.innerHTML = emptyState({
       iconName: 'music', title: '音乐库暂时不可用', desc: home.error,
-      action: '<a class="btn" href="#/settings/music" data-focus>检查配置</a>',
+      action: isApp() ? '' : '<a class="btn" href="#/settings/music" data-focus>检查配置</a>',
     });
     return;
   }

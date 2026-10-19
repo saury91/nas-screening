@@ -1,6 +1,7 @@
 // 全屏播放器：ArtPlayer + hls.js
 // 交互统一收进播放器控制栏：上一集/下一集/线路选集；画面只保留缓冲状态（进度 + 网速）。
 import { $, esc, icon, toast, fmtSpeed } from '../core/dom.js';
+import { isTv } from '../core/platform.js';
 import { api } from '../core/api.js';
 import { openCastSheet } from '../core/cast.js';
 import { getToken } from '../core/auth.js';
@@ -137,7 +138,7 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
           <p>${esc(src.site || '')}${item.year ? ` · ${esc(item.year)}` : ''}${isLive ? ' · 直播' : ''}<span class="pl-res" id="pl-res"></span></p>
         </div>
         <div class="pl-tools">
-          ${isTvDevice() ? '' : `<button class="icon-btn" id="pl-cast" title="投屏到电视" data-focus>${icon('tv')}</button>`}
+          ${isTv() ? '' : `<button class="icon-btn" id="pl-cast" title="投屏到电视" data-focus>${icon('tv')}</button>`}
           <button class="icon-btn" id="pl-close" title="关闭（Esc）" data-focus>${icon('close')}</button>
         </div>
       </div>
@@ -193,11 +194,7 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
 
 function currentSource() { return state.item.sources[state.si]; }
 
-// 电视端不显示投屏按钮（它本身就是接收端）
-function isTvDevice() {
-  return /ProomTV\//.test(navigator.userAgent) ||
-    document.documentElement.classList.contains('tv');
-}
+
 
 /** 投屏用：当前在播的地址、标题、进度 */
 export function castInfo() {

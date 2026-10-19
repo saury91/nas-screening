@@ -2,11 +2,9 @@
 // 电视端自己就是接收器（同一套网页），不做 DLNA/Cast。
 import { $, esc, icon, toast } from './dom.js';
 import { getToken } from './auth.js';
+import { isTv, isPhone } from './platform.js';
 
 const ID_KEY = 'pr.dev';
-const isTv = () => /ProomTV\//.test(navigator.userAgent) ||
-  document.documentElement.classList.contains('tv');
-const isPhone = () => /Proom(Phone|Mobile)\//.test(navigator.userAgent);
 
 function deviceId() {
   // 原生给了稳定 id 就用它：电视端每次冷启动都会清 WebView 存储，
@@ -121,36 +119,57 @@ export async function openCastSheet(info) {
 
   const body = box.querySelector('#cast-body');
   const nasBox = box.querySelector('#cast-nas');
-  let items = [];
-  // 面板开着的时候每 2 秒刷一次：电视刚打开也能自己冒出来，不用重开面板
-  clearInterval(castTimer);
-  castTimer = setInterval(() => {
-    if (box.hidden) { clearInterval(castTimer); return; }
-    renderTargets(nasBox, info).catch(() => {});
-  }, 2000);
+  localSig = null;                // 每次开面板都重新发现局域网
+  window.__hasLocalCast = false;
+
+  // NAS 只是「设备名录」之一，它不在不该让整个投屏失效：
+  // 手机和电视本来就活在同一个局域网里，UDP 广播不需要经过 NAS。
+  let items = null;
+  let nasOk = true;
   try {
     items = await listTargets();
   } catch (e) {
-    nasBox.innerHTML = `<p class="hint">拿不到设备列表：${esc(e.message)}</p>`;
-    return;
+    nasOk = false;
+    nasBox.innerHTML = '';
   }
 
-  renderTargets(nasBox, info, items);
-  renderLocal(body, info);
+  if (nasOk) renderTargets(nasBox, info, items);
+  renderLocal(body, info, nasOk);
+
+  // 面板开着时定时刷新：NAS 在线就刷名录，离线就只刷局域网发现
+  clearInterval(castTimer);
+  castTimer = setInterval(() => {
+    if (box.hidden) { clearInterval(castTimer); return; }
+    if (nasOk) renderTargets(nasBox, info).catch(() => {});
+    else renderLocal(body, info, false).catch(() => {});
+  }, nasOk ? 2000 : 3000);
 }
 
 /** 局域网直连：不经过 NAS，NAS 关机也能投 */
-async function renderLocal(body, info) {
-  const box = document.createElement('div');
-  box.className = 'cast-local';
-  box.innerHTML = '<p class="hint">正在查找可直连的电视…</p>';
-  body.appendChild(box);
+let localSig = null;
 
-  const tvs = await discoverLocal();
+async function renderLocal(body, info, nasOk = true) {
+  const tvs = await discoverLocal(nasOk ? 2500 : 1800);
   window.__hasLocalCast = tvs.length > 0;
-  if (!tvs.length) { box.remove(); return; }
+
+  // 空结果也要走一遍：首次「一台都没找到」时必须给提示，不能被去重吞掉
+  const sig = tvs.length ? tvs.map(t => t.url).join(',') : '-';
+  if (sig === localSig) return;          // 没变化就别重建，免得焦点被打断
+  localSig = sig;
+
+  let box = body.querySelector('.cast-local');
+  if (!tvs.length) {
+    if (box) box.remove();
+    if (!nasOk) showOfflineHint(body);
+    return;
+  }
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'cast-local';
+    body.appendChild(box);
+  }
   // 已经有直连设备了：把上面那句"没找到在线的电视"收掉，免得看着像失败
-  const hint = box.parentElement?.querySelector('#cast-nas .hint');
+  const hint = body.querySelector('#cast-nas .hint');
   if (hint) hint.remove();
 
   box.innerHTML = '<div class="cast-group">直连电视<span>· 不需要 NAS</span></div>' +
@@ -178,6 +197,18 @@ async function renderLocal(body, info) {
 }
 
 let castTimer = null;
+
+// NAS 不在时的兜底文案：手机还有 UDP 这条腿，PC 就真的没辙了
+function showOfflineHint(body) {
+  const nasBox = body.querySelector('#cast-nas');
+  if (!nasBox || nasBox.textContent.trim()) return;
+  const hasNativeFinder = !!window.ProomNative?.castDiscover;
+  nasBox.innerHTML = hasNativeFinder
+    ? `<p class="hint">NAS 不在线，局域网里也没发现电视。<br>
+       电视上打开放映室（保持前台）就会出现在这里。</p>`
+    : `<p class="hint">NAS 不在线，投屏列表拿不到。<br>
+       手机 App 可以不走 NAS 直连电视，网页端不行。</p>`;
+}
 
 /** 渲染设备列表（面板定时刷新也走这里） */
 async function renderTargets(body, info, preloaded) {
