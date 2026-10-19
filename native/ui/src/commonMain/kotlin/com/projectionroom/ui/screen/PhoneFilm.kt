@@ -272,7 +272,8 @@ private fun HomePane(
         modifier = Modifier.fillMaxSize(),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val wideW = (maxWidth * 0.62f).coerceIn(180.dp, 300.dp)
+            // 62% 太占屏：一张就吃掉大半行高，改成 46%（约 180dp）
+            val wideW = (maxWidth * 0.46f).coerceIn(150.dp, 220.dp)
             val railW = (maxWidth * 0.28f).coerceIn(96.dp, 150.dp)
 
             LazyVerticalGrid(
