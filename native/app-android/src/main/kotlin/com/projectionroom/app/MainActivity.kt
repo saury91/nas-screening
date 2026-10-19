@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
@@ -94,7 +95,9 @@ class MainActivity : ComponentActivity() {
         // 状态栏保持可见，图标用浅色（暗底）；颜色跟主题一致，不要黑色断层
         androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
             .isAppearanceLightStatusBars = false
-        window.statusBarColor = 0xFF07080B.toInt()
+        // 透明状态栏：Hero 的背景要能画到状态栏下面（真正沉浸），
+        // 但状态栏本身还在、图标仍可见
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = 0xFF07080B.toInt()
 
         // 电视锁横屏；手机跟随系统（竖屏为主，播放器再单独转）
@@ -199,11 +202,32 @@ class MainActivity : ComponentActivity() {
 
                 // Android 15+ 强制 edge-to-edge：内容会画到状态栏/手势条下面，
                 // 状态栏还会吃掉那块区域的点击。除播放页（要满屏视频）外统一让开。
-                val insetMod = if (screen is Screen.Play) Modifier
-                    else Modifier.padding(top = barTop, bottom = barBottom)
+                val topPad = when (screen) {
+                    is Screen.Home, is Screen.Play -> 0.dp   // 首页 Hero 通栏、播放页满屏
+                    else -> barTop
+                }
+                val insetMod = Modifier.padding(top = topPad, bottom = barBottom)
 
                 Box(Modifier.fillMaxSize().background(ProomColor.bg).then(insetMod)) {
-                    when (val s = screen) {
+                    // 页面切换动效：新页从右侧滑入淡入，旧页微左移淡出（硬切太突兀）
+                androidx.compose.animation.AnimatedContent(
+                    targetState = screen,
+                    transitionSpec = {
+                        (androidx.compose.animation.slideInHorizontally(
+                            initialOffsetX = { it / 5 },
+                        ) + androidx.compose.animation.fadeIn(
+                            androidx.compose.animation.core.tween(240),
+                        )).togetherWith(
+                            androidx.compose.animation.slideOutHorizontally(
+                                targetOffsetX = { -it / 10 },
+                            ) + androidx.compose.animation.fadeOut(
+                                androidx.compose.animation.core.tween(180),
+                            )
+                        )
+                    },
+                    label = "screen",
+                ) { s ->
+                    when (s) {
                         is Screen.Home -> if (onTv) {
                             TvHome(
                                 continueWatching = feed?.continueWatching.orEmpty(),
@@ -220,11 +244,13 @@ class MainActivity : ComponentActivity() {
                         } else {
                             // 手机：底部 tab 壳（搜索与「我的」都在壳里）
                             PhoneShell(
+                                statusInset = barTop,
                                 home = {
                                     PhoneFilm(
                                         api = api,
                                         feed = feed,
                                         loading = loading,
+                                        statusInset = barTop,
                                         onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
                                         onSearch = { screen = Screen.Search(from = s) },
                                         // 下拉刷新：重拉首页 feed（分类页各自重拉第一页）
@@ -385,6 +411,7 @@ class MainActivity : ComponentActivity() {
                             resolveUrl = { api.proxied(it) },
                             onBack = { screen = s.from },
                         )
+                    }
                     }
                 }
             }
