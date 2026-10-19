@@ -26,6 +26,14 @@ class NasApi(private val http: Http, baseUrl: String) {
         coerceInputValues = true
     }
 
+    /**
+     * 把源站直链包成 NAS 代理地址。
+     *
+     * 采集站的 m3u8 大多校验 Referer，Media3 直接拉会 403 或一直缓冲；
+     * NAS 的 /api/proxy 会补 Referer 并重写播放列表里的分片地址。
+     */
+    fun proxied(raw: String): String = "$base/api/proxy?u=${raw.encodeQuery()}"
+
     @Serializable
     private data class SearchResp(val items: List<SearchItem> = emptyList())
 
