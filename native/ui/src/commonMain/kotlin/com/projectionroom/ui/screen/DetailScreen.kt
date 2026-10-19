@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraintsScope
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -217,9 +218,18 @@ private fun PhoneDetail(
     onBack: () -> Unit,
 ) {
     val line = vod.lines.getOrNull(lineIndex)
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ProomSpace.lg)
-    ) {
+    Column(Modifier.fillMaxSize()) {
+        // 顶部标题栏：新页面必须有明确的返回入口和标题（之前只有一个「返回」按钮
+        // 混在操作区里，看着不像一个独立页面）
+        DetailTopBar(title = vod.name, onBack = onBack)
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = ProomSpace.lg)
+                .padding(bottom = ProomSpace.lg)
+        ) {
+            Spacer(Modifier.height(4.dp))
         Row {
             Poster(vod, Modifier.width(104.dp))
             Spacer(Modifier.width(ProomSpace.md))
@@ -252,13 +262,7 @@ private fun PhoneDetail(
                 label = if (isFavorite) "已收藏" else "收藏",
                 labelColor = if (isFavorite) ProomColor.accent else ProomColor.text,
             )
-            FocusBox(
-                background = ProomColor.surface,
-                onClick = onBack,
-                contentPadding = Padding(18, 10),
-                label = "返回",
-                labelColor = ProomColor.text,
-            )
+            // 返回已经在顶部标题栏，这里不再重复
         }
         if (vod.desc.isNotBlank()) {
             Spacer(Modifier.height(ProomSpace.md))
@@ -301,6 +305,40 @@ private fun PhoneDetail(
             }
             Spacer(Modifier.height(8.dp))
         }
+        }
+    }
+}
+
+/** 详情页顶部：返回（48dp 热区）+ 标题一行 */
+@Composable
+private fun DetailTopBar(title: String, onBack: () -> Unit) {
+    androidx.compose.foundation.layout.Row(
+        Modifier.fillMaxWidth().height(56.dp).padding(start = 8.dp, end = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(48.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            androidx.compose.material3.Icon(
+                imageVector = com.projectionroom.ui.component.TabIcons.Back,
+                contentDescription = "返回",
+                tint = ProomColor.text,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        Spacer(Modifier.height(0.dp))
+        Text(
+            title,
+            style = ProomType.title,
+            color = ProomColor.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 4.dp),
+        )
     }
 }
 
