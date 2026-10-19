@@ -64,6 +64,14 @@ private sealed interface Screen {
     data class Play(val vod: Vod, val lineIndex: Int, val epIndex: Int, val from: Screen) : Screen
 }
 
+/** 页面层级：决定转场方向（变大=前进） */
+private fun depth(s: Screen): Int = when (s) {
+    is Screen.Home -> 0
+    is Screen.Browse, is Screen.Search, is Screen.Playlist -> 1
+    is Screen.Detail -> 2
+    is Screen.Play -> 3
+}
+
 class MainActivity : ComponentActivity() {
 
     /** 电视判定：优先看系统特性，比按屏幕尺寸猜准。 */
@@ -202,26 +210,25 @@ class MainActivity : ComponentActivity() {
 
                 // Android 15+ 强制 edge-to-edge：内容会画到状态栏/手势条下面，
                 // 状态栏还会吃掉那块区域的点击。除播放页（要满屏视频）外统一让开。
-                val topPad = when (screen) {
-                    is Screen.Home, is Screen.Play -> 0.dp   // 首页 Hero 通栏、播放页满屏
-                    else -> barTop
-                }
-                val insetMod = Modifier.padding(top = topPad, bottom = barBottom)
+                // 顶部让开交给各页面自己（放外层会让正在退出的首页也一起上移，沉浸感瞬间消失）
+                val insetMod = Modifier.padding(bottom = barBottom)
 
                 Box(Modifier.fillMaxSize().background(ProomColor.bg).then(insetMod)) {
                     // 页面切换动效：新页从右侧滑入淡入，旧页微左移淡出（硬切太突兀）
                 androidx.compose.animation.AnimatedContent(
                     targetState = screen,
                     transitionSpec = {
+                        // 前进：新页从右进、旧页往左退；返回：反过来
+                        val dir = if (depth(targetState) >= depth(initialState)) 1 else -1
                         (androidx.compose.animation.slideInHorizontally(
-                            initialOffsetX = { it / 5 },
+                            initialOffsetX = { dir * it / 4 },
                         ) + androidx.compose.animation.fadeIn(
-                            androidx.compose.animation.core.tween(240),
+                            androidx.compose.animation.core.tween(260),
                         )).togetherWith(
                             androidx.compose.animation.slideOutHorizontally(
-                                targetOffsetX = { -it / 10 },
+                                targetOffsetX = { -dir * it / 8 },
                             ) + androidx.compose.animation.fadeOut(
-                                androidx.compose.animation.core.tween(180),
+                                androidx.compose.animation.core.tween(200),
                             )
                         )
                     },
@@ -359,6 +366,7 @@ class MainActivity : ComponentActivity() {
                             api = api,
                             onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
                             onBack = { screen = s.from },
+                            topInset = barTop,
                             history = searchHistory,
                             onHistoryCommit = { kw -> searchHistory = SearchStore.add(this@MainActivity, kw) },
                             onHistoryRemove = { kw -> searchHistory = SearchStore.remove(this@MainActivity, kw) },
@@ -397,6 +405,7 @@ class MainActivity : ComponentActivity() {
                                         screen = Screen.Play(vod, li, ei, s)
                                     },
                                     onBack = { screen = s.from },
+                                    topInset = barTop,
                                 )
                                 else -> CenterHint("这部片没有可播线路")
                             }
