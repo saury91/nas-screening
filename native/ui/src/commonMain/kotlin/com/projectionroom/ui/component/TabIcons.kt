@@ -62,6 +62,24 @@ object TabIcons {
         curveTo(15.7f, 14.1f, 18.6f, 16.1f, 18.6f, 19.6f)
     }
 
+    /** 放大镜：顶栏搜索入口（统一成一个图标，不再用文字按钮） */
+    val Search: ImageVector = ImageVector.Builder(
+        name = "search", defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f,
+    ).apply {
+        path(
+            fill = null,
+            stroke = SolidColor(Color.White),
+            strokeLineWidth = 1.9f,
+            strokeLineCap = StrokeCap.Round,
+        ) {
+            moveTo(11f, 4.2f)
+            arcTo(6.8f, 6.8f, 0f, true, true, 10.98f, 4.2f)
+            close()
+            moveTo(16.2f, 16.2f); lineTo(20.4f, 20.4f)
+        }
+    }.build()
+
     // ── 构造 ──────────────────────────────────────────────
     private fun icon(name: String, filled: Boolean, block: PathBuilder.() -> Unit): ImageVector =
         ImageVector.Builder(

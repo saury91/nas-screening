@@ -9,7 +9,9 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import com.projectionroom.shared.model.Vod
+import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.ui.screen.ConnectScreen
+import com.projectionroom.ui.screen.PhoneFilm
 import com.projectionroom.ui.screen.TvHome
 import com.projectionroom.ui.theme.ProomTheme
 import kotlinx.coroutines.runBlocking
@@ -28,6 +30,7 @@ fun main() {
         renderToPng(out.replace(".png", "-phone.png"), isTv = false)
         renderToPng(out.replace(".png", "-tv.png"), isTv = true)
         renderConnect(out.replace(".png", "-connect.png"))
+        renderFilm(out.replace(".png", "-film.png"))
         return
     }
     application {
@@ -62,6 +65,33 @@ private fun warmUp() {
                 )
             }
         }
+    }
+}
+
+/** 影视页：验证「顶栏 + 二级 tab + 海报网格」的版式（不需要真机/模拟器） */
+@OptIn(ExperimentalComposeUiApi::class)
+private fun renderFilm(path: String) {
+    val api = NasApi(object : com.projectionroom.shared.net.Http {
+        override suspend fun get(url: String, referer: String?): String = "{}"
+    }, "http://127.0.0.1:8899")
+    val feed = NasApi.HomeFeed(
+        continueWatching = SAMPLE.take(4),
+        latest = SAMPLE,
+        liked = SAMPLE.take(3),
+        cats = emptyList(),
+    )
+    val scene = ImageComposeScene(width = 900, height = 1600, density = Density(2f)) {
+        ProomTheme(isTv = false) {
+            PhoneFilm(api = api, feed = feed, loading = false, onOpen = {}, onSearch = {})
+        }
+    }
+    try {
+        val image = scene.render()
+        val data = image.encodeToData(EncodedImageFormat.PNG) ?: error("PNG 编码失败")
+        File(path).writeBytes(data.bytes)
+        println("rendered -> $path")
+    } finally {
+        scene.close()
     }
 }
 
