@@ -27,6 +27,7 @@ import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.shared.net.OkHttpHttp
 import com.projectionroom.ui.screen.BrowseScreen
+import com.projectionroom.ui.screen.ConnectScreen
 import com.projectionroom.ui.screen.LiveScreen
 import com.projectionroom.ui.screen.MusicScreen
 import com.projectionroom.ui.screen.PlaylistScreen
@@ -38,7 +39,9 @@ import com.projectionroom.ui.screen.PhoneShell
 import com.projectionroom.ui.screen.TvHome
 import com.projectionroom.ui.screen.SearchScreen
 import com.projectionroom.ui.theme.ProomColor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.projectionroom.ui.theme.ProomRoot
 import com.projectionroom.ui.theme.ProomType
 
@@ -74,12 +77,63 @@ class MainActivity : ComponentActivity() {
         // 电视锁横屏；手机跟随系统（竖屏为主，播放器再单独转）
         if (onTv) requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 
-        // 模拟器里宿主机是 10.0.2.2；装到真机/电视时要改成 NAS 的局域网地址。
-        // 超时给 30 秒：一次搜索要问 60+ 个源，实测 13~15 秒，10 秒会直接 timeout。
-        val api = NasApi(OkHttpHttp(timeoutSeconds = 30), baseUrl = "http://10.0.2.2:8899")
-
         setContent {
             ProomRoot(isTv = onTv) {
+                val scopeTop = rememberCoroutineScope()
+                // NAS 地址存本地；第一次启动先在局域网里找，找不到才让用户手填
+                var baseUrl by remember { mutableStateOf(NasStore.url(this@MainActivity)) }
+                var searching by remember { mutableStateOf(baseUrl == null) }
+                var findErr by remember { mutableStateOf<String?>(null) }
+
+                LaunchedEffect(Unit) {
+                    if (baseUrl != null) return@LaunchedEffect
+                    searching = true
+                    val found = withContext(Dispatchers.IO) { Discovery.find() }
+                    searching = false
+                    if (found != null) {
+                        NasStore.save(this@MainActivity, found)
+                        baseUrl = found
+                    } else {
+                        findErr = "没有在局域网里找到放映室，确认 NAS 开机后可以手动填地址"
+                    }
+                }
+
+                if (baseUrl == null) {
+                    ConnectScreen(
+                        isTv = onTv,
+                        searching = searching,
+                        hint = findErr,
+                        onRetry = {
+                            scopeTop.launch {
+                                searching = true
+                                findErr = null
+                                val found = withContext(Dispatchers.IO) { Discovery.find() }
+                                searching = false
+                                if (found != null) {
+                                    NasStore.save(this@MainActivity, found)
+                                    baseUrl = found
+                                } else {
+                                    findErr = "还是没找到，检查手机和 NAS 是否在同一网段"
+                                }
+                            }
+                        },
+                        onConnect = { raw ->
+                            val url = NasStore.normalize(raw)
+                            if (url == null) {
+                                findErr = "地址格式不对，示例：192.168.1.10:8899"
+                            } else {
+                                NasStore.save(this@MainActivity, url)
+                                baseUrl = url
+                            }
+                        },
+                    )
+                    return@ProomRoot
+                }
+
+                // 超时给 30 秒：一次搜索要问 60+ 个源，实测 13~15 秒，10 秒会直接 timeout
+                val api = remember(baseUrl) {
+                    NasApi(OkHttpHttp(timeoutSeconds = 30), baseUrl = baseUrl!!)
+                }
                 var screen by remember { mutableStateOf<Screen>(Screen.Home) }
 
                 // 首页数据只拉一次，TV 与手机共用同一份

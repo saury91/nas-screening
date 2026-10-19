@@ -9,6 +9,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import com.projectionroom.shared.model.Vod
+import com.projectionroom.ui.screen.ConnectScreen
 import com.projectionroom.ui.screen.TvHome
 import com.projectionroom.ui.theme.ProomTheme
 import kotlinx.coroutines.runBlocking
@@ -26,6 +27,7 @@ fun main() {
     if (!out.isNullOrBlank()) {
         renderToPng(out.replace(".png", "-phone.png"), isTv = false)
         renderToPng(out.replace(".png", "-tv.png"), isTv = true)
+        renderConnect(out.replace(".png", "-connect.png"))
         return
     }
     application {
@@ -60,6 +62,30 @@ private fun warmUp() {
                 )
             }
         }
+    }
+}
+
+/** 首次连接页（找不到 NAS 的那个状态），手机上见到的就是这张 */
+@OptIn(ExperimentalComposeUiApi::class)
+private fun renderConnect(path: String) {
+    val scene = ImageComposeScene(width = 900, height = 1600, density = Density(2f)) {
+        ProomTheme(isTv = false) {
+            ConnectScreen(
+                isTv = false,
+                searching = false,
+                hint = "没有在局域网里找到放映室，确认 NAS 开机后可以手动填地址",
+                onRetry = {},
+                onConnect = {},
+            )
+        }
+    }
+    try {
+        val image = scene.render()
+        val data = image.encodeToData(EncodedImageFormat.PNG) ?: error("PNG 编码失败")
+        File(path).writeBytes(data.bytes)
+        println("rendered -> $path")
+    } finally {
+        scene.close()
     }
 }
 
