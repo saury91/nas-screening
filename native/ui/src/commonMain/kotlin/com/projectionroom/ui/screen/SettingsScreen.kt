@@ -1,0 +1,534 @@
+package com.projectionroom.ui.screen
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.projectionroom.ui.component.TabIcons
+import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.ProomSpace
+import com.projectionroom.ui.theme.ProomType
+
+/** 检查更新的结果 */
+data class AppUpdate(
+    val versionName: String,
+    val versionCode: Long,
+    val sizeMb: String,
+    val notes: String = "",
+    /** false = 已经是最新，界面上只显示一句话 */
+    val newer: Boolean = false,
+)
+
+/** 一条订阅在设置页里的展示形态 */
+data class SubRow(
+    val url: String,
+    val name: String,
+    val info: String,
+    val ok: Boolean = true,
+)
+
+/** 设置页要显示的全部状态，由壳组装后传进来 */
+data class SettingsState(
+    val nasUrl: String = "",
+    val configVersion: String = "",
+    val configSources: Int = 0,
+    /** 配置包什么时候拉的，人话（「3 分钟前」/「昨天」） */
+    val configAt: String = "",
+    val versionName: String = "",
+    val versionCode: Long = 0,
+    val cacheSize: String = "",
+    /** 分享出去的包里有多少东西（源数 / 台数），空表示还没有可分享的配置 */
+    val shareInfo: String = "",
+    val subs: List<SubRow> = emptyList(),
+    val update: AppUpdate? = null,
+    /** 上一次操作的结果，显示在底部一行 */
+    val message: String? = null,
+    val busy: Boolean = false,
+)
+
+/**
+ * 设置页。
+ *
+ * 之前这些内容挤在「我的」底部（NAS 地址 + 版本两行），既看不到全貌，
+ * 也放不下「手动同步」「检查更新」这类动作。现在独立成页，分三组：
+ *
+ * ```
+ * NAS     地址 / 配置版本 / 立即同步配置 / 重新发现
+ * 存储    缓存占用 / 清理
+ * 关于    版本 / 检查更新 / 说明
+ * ```
+ *
+ * 不在这里做片源管理：片源、直播源、下载任务全在 NAS 的网页端，
+ * App 里造一套只会和网页端打架。
+ */
+@Composable
+fun SettingsScreen(
+    state: SettingsState,
+    topInset: Dp = 0.dp,
+    onBack: () -> Unit,
+    onChangeNas: () -> Unit,
+    onSyncConfig: () -> Unit,
+    onClearCache: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    /** 扫码：从电视把配置拉过来（电视上会显示二维码） */
+    onScanPair: () -> Unit,
+    /** 反过来：本机显示二维码，让另一台设备来取配置 */
+    onShowPair: () -> Unit,
+    /** 导出配置并分享（写成文件交给系统分享面板） */
+    onExport: () -> Unit,
+    /** 从文件导入 */
+    onImportFile: () -> Unit,
+    /** 从剪贴板导入 */
+    onImportClipboard: () -> Unit,
+    onAddSub: (String) -> Unit,
+    onRemoveSub: (String) -> Unit,
+    onRefreshSubs: () -> Unit,
+) {
+    var addSubOpen by remember { mutableStateOf(false) }
+    var subText by remember { mutableStateOf("") }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(ProomColor.bg)
+            .padding(top = topInset)
+    ) {
+        // 顶栏：和「我的」同高同字重，只是左边是返回键
+        Row(
+            Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(TabIcons.Back, "返回", tint = ProomColor.text, modifier = Modifier.size(22.dp))
+            }
+            Text(
+                "设置",
+                color = ProomColor.text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.2.sp,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            if (state.busy) {
+                CircularProgressIndicator(
+                    color = ProomColor.accent,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = ProomSpace.xxl),
+            verticalArrangement = Arrangement.spacedBy(ProomSpace.sm),
+        ) {
+            item { GroupTitle("NAS") }
+            item {
+                Card {
+                    SettingRow(
+                        title = "地址",
+                        value = state.nasUrl.removePrefix("http://").removePrefix("https://"),
+                        hint = "局域网内自动发现，也可以手动填",
+                        action = "更换 ›",
+                        onClick = onChangeNas,
+                    )
+                    Divider()
+                    SettingRow(
+                        title = "配置版本",
+                        value = if (state.configVersion.isNotBlank()) {
+                            "${state.configVersion.withV()} · ${state.configSources} 个源"
+                        } else "尚未同步",
+                        hint = state.configAt.ifBlank { "配置包只在 NAS 更新时才变" },
+                    )
+                    Divider()
+                    SettingRow(
+                        title = "立即同步配置",
+                        value = "",
+                        hint = "片源地址存在本地，NAS 关机也能用；这里只是拉一次最新的",
+                        action = if (state.busy) "同步中" else "同步",
+                        enabled = !state.busy,
+                        onClick = onSyncConfig,
+                    )
+                    Divider()
+                    SettingRow(
+                        title = "重新发现 NAS",
+                        value = "",
+                        hint = "换了网段、改了 IP 时用",
+                        action = "去发现 ›",
+                        onClick = onChangeNas,
+                    )
+                }
+            }
+
+            item { GroupTitle("配置分享") }
+            item {
+                Card {
+                    SettingRow(
+                        title = "扫码从电视导入",
+                        value = "",
+                        hint = "电视上打开「我的 → 从手机导入」，扫它的二维码",
+                        action = "扫码 ›",
+                        onClick = onScanPair,
+                    )
+                    Divider()
+                    SettingRow(
+                        title = "显示配对二维码",
+                        value = "",
+                        hint = "让另一台设备扫码取走这份配置（手机给手机、手机给电视都行）",
+                        action = "显示 ›",
+                        onClick = onShowPair,
+                    )
+                    Divider()
+                    SettingRow(
+                        title = "导出发给朋友",
+                        value = state.shareInfo,
+                        hint = "导出的文件里有片源地址、分类和直播表；对方导入后不连 NAS 也能用",
+                        action = "导出",
+                        onClick = onExport,
+                    )
+                    Divider()
+                    SettingRow(
+                        title = "从文件导入",
+                        value = "",
+                        hint = "选一个 proom-config 配置文件",
+                        action = "选择文件 ›",
+                        onClick = onImportFile,
+                    )
+                    Divider()
+                    SettingRow(
+                        title = "从剪贴板导入",
+                        value = "",
+                        hint = "对方把配置文本发在聊天里，复制后点这里",
+                        action = "粘贴 ›",
+                        onClick = onImportClipboard,
+                    )
+                }
+            }
+
+            item { GroupTitle("订阅源") }
+            item {
+                Card {
+                    if (state.subs.isEmpty()) {
+                        SettingRow(
+                            title = "还没有订阅",
+                            value = "",
+                            hint = "支持 TVBox 配置地址，也支持直接的 txt / m3u 直播列表",
+                        )
+                    }
+                    state.subs.forEach { sub ->
+                        SettingRow(
+                            title = if (sub.ok) sub.name else "${sub.name}（失败）",
+                            value = sub.info,
+                            hint = sub.url,
+                            action = "删除",
+                            onClick = { onRemoveSub(sub.url) },
+                        )
+                        Divider()
+                    }
+                    SettingRow(
+                        title = "添加订阅",
+                        value = "",
+                        hint = "填 TVBox 配置地址（http…/tvbox.json）或直播列表地址",
+                        action = "添加 ›",
+                        enabled = !state.busy,
+                        onClick = { addSubOpen = true },
+                    )
+                    Divider()
+                    SettingRow(
+                        title = "刷新全部订阅",
+                        value = "",
+                        hint = "重新拉一遍，解析出的源和频道会合并进本地",
+                        action = if (state.busy) "刷新中" else "刷新",
+                        enabled = !state.busy && state.subs.isNotEmpty(),
+                        onClick = onRefreshSubs,
+                    )
+                }
+            }
+
+            item { GroupTitle("存储") }
+            item {
+                Card {
+                    SettingRow(
+                        title = "缓存占用",
+                        value = state.cacheSize.ifBlank { "—" },
+                        hint = "接口响应和图片。清掉只是下次要重新下载，不缺内容",
+                        action = "清理",
+                        onClick = onClearCache,
+                    )
+                }
+            }
+
+            item { GroupTitle("关于") }
+            item {
+                Card {
+                    SettingRow(
+                        title = "放映室",
+                        value = "v${state.versionName} (${state.versionCode})",
+                        hint = "手机端。电视端可以在 NAS 网页端下载",
+                    )
+                    Divider()
+                    val up = state.update
+                    SettingRow(
+                        title = "检查更新",
+                        value = when {
+                            up == null -> ""
+                            up.newer -> "发现 v${up.versionName} · ${up.sizeMb}"
+                            else -> "已是最新"
+                        },
+                        hint = when {
+                            up == null -> "从 NAS 上取最新发布的安装包信息"
+                            up.newer -> up.notes.ifBlank { "点右侧从 NAS 下载" }
+                            else -> "NAS 上还没有更新的版本"
+                        },
+                        action = when {
+                            up == null -> "检查"
+                            up.newer -> "去更新 ›"
+                            else -> "再查"
+                        },
+                        enabled = !state.busy,
+                        onClick = {
+                            if (up?.newer == true) onDownloadUpdate() else onCheckUpdate()
+                        },
+                    )
+                }
+            }
+
+            item {
+                Text(
+                    "片源、直播源、下载任务都在 NAS 的网页端配置，App 只负责播放。\n" +
+                        "收藏和播放记录优先存本地，NAS 在线时后台同步。",
+                    style = ProomType.label,
+                    color = ProomColor.muted,
+                    modifier = Modifier.padding(top = ProomSpace.sm, start = 4.dp, end = 4.dp),
+                )
+            }
+
+        }
+
+        if (addSubOpen) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { addSubOpen = false }) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(ProomShape.lg))
+                        .background(ProomColor.bgSoft)
+                        .padding(18.dp),
+                ) {
+                    Text("添加订阅", style = ProomType.title, color = ProomColor.text)
+                    Text(
+                        "TVBox 配置地址，或者 txt / m3u 直播列表地址",
+                        style = ProomType.label,
+                        color = ProomColor.muted,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                    )
+                    BasicTextField(
+                        value = subText,
+                        onValueChange = { subText = it },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 14.sp, color = ProomColor.text,
+                        ),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(ProomColor.accent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(ProomShape.sm))
+                            .background(ProomColor.surface)
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        decorationBox = { inner ->
+                            Box {
+                                if (subText.isEmpty()) {
+                                    Text("https://…", style = ProomType.meta, color = ProomColor.muted)
+                                }
+                                inner()
+                            }
+                        },
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Text(
+                            "取消",
+                            style = ProomType.cardTitle,
+                            color = ProomColor.muted,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(ProomShape.sm))
+                                .clickable { addSubOpen = false }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "添加",
+                            style = ProomType.cardTitle,
+                            color = if (subText.isBlank()) ProomColor.muted else ProomColor.accent,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(ProomShape.sm))
+                                .then(
+                                    if (subText.isBlank()) Modifier
+                                    else Modifier.clickable {
+                                        val u = subText.trim()
+                                        addSubOpen = false
+                                        subText = ""
+                                        onAddSub(u)
+                                    }
+                                )
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        // 操作结果固定在底部一行：放在列表末尾的话，屏幕不够长时它就在折叠线以下，
+        // 点了「检查更新」看起来像没反应
+        state.message?.let { msg ->
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(ProomColor.bgSoft)
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Text(msg, style = ProomType.label, color = ProomColor.accent)
+            }
+        }
+    }
+}
+
+/**
+ * 版本串可能是 12 这种序号，也可能是 a5630… 这种 hash。
+ * 只给数字版本补 v；hash 原样显示，否则会拼出「va5630」这种四不像。
+ */
+private fun String.withV(): String = when {
+    isEmpty() -> this
+    startsWith("v", ignoreCase = true) -> this
+    first().isDigit() -> "v$this"
+    else -> this
+}
+
+/* ───────────────────────── 零件 ───────────────────────── */
+
+@Composable
+private fun GroupTitle(text: String) {
+    Text(
+        text,
+        style = ProomType.label,
+        color = ProomColor.muted,
+        modifier = Modifier.padding(top = ProomSpace.lg, bottom = ProomSpace.xs, start = 4.dp),
+    )
+}
+
+/** 一组设置：圆角卡片，组内用 1px 线分隔 */
+@Composable
+private fun Card(content: @Composable () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(ProomShape.sm))
+            .background(ProomColor.surface)
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun Divider() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(ProomColor.line))
+}
+
+/**
+ * 一行设置：标题 + 值 + 说明 + 右侧动作。
+ *
+ * 说明文字放第二行小字而不是塞进 value —— value 那一列是给「当前值」的，
+ * 混进解释性文字就没法一眼扫出「现在的状态是什么」。
+ */
+@Composable
+private fun SettingRow(
+    title: String,
+    value: String,
+    hint: String = "",
+    action: String? = null,
+    enabled: Boolean = true,
+    onClick: (() -> Unit)? = null,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null && enabled) Modifier.clickable(onClick = onClick) else Modifier
+            )
+            .padding(horizontal = ProomSpace.md, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = ProomType.cardTitle, color = ProomColor.text)
+                if (value.isNotBlank()) {
+                    Text(
+                        value,
+                        style = ProomType.label,
+                        color = if (action != null) ProomColor.muted else ProomColor.dim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 10.dp),
+                    )
+                }
+            }
+            if (hint.isNotBlank()) {
+                Text(
+                    hint,
+                    style = ProomType.label,
+                    color = ProomColor.muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+        }
+        if (action != null) {
+            Text(
+                action,
+                style = ProomType.label,
+                color = if (enabled) ProomColor.accent else ProomColor.muted,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
+    }
+}

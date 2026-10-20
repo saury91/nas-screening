@@ -58,7 +58,11 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun SearchScreen(
-    api: NasApi,
+    /**
+     * 搜索入口由壳注入：优先本地聚合（直连源站），NAS 可用时再补一次。
+     * 页面不关心数据从哪来 —— 这也是 NAS 关机还能搜的前提。
+     */
+    search: suspend (String) -> List<Vod>,
     onOpen: (Vod) -> Unit,
     initialQuery: String = "",
     onBack: () -> Unit = {},
@@ -88,7 +92,7 @@ fun SearchScreen(
         onHistoryCommit(kw)
         loading = true
         err = null
-        runCatching { api.search(kw) }
+        runCatching { search(kw) }
             .onSuccess { results = it }
             .onFailure { err = it.message }
         loading = false
@@ -182,11 +186,23 @@ fun SearchScreen(
 
         Box(Modifier.fillMaxWidth().weight(1f).padding(top = ProomSpace.lg)) {
             when {
-                loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = ProomColor.accent)
+                // 骨架屏而不是转圈：网格形状先立住，结果回来直接换内容，不会整页跳
+                loading -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    items(9) {
+                        com.projectionroom.ui.component.PosterSkeleton()
+                    }
                 }
 
-                err != null -> Center(if (err!!.contains("NAS", true)) "连不上 NAS" else err!!)
+                err != null -> {
+                    // 取一次再判断：err 是 Compose state，两次读之间可能被置空
+                    val e = err.orEmpty()
+                    Center(if (e.contains("NAS", true)) "连不上 NAS" else e)
+                }
 
                 searched && results.isEmpty() -> Center("没找到「$committed」，换个片名试试")
 
@@ -216,31 +232,70 @@ fun SearchScreen(
 @Composable
 private fun SearchField(value: String, onValueChange: (String) -> Unit, onSearch: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(ProomSpace.md)
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        singleLine = true,
-        textStyle = ProomType.body.copy(color = ProomColor.text),
-        cursorBrush = SolidColor(ProomColor.accent),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-        modifier = Modifier
+    val shape = RoundedCornerShape(50)
+
+    // 聚焦时不再画一圈 2dp 亮金边 —— 那是「输入框报错」的视觉语言。
+    // 改成「底色抬一档 + 1dp 半透明描边」，安静但看得见。
+    Row(
+        Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(ProomColor.surface)
-            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
+            .background(if (focused) ProomColor.surface2 else ProomColor.surface)
+            .border(
+                1.dp,
+                if (focused) ProomColor.accent.copy(alpha = 0.55f) else ProomColor.line,
+                shape,
+            )
             .onFocusChanged { focused = it.isFocused }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        decorationBox = { inner ->
-            Box(contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) {
-                    Text("搜片名、演员、导演…", style = ProomType.body, color = ProomColor.muted)
-                }
-                inner()
-            }
-        },
-    )
+            .padding(horizontal = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 左边一个小放大镜：形状上是「搜索」，比占位文字更早被认出来
+        androidx.compose.foundation.Canvas(Modifier.size(15.dp)) {
+            val w = 1.6.dp.toPx()
+            val c = androidx.compose.ui.geometry.Offset(size.width * 0.42f, size.height * 0.42f)
+            val r = size.minDimension * 0.31f
+            val tint = if (focused) ProomColor.accent else ProomColor.muted
+            drawCircle(tint, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = w))
+            drawLine(
+                tint,
+                start = androidx.compose.ui.geometry.Offset(c.x + r * 0.7f, c.y + r * 0.7f),
+                end = androidx.compose.ui.geometry.Offset(size.width * 0.93f, size.height * 0.93f),
+                strokeWidth = w,
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+
+        // 选中文本时不画那个黄色「水滴手柄」：搜索框里几乎用不到，
+        // 但它会在聚焦瞬间跳出来，很脏。只保留半透明的高亮底色。
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
+                androidx.compose.foundation.text.selection.TextSelectionColors(
+                    handleColor = androidx.compose.ui.graphics.Color.Transparent,
+                    backgroundColor = ProomColor.accent.copy(alpha = 0.25f),
+                )
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = ProomType.body.copy(color = ProomColor.text),
+                cursorBrush = SolidColor(ProomColor.accent),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                modifier = Modifier.weight(1f).padding(vertical = 13.dp),
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (value.isEmpty()) {
+                            Text("搜片名、演员、导演…", style = ProomType.body, color = ProomColor.muted)
+                        }
+                        inner()
+                    }
+                },
+            )
+        }
+    }
 }
 
 private val HOT_WORDS = listOf("繁花", "沙丘", "庆余年", "奥本海默", "狂飙")
