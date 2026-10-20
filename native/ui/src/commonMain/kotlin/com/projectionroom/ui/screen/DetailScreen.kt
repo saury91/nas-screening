@@ -308,7 +308,7 @@ private fun PhoneDetail(
                         if (barAlpha <= 0.01f) return@drawBehind
                         drawRect(ProomColor.bg.copy(alpha = barAlpha))
                     }
-                    .padding(start = 8.dp, end = 20.dp, top = topInset),
+                    .padding(start = 4.dp, end = 20.dp, top = topInset),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(

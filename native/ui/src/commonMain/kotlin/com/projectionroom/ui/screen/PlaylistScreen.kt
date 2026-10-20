@@ -272,8 +272,9 @@ fun PlaylistScreen(
                 Modifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 统一规格：48dp 热区 + 24dp 图标（左缘 4 + 12 = 16dp）
                 Box(
-                    Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onBack),
+                    Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onBack),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
