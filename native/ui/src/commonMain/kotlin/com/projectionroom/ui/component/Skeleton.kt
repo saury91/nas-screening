@@ -50,11 +50,14 @@ fun SkeletonBlock(
     radius: Dp = ProomShape.md,
 ) {
     val a = blockAlpha()
+    // 注意：surface 本身是「白 5.5%」，直接 copy(alpha=a) 是**替换**掉那 5.5%，
+    // 结果变成 45%~85% 的白 —— 在暗色页面上就是一排白板。
+    // 这里自己乘一遍，闪动范围落在「白 5%~11%」，才是暗色主题该有的骨架。
     Box(
         modifier
             .then(if (height != null) Modifier.height(height) else Modifier)
             .clip(RoundedCornerShape(radius))
-            .background(ProomColor.surface.copy(alpha = a))
+            .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.11f * a))
     )
 }
 

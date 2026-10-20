@@ -61,8 +61,9 @@ fun PhoneHero(
         // 小屏（iPhone SE 那档，~667dp 高）也不能让 Hero 一口吃掉整屏
         // 高度按「内容 + 顶栏」算，不再按屏幕宽度乘系数 ——
         // 之前 1.02×宽 会在 tab 与海报之间留出一大条空白
-        val h = (300f + topInset.value)
-            .coerceIn(300f + topInset.value, maxHeight.value * 0.62f).dp
+        // 用 minOf 而不是 coerceIn(min, max)：横屏或极小的可用高度下
+        // maxHeight*0.62 会小于 300+topInset，coerceIn 收到 min > max 会直接抛异常。
+        val h = minOf(300f + topInset.value, maxHeight.value * 0.62f).dp
 
         val state = rememberPagerState(pageCount = { items.size })
 

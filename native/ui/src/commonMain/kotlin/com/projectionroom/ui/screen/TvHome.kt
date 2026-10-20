@@ -70,7 +70,13 @@ fun TvHome(
     onNav: (String, String?) -> Unit = { _, _ -> },
     onMore: (String, String?) -> Unit = { _, _ -> },
     onOpen: (Vod) -> Unit = {},
+    /** 「立即播放」：直接进播放器，不经过详情页 */
+    onPlay: (Vod) -> Unit = onOpen,
     onSearch: () -> Unit = {},
+    onNas: () -> Unit = {},
+    onMine: () -> Unit = {},
+    /** 状态栏高度：电视一般没有，个别盒子/模拟器有，顶栏内容要避开 */
+    topInset: Dp = 0.dp,
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
 ) {
     // 从详情页返回时，整个 TvHome 会重新组合，Compose 不会帮你把焦点找回来 ——
@@ -94,6 +100,10 @@ fun TvHome(
         // 海报源图只有 270x385，裁成 16:9 后横向只剩 270px；卡片别超过 300dp
         val wideCardW = (maxWidth * 0.16f).coerceIn(160.dp, 300.dp)
 
+        // Hero 已经展示了前 6 条，下面的「最近更新」不再重复
+        val heroItems = latest.take(6)
+        val latestRest = latest.drop(heroItems.size)
+
         androidx.compose.foundation.lazy.LazyColumn(
             Modifier.fillMaxSize(),
             state = listState,
@@ -104,12 +114,12 @@ fun TvHome(
             item {
                 if (latest.isNotEmpty()) {
                     TvHero(
-                        items = latest.take(6),
+                        items = heroItems,
                         height = maxHeight * 0.76f,
-                        topInset = TOP_BAR_HEIGHT,
+                        topInset = TOP_BAR_HEIGHT + topInset,
                         playFocusRequester = if (latest.isNotEmpty()) heroPlay else null,
                         navFocusRequester = landing,
-                        onPlay = { v -> onOpen(v) },
+                        onPlay = onPlay,
                         onDetail = { v -> onOpen(v) },
                     )
                 }
@@ -146,11 +156,11 @@ fun TvHome(
                 }
             }
 
-            if (latest.isNotEmpty()) {
+            if (latestRest.isNotEmpty()) {
                 item {
                     SectionTitle("最近更新", "")
                     TvRow(
-                        items = latest.take(14),
+                        items = latestRest.take(14),
                         itemWidth = cardW,
                         gap = ProomSpace.md,
                         contentPadding = PaddingValues(horizontal = ProomSpace.xxl, vertical = ProomSpace.sm),
@@ -194,6 +204,9 @@ fun TvHome(
             downTarget = if (latest.isNotEmpty()) heroPlay else null,
             onNav = onNav,
             onSearch = onSearch,
+            onNas = onNas,
+            onMine = onMine,
+            topInset = topInset,
         )
     }
 }
@@ -208,11 +221,14 @@ private fun TvTopBar(
     downTarget: FocusRequester?,
     onNav: (String, String?) -> Unit,
     onSearch: () -> Unit,
+    onNas: () -> Unit,
+    onMine: () -> Unit,
+    topInset: Dp = 0.dp,
 ) {
     Box(
         Modifier
             .fillMaxWidth()
-            .height(TOP_BAR_HEIGHT)
+            .height(TOP_BAR_HEIGHT + topInset)
             .background(
                 androidx.compose.ui.graphics.Brush.verticalGradient(
                     0f to ProomColor.bg.copy(alpha = 0.80f),
@@ -220,7 +236,7 @@ private fun TvTopBar(
                     1f to Color.Transparent,
                 )
             )
-            .padding(horizontal = ProomSpace.xxl),
+            .padding(start = ProomSpace.xxl, end = ProomSpace.xxl, top = topInset),
         contentAlignment = Alignment.CenterStart,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -252,6 +268,12 @@ private fun TvTopBar(
                 }
             }
             Spacer(Modifier.weight(1f))
+            // 只有两个入口：换 NAS（低频）+ 搜索（高频）。
+            // 「管理」类的东西一律不在电视上做 —— 产品边界。
+            MineIcon(downTarget = downTarget, onClick = onMine)
+            Spacer(Modifier.width(6.dp))
+            ServerIcon(downTarget = downTarget, onClick = onNas)
+            Spacer(Modifier.width(6.dp))
             SearchIcon(downTarget = downTarget, onClick = onSearch)
         }
     }
@@ -381,6 +403,104 @@ private fun SearchIcon(downTarget: FocusRequester? = null, onClick: () -> Unit) 
                 strokeWidth = w,
                 cap = androidx.compose.ui.graphics.StrokeCap.Round,
             )
+        }
+    }
+}
+
+/**
+ * 「我的」图标：一个头 + 一道肩。
+ *
+ * 电视上没有底部 tab，收藏和记录只能从这里进 —— 所以它是常驻入口，不是设置。
+ */
+@Composable
+private fun MineIcon(downTarget: FocusRequester? = null, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val tint = if (focused) ProomColor.accent else ProomColor.dim
+    Box(
+        Modifier
+            .then(
+                if (downTarget != null) Modifier.focusProperties { down = downTarget } else Modifier
+            )
+            .size(40.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (focused) ProomColor.surface2 else Color.Transparent)
+            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, RoundedCornerShape(50)) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(17.dp)) {
+            val w = 1.7.dp.toPx()
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = w,
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+            drawCircle(
+                color = tint,
+                radius = size.minDimension * 0.175f,
+                center = androidx.compose.ui.geometry.Offset(size.width * 0.5f, size.height * 0.28f),
+                style = stroke,
+            )
+            drawArc(
+                color = tint,
+                startAngle = 195f,
+                sweepAngle = 150f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(size.width * 0.17f, size.height * 0.52f),
+                size = androidx.compose.ui.geometry.Size(size.width * 0.66f, size.height * 0.58f),
+                style = stroke,
+            )
+        }
+    }
+}
+
+/**
+ * 「换 NAS」图标：两个叠起来的机箱（服务器）。
+ *
+ * 不用文字 —— 顶栏越安静，Hero 的画面感越强；这个入口一周也用不到一次。
+ */
+@Composable
+private fun ServerIcon(downTarget: FocusRequester? = null, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val tint = if (focused) ProomColor.accent else ProomColor.dim
+    Box(
+        Modifier
+            .then(
+                if (downTarget != null) Modifier.focusProperties { down = downTarget } else Modifier
+            )
+            .size(40.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (focused) ProomColor.surface2 else Color.Transparent)
+            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, RoundedCornerShape(50)) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(17.dp)) {
+            val w = 1.6.dp.toPx()
+            val corner = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+            val barH = size.height * 0.30f
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = w)
+            // 上下两块机箱
+            drawRoundRect(
+                color = tint,
+                topLeft = androidx.compose.ui.geometry.Offset(w * 0.5f, size.height * 0.10f),
+                size = androidx.compose.ui.geometry.Size(size.width - w, barH),
+                cornerRadius = corner,
+                style = stroke,
+            )
+            drawRoundRect(
+                color = tint,
+                topLeft = androidx.compose.ui.geometry.Offset(w * 0.5f, size.height * 0.58f),
+                size = androidx.compose.ui.geometry.Size(size.width - w, barH),
+                cornerRadius = corner,
+                style = stroke,
+            )
+            // 每块的左侧指示灯
+            drawCircle(tint, radius = w * 0.75f,
+                center = androidx.compose.ui.geometry.Offset(size.width * 0.20f, size.height * 0.25f))
+            drawCircle(tint, radius = w * 0.75f,
+                center = androidx.compose.ui.geometry.Offset(size.width * 0.20f, size.height * 0.73f))
         }
     }
 }

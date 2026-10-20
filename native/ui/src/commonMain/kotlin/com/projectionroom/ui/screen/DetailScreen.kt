@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -42,11 +43,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
@@ -76,6 +79,9 @@ fun DetailScreen(
     onPlay: (lineIndex: Int, epIndex: Int) -> Unit,
     onBack: () -> Unit = {},
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
+    /** 下拉刷新中：壳层负责真正重拉，这里只画指示器 */
+    refreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
 ) {
     var lineIndex by remember(vod.name) {
         mutableIntStateOf(0)
@@ -92,14 +98,25 @@ fun DetailScreen(
         }
     }
 
+    // 注意：根容器**不能**加 top padding —— 那会把氛围背景一起推下去，
+    // 状态栏后面只剩 window 底色（一条黑边）。inset 交给各自的顶栏，
+    // 顶栏高度里算上 topInset，内容自然落在状态栏下方。
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(ProomColor.bg)
-            .padding(top = topInset)
     ) {
     if (!isTv) {
-        PhoneDetail(vod, lineIndex, isFavorite, onToggleFavorite, onSelectLine = { lineIndex = it }, onPlay = onPlay, onBack = onBack)
+        PhoneDetail(
+            vod, lineIndex, isFavorite, onToggleFavorite,
+            onSelectLine = { lineIndex = it },
+            onPlay = onPlay,
+            onBack = onBack,
+            // 之前漏了这个参数：顶栏高度只有 56dp，标题和返回键直接顶进了状态栏
+            topInset = topInset,
+            refreshing = refreshing,
+            onRefresh = onRefresh,
+        )
         return@BoxWithConstraints
     }
     // 电视的逻辑尺寸差别很大（960x540 / 1280x720 / 1920x1080 都有），
@@ -212,6 +229,7 @@ fun DetailScreen(
 }
 
 /** 竖屏详情：海报居左偏小、信息占满宽，选集多列铺开。 */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun PhoneDetail(
     vod: Vod,
@@ -222,28 +240,47 @@ private fun PhoneDetail(
     onPlay: (lineIndex: Int, epIndex: Int) -> Unit,
     onBack: () -> Unit,
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
+    refreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
 ) {
     val line = vod.lines.getOrNull(lineIndex)
     val scroll = rememberScrollState()
 
-    // 跟滚动位置**连续**变化，不用阈值 + 补间：
-    //  0 → 190px：栏底从全透明渐变到实底（不会"突然变黑"）
-    //  150 → 230px：标题淡入（此时内容标题已经滚出视野，不会重复）
-    val barAlpha = (scroll.value / 190f).coerceIn(0f, 1f)
-    val titleAlpha = ((scroll.value - 150f) / 80f).coerceIn(0f, 1f)
+    // 跟滚动位置连续变化（不是二态跳变），但把区间压到 0~72px：
+    // 手指滑一下就走完，既不会「啪」地变实，也不会像以前那样
+    // 滚了半天还停在半透明、灰标题压在图上。
+    val barAlpha = (scroll.value / 72f).coerceIn(0f, 1f)
+    // 标题比底色晚一点出来（30px 起步、90px 完成），避免刚泛白时字先糊上来
+    val titleAlpha = ((scroll.value - 30f) / 60f).coerceIn(0f, 1f)
 
+    // 下拉刷新：详情有 5 分钟缓存，想拿最新的就下拉一次。
+    // 不接 onRefresh 时（比如 TV）这个 Box 等于不存在，不会拦截手势。
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = { onRefresh?.invoke() },
+        modifier = Modifier.fillMaxSize(),
+    ) {
     Box(Modifier.fillMaxSize().background(ProomColor.bg)) {
         // 氛围层：海报自身的模糊光，向下渐隐到页面底色
         if (vod.pic.isNotBlank()) {
             androidx.compose.foundation.layout.Box(
                 Modifier.fillMaxSize().background(ProomColor.bg)
             ) {
+                // 放大 1.15 倍再模糊：blur 采样到图层边界时会被 clamp，
+                // 在边缘留下一条**直角硬边**（就是背景里那块突兀的矩形）。
+                // 放大把边界推到屏幕外，edgeTreatment 再用 Unbounded，双保险。
                 AsyncImage(
                     model = vod.pic,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     alpha = 0.75f,
-                    modifier = Modifier.fillMaxSize().blur(46.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 1.15f
+                            scaleY = 1.15f
+                        }
+                        .blur(44.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded),
                 )
                 Box(
                     Modifier.fillMaxSize().background(
@@ -265,7 +302,12 @@ private fun PhoneDetail(
                 Modifier
                     .fillMaxWidth()
                     .height(56.dp + topInset)
-                    .background(ProomColor.bg.copy(alpha = barAlpha * 0.55f))
+                    // 只铺底色，不画分隔线、不做投影：
+                    // 0.5dp 的白线在高密度屏上会渲染成 2px，看着像一条发亮的边框。
+                    .drawBehind {
+                        if (barAlpha <= 0.01f) return@drawBehind
+                        drawRect(ProomColor.bg.copy(alpha = barAlpha))
+                    }
                     .padding(start = 8.dp, end = 20.dp, top = topInset),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -299,43 +341,52 @@ private fun PhoneDetail(
             ) {
 
             Spacer(Modifier.height(4.dp))
-        Row {
-            Poster(vod, Modifier.width(104.dp))
-            Spacer(Modifier.width(ProomSpace.md))
+        // 整页只留「海报 + 一栏信息」两块：标题/元信息/简介/按钮全在右栏，
+        // 比原来「海报一行、按钮一行、简介一行」省下两整行高度。
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Poster(vod, Modifier.width(112.dp))
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(vod.name, style = ProomType.title, color = ProomColor.text, maxLines = 2)
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(4.dp))
                 Text(
                     listOf(vod.year, vod.type, vod.area).filter { it.isNotBlank() }.joinToString(" · "),
                     style = ProomType.label,
                     color = ProomColor.muted,
                 )
                 if (vod.score.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
                     Text("评分 ${vod.score}", style = ProomType.label, color = ProomColor.accent)
                 }
+                // 简介限 3 行：源站简介经常几百字，放开会把整页撑变形
+                if (vod.desc.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        vod.desc,
+                        style = ProomType.meta,
+                        color = ProomColor.dim,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    FocusBox(
+                        background = ProomColor.accent,
+                        onClick = { if (line?.episodes?.isNotEmpty() == true) onPlay(lineIndex, 0) },
+                        contentPadding = Padding(18, 9),
+                        label = "立即播放",
+                        labelColor = Color(0xFF1B1206),
+                    )
+                    // 收藏改成图标：只占 40dp，且「已收藏」靠实心 + 金色区分，
+                    // 不必再占一个「已收藏」的文字按钮宽度
+                    FavIconButton(active = isFavorite, onClick = onToggleFavorite)
+                    // 返回已经在顶部标题栏，这里不再重复
+                }
             }
-        }
-        Spacer(Modifier.height(ProomSpace.md))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FocusBox(
-                background = ProomColor.accent,
-                onClick = { if (line?.episodes?.isNotEmpty() == true) onPlay(lineIndex, 0) },
-                contentPadding = Padding(18, 10),
-                label = "立即播放",
-                labelColor = Color(0xFF1B1206),
-            )
-            FocusBox(
-                background = if (isFavorite) ProomColor.accentSoft else ProomColor.surface,
-                onClick = onToggleFavorite,
-                contentPadding = Padding(18, 10),
-                label = if (isFavorite) "已收藏" else "收藏",
-                labelColor = if (isFavorite) ProomColor.accent else ProomColor.text,
-            )
-            // 返回已经在顶部标题栏，这里不再重复
-        }
-        if (vod.desc.isNotBlank()) {
-            Spacer(Modifier.height(ProomSpace.md))
-            Text(vod.desc, style = ProomType.meta, color = ProomColor.dim, maxLines = 4, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.height(ProomSpace.lg))
         Text("播放线路", style = ProomType.cardTitle, color = ProomColor.dim)
@@ -376,6 +427,32 @@ private fun PhoneDetail(
         }
             }
         }
+    }
+}
+
+}
+
+/** 收藏图标按钮：实心 + 金色 = 已收藏，描边 + 灰 = 未收藏 */
+@Composable
+private fun FavIconButton(active: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(if (active) ProomColor.accentSoft else ProomColor.surface)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.material3.Icon(
+            imageVector = if (active) {
+                com.projectionroom.ui.component.TabIcons.HeartOn
+            } else {
+                com.projectionroom.ui.component.TabIcons.Heart
+            },
+            contentDescription = if (active) "取消收藏" else "收藏",
+            tint = if (active) ProomColor.accent else ProomColor.dim,
+            modifier = Modifier.size(19.dp),
+        )
     }
 }
 

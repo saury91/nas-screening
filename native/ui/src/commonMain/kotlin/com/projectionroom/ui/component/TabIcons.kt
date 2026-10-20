@@ -62,6 +62,48 @@ object TabIcons {
         curveTo(15.7f, 14.1f, 18.6f, 16.1f, 18.6f, 19.6f)
     }
 
+    /**
+     * 设置：齿轮。
+     *
+     * 外圈 + 内圈 + 8 根齿。手写而不是拿 material 的 settings 图标，
+     * 是为了和这套 1.7dp 圆头笔触保持一致 —— 混一套别人的图标，
+     * 线条粗细和圆角立刻能看出来不一样。
+     */
+    val Settings: ImageVector = icon("settings", false) {
+        circle(12f, 12f, 6.4f)
+        circle(12f, 12f, 2.3f)
+        val teeth = listOf(
+            0f to -1f, 0.71f to -0.71f, 1f to 0f, 0.71f to 0.71f,
+            0f to 1f, -0.71f to 0.71f, -1f to 0f, -0.71f to -0.71f,
+        )
+        teeth.forEach { (dx, dy) ->
+            moveTo(12f + dx * 7.4f, 12f + dy * 7.4f)
+            lineTo(12f + dx * 9.4f, 12f + dy * 9.4f)
+        }
+    }
+
+    /** 收藏（空心）：详情页图标按钮 */
+    val Heart: ImageVector = icon("heart", false) { heartPath() }
+
+    /** 收藏（实心）：已收藏状态 */
+    val HeartOn: ImageVector = icon("heart_on", true) { heartPath() }
+
+    /**
+     * 心形轮廓：从下方尖角起笔，左右各三段贝塞尔。
+     *
+     * 手写而不是引 material-icons —— 那套包 4MB+，这里只需要一个形状。
+     */
+    private fun PathBuilder.heartPath() {
+        moveTo(12f, 20.4f)
+        curveTo(10.5f, 19.1f, 3.7f, 14f, 3.7f, 9.2f)
+        curveTo(3.7f, 6.3f, 5.9f, 4.2f, 8.4f, 4.2f)
+        curveTo(10.1f, 4.2f, 11.3f, 5.1f, 12f, 6.2f)
+        curveTo(12.7f, 5.1f, 13.9f, 4.2f, 15.6f, 4.2f)
+        curveTo(18.1f, 4.2f, 20.3f, 6.3f, 20.3f, 9.2f)
+        curveTo(20.3f, 14f, 13.5f, 19.1f, 12f, 20.4f)
+        close()
+    }
+
     /** 放大镜：顶栏搜索入口（统一成一个图标，不再用文字按钮） */
     val Search: ImageVector = ImageVector.Builder(
         name = "search", defaultWidth = 24.dp, defaultHeight = 24.dp,
@@ -77,6 +119,22 @@ object TabIcons {
             arcTo(6.8f, 6.8f, 0f, true, true, 10.98f, 4.2f)
             close()
             moveTo(16.2f, 16.2f); lineTo(20.4f, 20.4f)
+        }
+    }.build()
+
+    /** 关闭：搜索态的「收起」，两笔交叉 */
+    val Close: ImageVector = ImageVector.Builder(
+        name = "close", defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f,
+    ).apply {
+        path(
+            fill = null,
+            stroke = SolidColor(Color.White),
+            strokeLineWidth = 1.9f,
+            strokeLineCap = StrokeCap.Round,
+        ) {
+            moveTo(6.4f, 6.4f); lineTo(17.6f, 17.6f)
+            moveTo(17.6f, 6.4f); lineTo(6.4f, 17.6f)
         }
     }.build()
 

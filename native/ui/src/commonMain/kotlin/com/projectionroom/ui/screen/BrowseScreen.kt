@@ -64,8 +64,12 @@ private val AREAS = listOf("", "内地", "中国香港", "中国台湾", "美国
  */
 @Composable
 fun BrowseScreen(
-    api: NasApi,
     slug: String,
+    /**
+     * 数据来源由壳注入：现在优先本地聚合（按配置包里的分类映射直连各站），
+     * NAS 只是备胎。页面不再认识 NasApi，也就没法偷偷依赖它。
+     */
+    load: suspend (cat: String, page: Int, year: String, area: String) -> NasApi.BrowsePage,
     onOpen: (Vod) -> Unit,
 ) {
     var year by remember(slug) { mutableStateOf("") }
@@ -83,7 +87,7 @@ fun BrowseScreen(
         loading = true
         err = null
         page = 1
-        runCatching { api.browse(slug, 1, year, area) }
+        runCatching { load(slug, 1, year, area) }
             .onSuccess {
                 items = it.items
                 total = it.total
@@ -105,7 +109,7 @@ fun BrowseScreen(
             if (!more || loadingMore || count == 0) return@collect
             if (last < count - 8) return@collect
             loadingMore = true
-            runCatching { api.browse(slug, page + 1, year, area) }
+            runCatching { load(slug, page + 1, year, area) }
                 .onSuccess {
                     // 采集站同一页可能回重复，按名字再滤一次，避免网格里出现同款两张
                     val seen = items.mapTo(HashSet()) { it.name }

@@ -43,13 +43,21 @@ import com.projectionroom.ui.theme.ProomType
 fun PhoneShell(
     /** 状态栏高度：影视页的 Hero 要通栏到顶，其余 tab 需要让开 */
     statusInset: androidx.compose.ui.unit.Dp = 0.dp,
+    /** 手势条/导航栏高度：底栏要垫高，否则文字压在系统手势条上 */
+    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
+    /**
+     * 当前 tab 由外壳持有：从「我的」进 NAS 页再返回时，
+     * 如果状态留在这里，PhoneShell 会被重建、tab 又跳回「影视」。
+     */
+    tab: Int = 0,
+    onTab: (Int) -> Unit = {},
     home: @Composable () -> Unit,
     live: @Composable () -> Unit,
     music: @Composable () -> Unit,
     mine: @Composable () -> Unit,
+    /** 底部常驻的迷你播放条：有歌在放时才由壳注入内容 */
+    miniPlayer: @Composable () -> Unit = {},
 ) {
-    var tab by remember { mutableIntStateOf(0) }
-
     Column(Modifier.fillMaxSize().background(ProomColor.bg)) {
         Box(Modifier.weight(1f)) {
             when (tab) {
@@ -60,7 +68,8 @@ fun PhoneShell(
                 else -> Box(Modifier.padding(top = statusInset)) { mine() }
             }
         }
-        PhoneTabBar(current = tab, onSelect = { tab = it })
+        miniPlayer()
+        PhoneTabBar(current = tab, bottomInset = bottomInset, onSelect = onTab)
     }
 }
 
@@ -71,7 +80,7 @@ fun PhoneShell(
  * 选中态**不只靠颜色**（色弱用户要分得清）：图标从描边变实心 + 文字变金色。
  */
 @Composable
-private fun PhoneTabBar(current: Int, onSelect: (Int) -> Unit) {
+private fun PhoneTabBar(current: Int, bottomInset: androidx.compose.ui.unit.Dp = 0.dp, onSelect: (Int) -> Unit) {
     val items = listOf(
         "影视" to (TabIcons.Movie to TabIcons.MovieOn),
         "直播" to (TabIcons.Live to TabIcons.LiveOn),
@@ -85,7 +94,7 @@ private fun PhoneTabBar(current: Int, onSelect: (Int) -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .background(ProomColor.bgSoft)
-                .padding(top = 8.dp, bottom = 10.dp)
+                .padding(top = 8.dp, bottom = 10.dp + bottomInset)
         ) {
             items.forEachIndexed { i, (label, vectors) ->
                 val on = i == current
