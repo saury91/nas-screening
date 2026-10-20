@@ -107,7 +107,7 @@ fun SearchScreen(
     ) {
         // 从任何页面点搜索图标进来，都能一眼退回（不只靠系统返回键）
         Row(
-            Modifier.fillMaxWidth().padding(start = 8.dp, end = 20.dp),
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 标准 App Bar 返回：48dp 可点区 + 24dp 图标（原来是个 26sp 的「‹」字符，
