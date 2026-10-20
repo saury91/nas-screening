@@ -58,6 +58,17 @@ class CatalogTest {
     }
 
     @Test
+    fun `美元符号分隔的是线路不是集`() {
+        // 一条记录里塞两条线路：以前会被摊平成 4 集，选集面板里全是重复
+        val raw = "第01集\$https://a/1.m3u8#第02集\$https://a/2.m3u8" +
+            "\$\$\$第01集\$https://b/1.m3u8#第02集\$https://b/2.m3u8"
+        val lines = MacCms.parseLines(raw)
+        assertEquals(2, lines.size, "应该是两条线路")
+        assertEquals(2, lines[0].size)
+        assertEquals("https://b/1.m3u8", lines[1][0].url)
+    }
+
+    @Test
     fun `空串不会炸`() {
         assertTrue(MacCms.parsePlayUrl("").isEmpty())
     }
@@ -84,6 +95,24 @@ class CatalogTest {
     }
 
     // ── 跨源合并 ────────────────────────────────────────────────
+
+    @Test
+    fun `本地详情不用 NAS 也能凑齐线路`() = runTest {
+        val http = FakeHttp(
+            mapOf(
+                "a.com" to """{"list":[{"vod_name":"沙丘","vod_year":"1984","vod_play_url":"第1集${'$'}https://a/1984.m3u8"}]}""",
+                "b.com" to """{"list":[{"vod_name":"沙丘","vod_year":"2021","vod_play_url":"第1集${'$'}https://b/2021.m3u8"}]}""",
+            )
+        )
+        val cat = Catalog(http)
+        val srcs = listOf(Source("A", "https://a.com/api"), Source("B", "https://b.com/api"))
+        val hit = cat.detail("沙丘", "2021", srcs)
+        assertNotNull(hit)
+        // 同名合并（和服务端一致）：两条线路都要在，播放地址不能互相覆盖
+        assertEquals(2, hit.lines.size)
+        assertTrue(hit.lines.any { it.episodes.any { e -> e.url.contains("a/1984") } })
+        assertTrue(hit.lines.any { it.episodes.any { e -> e.url.contains("b/2021") } })
+    }
 
     @Test
     fun `两个源的同名片合成一条并保留两条线路`() = runTest {
@@ -135,5 +164,51 @@ class CatalogTest {
         )
         assertEquals(1, result.size)
         assertEquals("好的", result.first().lines.first().site)
+    }
+}
+
+class LrcTest {
+
+    @kotlin.test.Test
+    fun `解析普通歌词`() {
+        val raw = """
+            [ti:测试]
+            [ar:某人]
+            [00:01.00]第一行
+            [00:12.50]第二行
+            [01:03.123]第三行
+        """.trimIndent()
+        val lines = com.projectionroom.shared.catalog.Lrc.parse(raw)
+        kotlin.test.assertEquals(3, lines.size, "元数据行不该被当成歌词")
+        kotlin.test.assertEquals(1_000L, lines[0].timeMs)
+        kotlin.test.assertEquals("第一行", lines[0].text)
+        kotlin.test.assertEquals(12_500L, lines[1].timeMs)
+        kotlin.test.assertEquals(63_123L, lines[2].timeMs)
+    }
+
+    @kotlin.test.Test
+    fun `一行多个时间标签会展开`() {
+        val lines = com.projectionroom.shared.catalog.Lrc.parse("[00:10.00][01:00.00]副歌")
+        kotlin.test.assertEquals(2, lines.size)
+        kotlin.test.assertEquals(10_000L, lines[0].timeMs)
+        kotlin.test.assertEquals(60_000L, lines[1].timeMs)
+        kotlin.test.assertTrue(lines.all { it.text == "副歌" })
+    }
+
+    @kotlin.test.Test
+    fun `没有时间标签的行全部忽略`() {
+        kotlin.test.assertTrue(com.projectionroom.shared.catalog.Lrc.parse("纯文本\n[by:某人]").isEmpty())
+        kotlin.test.assertTrue(com.projectionroom.shared.catalog.Lrc.parse("").isEmpty())
+    }
+
+    @kotlin.test.Test
+    fun `当前行按时间取`() {
+        val lines = com.projectionroom.shared.catalog.Lrc.parse(
+            "[00:01.00]a\n[00:05.00]b\n[00:09.00]c"
+        )
+        kotlin.test.assertEquals(-1, com.projectionroom.shared.catalog.Lrc.indexAt(lines, 500))
+        kotlin.test.assertEquals(0, com.projectionroom.shared.catalog.Lrc.indexAt(lines, 1_000))
+        kotlin.test.assertEquals(1, com.projectionroom.shared.catalog.Lrc.indexAt(lines, 7_000))
+        kotlin.test.assertEquals(2, com.projectionroom.shared.catalog.Lrc.indexAt(lines, 60_000))
     }
 }

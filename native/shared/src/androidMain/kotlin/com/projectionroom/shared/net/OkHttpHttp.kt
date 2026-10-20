@@ -53,6 +53,33 @@ class OkHttpHttp(
         }
     }
 
+    override suspend fun resolveRedirect(url: String, referer: String?): String =
+        withContext(Dispatchers.IO) {
+            // 不跟随：只读 Location。跟随了就拿不到最终地址了（CDN 地址有时效，得现取现给）
+            val noFollow = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", UA)
+                .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
+                .build()
+            noFollow.newCall(req).execute().use { resp ->
+                resp.header("Location")?.takeIf { it.startsWith("http") } ?: url
+            }
+        }
+
+    override suspend fun contentLength(url: String, referer: String?): Long =
+        withContext(Dispatchers.IO) {
+            val req = Request.Builder()
+                .url(url)
+                .head()
+                .header("User-Agent", UA)
+                .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
+                .build()
+            runCatching {
+                client.newCall(req).execute().use { it.body?.contentLength() ?: 0L }
+            }.getOrDefault(0L)
+        }
+
     private companion object {
         // 有些采集站会挑 UA，空 UA 直接 403
         const val UA =

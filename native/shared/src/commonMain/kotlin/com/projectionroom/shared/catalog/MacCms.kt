@@ -33,6 +33,12 @@ object MacCms {
         val playUrl: String = "",
     )
 
+    /** 按分类 ID 拉列表（各站 type_id 由配置包里的 cats 给出） */
+    fun listUrl(api: String, typeId: String, page: Int = 1): String {
+        val sep = if (api.contains('?')) '&' else '?'
+        return "$api${sep}ac=detail&t=${typeId}&pg=$page"
+    }
+
     fun searchUrl(api: String, keyword: String, page: Int = 1): String {
         val sep = if (api.contains('?')) '&' else '?'
         return "$api${sep}ac=detail&wd=${keyword.encodeQuery()}&pg=$page"
@@ -73,18 +79,30 @@ object MacCms {
     }
 
     /**
-     * 拆播放地址。真实世界的格式很脏：
+     * 把 `vod_play_url` 拆成**多条线路**。
+     *
+     * `$$$` 是「换一个播放源」，`#` 才是「换一集」—— 这两个必须分开。
+     * 早先的实现把两者一起切，多线路的源会被摊平成一条，集数翻倍还带重复。
+     */
+    fun parseLines(raw: String): List<List<Episode>> {
+        if (raw.isBlank()) return emptyList()
+        return raw.split("\$\$\$")
+            .map { parsePlayUrl(it) }
+            .filter { it.isNotEmpty() }
+    }
+
+    /**
+     * 拆单条线路的选集。真实世界的格式很脏：
      *   "第01集$https://a/1.m3u8#第02集$https://a/2.m3u8"
-     *   "第01集$https://a/1.m3u8$$$第01集$https://b/1.m3u8"   ← 多线路共用一段
      *   "https://a/1.m3u8#https://a/2.m3u8"                    ← 没有集名
-     * 统一按 `#` / `$$$` 切集，段内按第一个 `$` 切「名 / 地址」。
+     * 按 `#` 切集，段内按第一个 `$` 切「名 / 地址」。
      */
     fun parsePlayUrl(raw: String): List<Episode> {
         if (raw.isBlank()) return emptyList()
-        val eps = raw.split("#", "\$\$\$")
+        val eps = raw.split("#")
             .asSequence()
             .map { it.trim() }
-            .filter { it.isNotEmpty() }
+            .filter { it.isNotEmpty() && !it.contains("\$\$\$") }
             .mapNotNull { seg ->
                 val cut = seg.indexOf('$')
                 val name = if (cut >= 0) seg.substring(0, cut).trim() else ""
