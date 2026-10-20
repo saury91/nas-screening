@@ -368,9 +368,13 @@ class MusicService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < 26) return
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (nm.getNotificationChannel(CHANNEL) != null) return
+        // 用 IMPORTANCE_MIN：
+        //  · 状态栏不出现那颗常驻通知图标（AOSP 实测有效；vivo 仍会画自己的"正在播放"角标）
+        //  · 下拉通知栏里的媒体卡还在，锁屏/耳机控制不受影响
+        // 改重要性必须删掉旧渠道重建，否则沿用用户已有的设置
+        runCatching { nm.deleteNotificationChannel(CHANNEL) }
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "音乐播放", NotificationManager.IMPORTANCE_LOW).apply {
+            NotificationChannel(CHANNEL, "音乐播放", NotificationManager.IMPORTANCE_MIN).apply {
                 description = "播放控制"
                 setShowBadge(false)
             }
