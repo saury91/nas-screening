@@ -74,8 +74,10 @@ dependencies {
     // 手机↔电视配对：QR 生成/识别（zxing 是纯 JVM，不带 Android 依赖）
     implementation("com.google.zxing:core:3.5.3")
     // 扫码要用相机预览：CameraX 体量比自带 Camera2 封装小，行为也稳
-    implementation("androidx.camera:camera-core:1.3.4")
-    implementation("androidx.camera:camera-camera2:1.3.4")
-    implementation("androidx.camera:camera-lifecycle:1.3.4")
-    implementation("androidx.camera:camera-view:1.3.4")
+    // 1.4.1 起 native 库按 16KB page size 对齐（Android 15+ 设备必需）；
+    // 1.3.4 的 libimage_processing_util_jni.so 是 4K 对齐，装到 16KB 设备会弹兼容提示
+    implementation("androidx.camera:camera-core:1.4.1")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
 }
