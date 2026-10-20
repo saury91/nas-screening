@@ -91,6 +91,8 @@ _MIGRATIONS = [
     ("live_probed", "ALTER TABLE live ADD COLUMN probed_at INTEGER"),
     # 连续失效次数：每天自动巡检时累加，达到阈值才清理，避免一次抽风就删源
     ("live_dead_hits", "ALTER TABLE live ADD COLUMN dead_hits INTEGER DEFAULT 0"),
+    # 台标地址（M3U 的 tvg-logo）：有就直接显示，省得全是空白格子
+    ("live_logo", "ALTER TABLE live ADD COLUMN logo TEXT"),
 ]
 
 

@@ -299,6 +299,8 @@ class NasApi(
         val group: String = "",
         val name: String = "",
         val urls: List<String> = emptyList(),
+        /** 台标（M3U 的 tvg-logo）；可能为空，空的时候界面用生成的占位 */
+        val logo: String = "",
     )
 
     @Serializable

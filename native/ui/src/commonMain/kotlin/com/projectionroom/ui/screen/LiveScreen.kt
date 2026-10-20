@@ -429,6 +429,7 @@ private fun ChannelCard(ch: NasApi.LiveChannel, showGroup: Boolean, onClick: () 
     ChannelTile(
         name = ch.name,
         subtitle = if (showGroup) plainLabel(ch.group).ifBlank { "未分组" } else "",
+        logo = ch.logo,
         // 多线路是可用性信号（这条挂了换下一条），单线路就不用标了
         badge = if (ch.urls.size > 1) "${ch.urls.size} 源" else "",
         onClick = onClick,

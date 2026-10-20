@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -49,6 +50,8 @@ import com.projectionroom.ui.theme.ProomType
 fun ChannelTile(
     name: String,
     subtitle: String = "",
+    /** 台标地址（M3U 的 tvg-logo）；为空则用生成的占位块 */
+    logo: String = "",
     /** 右下角角标，比如「4 源」；空则不显示 */
     badge: String = "",
     onClick: () -> Unit = {},
@@ -74,20 +77,35 @@ fun ChannelTile(
                 .scale(scale)
                 .aspectRatio(16f / 9f)
                 .clip(shape)
-                .background(Brush.linearGradient(listOf(Color(0xFF191D26), Color(0xFF0D0F14))))
+                // 没有台标时用「按频道名生成的深色调」打底：
+                // 一屏几十个格子如果都是同一个黑灰，看起来就是"大面积空白"，
+                // 每个台给一点自己的色相，既统一又不再是一片死黑。
+                .background(
+                    Brush.linearGradient(tileColors(name))
+                )
                 .then(
                     if (focused && isTv) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier
                 ),
         ) {
-            val mark = channelMark(name)
-            Text(
-                text = mark,
-                color = Color.White.copy(alpha = 0.15f),
-                fontSize = markSize(mark),
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                modifier = Modifier.align(Alignment.Center),
-            )
+            if (logo.isNotBlank()) {
+                // 有台标优先显示台标（内边距留一圈，避免贴边）
+                coil3.compose.AsyncImage(
+                    model = logo,
+                    contentDescription = name,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().padding(10.dp),
+                )
+            } else {
+                val mark = channelMark(name)
+                Text(
+                    text = mark,
+                    color = Color.White.copy(alpha = 0.18f),
+                    fontSize = markSize(mark),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
             if (badge.isNotBlank()) {
                 Text(
                     badge,
@@ -125,6 +143,15 @@ fun ChannelTile(
             }
         }
     }
+}
+
+/** 按频道名生成一对深色（同色相、不同明度），保证每个台的底色有细微差别 */
+private fun tileColors(name: String): List<Color> {
+    val h = (name.hashCode() and 0x7FFFFFFF) % 360
+    return listOf(
+        Color.hsl(h.toFloat(), 0.22f, 0.16f),
+        Color.hsl(h.toFloat(), 0.18f, 0.09f),
+    )
 }
 
 /** CCTV5 / CCTV-5 / CCTV 5+ 取数字，其余取前几个字符 */
