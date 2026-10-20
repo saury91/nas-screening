@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -102,6 +103,8 @@ fun PhoneFilm(
     statusInset: Dp = 0.dp,
     /** 下拉刷新：首页重拉 feed；分类 tab 由内部重拉第一页 */
     onRefresh: () -> Unit = {},
+    /** 首页一条片源都没有时，引导去设置里连 NAS / 导入配置 */
+    onOpenSettings: () -> Unit = {},
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
@@ -139,6 +142,7 @@ fun PhoneFilm(
                 },
                 statusInset = statusInset,
                 onScrolled = { homeScrolled = it },
+                onOpenSettings = onOpenSettings,
             )
         } else {
             CategoryPane(
@@ -261,6 +265,7 @@ private fun HomePane(
     onPlay: (Vod) -> Unit,
     onMore: (String) -> Unit,
     onScrolled: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     val continueWatching = (feed?.continueWatching.orEmpty() + feed?.liked.orEmpty()).take(8)
     val hot = feed?.latest.orEmpty()
@@ -354,6 +359,14 @@ private fun HomePane(
                     }
                 }
 
+                // 一条片源都没有：新装还没连上 NAS 的机器就是这一屏。
+                // 以前这里什么都不渲染，看着就是「打不开」，用户不知道下一步该做什么。
+                if (!loading && hot.isEmpty() && cats.isEmpty() && continueWatching.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        EmptySources(onOpenSettings)
+                    }
+                }
+
                 // 首屏骨架：形状按真实内容摆好，数据一到直接替换
                 if (loading && hot.isEmpty()) {
                     // Hero 也要占位，否则一进来第一屏是「一大坨空白」，
@@ -389,8 +402,41 @@ private fun HomePane(
     }
 }
 
-/* ─────────────────────── 分类（同一套网格） ─────────────────────── */
+/**
+ * 空首页：这台设备还没有任何片源配置。
+ *
+ * 说清两件事就够了 —— 为什么会这样（没同步过配置）、下一步点哪里。
+ * 音乐页是唯一不需要配置就能出声的模块，别让人误以为"整个 App 坏了"。
+ */
+@Composable
+private fun EmptySources(onOpenSettings: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 140.dp, start = 12.dp, end = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("还没有片源", color = ProomColor.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "这台设备还没同步过配置。\n连上 NAS 同步一次，或在设置里导入配置包、添加订阅源。",
+            color = ProomColor.dim,
+            fontSize = 13.sp,
+            lineHeight = 21.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+        Box(
+            Modifier
+                .padding(top = 20.dp)
+                .clip(RoundedCornerShape(50))
+                .background(ProomColor.accent)
+                .clickable(onClick = onOpenSettings)
+                .padding(horizontal = 26.dp, vertical = 11.dp),
+        ) {
+            Text("去设置", color = ProomColor.bg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
 
+/* ─────────────────────── 分类（同一套网格） ─────────────────────── */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CategoryPane(

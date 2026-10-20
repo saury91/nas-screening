@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -57,15 +58,21 @@ fun PhoneHero(
     if (items.isEmpty()) return
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        // 竖屏 Hero 取「宽度 × 1.02」，再用屏幕高度兜一次底：
-        // 小屏（iPhone SE 那档，~667dp 高）也不能让 Hero 一口吃掉整屏
-        // 高度按「内容 + 顶栏」算，不再按屏幕宽度乘系数 ——
-        // 之前 1.02×宽 会在 tab 与海报之间留出一大条空白
-        // 用 minOf 而不是 coerceIn(min, max)：横屏或极小的可用高度下
-        // maxHeight*0.62 会小于 300+topInset，coerceIn 收到 min > max 会直接抛异常。
-        val h = minOf(300f + topInset.value, maxHeight.value * 0.62f).dp
-
         val state = rememberPagerState(pageCount = { items.size })
+
+        // 高度按**当前页内容**给，不再是一个固定值。
+        // 内容压在底部对齐，所以固定高度在「没有简介」的那几页会空出一大条 ——
+        // 简介占两行（约 58dp），没简介就该把这段收回去。
+        // 用 animateDpAsState 而不是直接换高度：翻页是手滑结束才换的，
+        // 硬跳会让整页内容上下弹一下。
+        val hasDesc = items.getOrNull(state.currentPage)?.desc?.isNotBlank() == true
+        val target = minOf((if (hasDesc) 300f else 248f) + topInset.value,
+                           maxHeight.value * 0.62f).dp
+        val h by androidx.compose.animation.core.animateDpAsState(
+            targetValue = target,
+            animationSpec = androidx.compose.animation.core.tween(220),
+            label = "heroHeight",
+        )
 
         Box(Modifier.fillMaxWidth().height(h)) {
             HorizontalPager(

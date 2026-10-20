@@ -165,6 +165,27 @@ class CatalogTest {
         assertEquals(1, result.size)
         assertEquals("好的", result.first().lines.first().site)
     }
+
+    /**
+     * 片库 slug 必须先翻成中文再匹配 `cats`。
+     *
+     * 不翻的症状是「看起来正常，其实全靠 NAS」：本地一条都匹配不到 → 返回空 →
+     * 静默回落到 NAS。NAS 一关片库就空，而首页（走 LocalHome，用的就是中文）却是好的，
+     * 极难从现象上定位。
+     */
+    @Test
+    fun `片库 slug 能翻成配置包里的中文分类`() {
+        val src = Source(
+            name = "暴风资源",
+            api = "https://example.com/api.php/provide/vod/",
+            cats = mapOf("20" to "电影", "21" to "剧集"),
+        )
+        assertEquals("电影", Cats.nameOf("movie"))
+        assertEquals("纪录片", Cats.nameOf("doc"))
+        assertEquals("电影", Cats.nameOf("电影"), "已经是中文就原样返回")
+        assertEquals(listOf("20"), src.typeIdsOf(Cats.nameOf("movie")))
+        assertTrue(src.typeIdsOf("movie").isEmpty(), "拿 slug 直接当分类名是匹配不到的")
+    }
 }
 
 class LrcTest {

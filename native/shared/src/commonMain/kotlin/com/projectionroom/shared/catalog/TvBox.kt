@@ -153,6 +153,21 @@ object Cats {
 
     val ORDER = listOf("电影", "剧集", "动漫", "综艺", "纪录片")
 
+    /** 界面导航用的 slug，顺序与 [ORDER] 一一对应 */
+    private val SLUGS = listOf("movie", "series", "anime", "variety", "doc")
+
+    /**
+     * slug → 中文大类。
+     *
+     * 界面传的是 `movie` / `series`，配置包里 `Source.cats` 的 value 却是中文。
+     * 少翻这一步的症状极隐蔽：本地匹配不到任何 type_id → 返回空 → 静默回落到 NAS，
+     * 看着"能用"，实际 NAS 一关片库就空（首页走 LocalHome，用的是中文，所以还是好的）。
+     */
+    val slugToName: Map<String, String> = SLUGS.zip(ORDER).toMap()
+
+    /** slug 或中文都能吃：`movie` → `电影`，`电影` 原样返回 */
+    fun nameOf(slug: String): String = slugToName[slug] ?: slug
+
     fun of(name: String): String {
         val t = name.trim()
         if (t.isEmpty()) return ""

@@ -21,27 +21,22 @@ import android.os.Looper
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
-import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import com.projectionroom.ui.music.MusicBox
-import com.projectionroom.ui.music.RepeatMode
 
 /**
  * 音乐的后台服务：前台通知 + 媒体会话。
  *
- * **为什么不用 MediaStyle**：Android 11 以后通知栏里的媒体卡片是系统画的，
- * 布局固定成「应用图标 + 歌名 + 歌手 + 三个按钮」—— 封面放不进去，
- * 循环和收藏也没有位置。这里改用自定义 RemoteViews，布局和 App 内的迷你条同构：
+ * **通知用系统的 MediaStyle**，不再自己画 RemoteViews。
  *
- * ```
- * [封面] 歌名
- *        当前歌词
- * ────────────────────  进度
- *  ↻   ⏮   ⏸   ⏭   ♡
- * ```
+ * 早先的版本走自定义视图，理由是"系统媒体卡布局固定，封面和循环/收藏放不进去"。
+ * 代价是真机上的结果：Android 12+ 会把自定义通知压成很矮的一条，
+ * 我们自己那排按钮被裁掉，系统也不认为这是媒体通知 ——
+ * 通知栏看不到上一首/播放/下一首，快速设置的媒体轮播和锁屏控制也没有。
  *
- * 代价是失去系统的「输出设备」切换芯片和锁屏媒体卡。MediaSession 仍然保留，
- * 蓝牙耳机/车机的播放键照常工作。
+ * 所以现在交给系统画：封面（大图）、歌名、歌手 + 三个按钮（上一首 / 播放暂停 / 下一首），
+ * 并且绑定 [session] 的 token —— 这是通知栏媒体卡、QS 轮播、锁屏控制共用的入口。
+ * 循环与收藏留在 App 内：它们不是"播放控制"，塞进这排反而把三个主按钮挤没了。
  */
 class MusicService : Service() {
 
@@ -66,7 +61,14 @@ class MusicService : Service() {
 
         fun start(ctx: Context) {
             runCatching {
-                ctx.startService(Intent(ctx, MusicService::class.java))
+                val i = Intent(ctx, MusicService::class.java)
+                // 8.0 之后 startService 在后台会被直接拒；startForegroundService
+                // 至少给我们 5 秒把 startForeground 调起来（onStartCommand 里第一件事就是它）
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ctx.startForegroundService(i)
+                } else {
+                    ctx.startService(i)
+                }
             }
         }
     }
@@ -210,7 +212,7 @@ class MusicService : Service() {
 
     private fun build(playing: Boolean): Notification {
         val track = MusicBox.current
-        // 点整张卡片（歌名也算在内）进全屏播放页
+        // 点整张卡片进全屏播放页
         val open = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java)
@@ -218,68 +220,44 @@ class MusicService : Service() {
                 .putExtra(EXTRA_OPEN_PLAYER, true),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        fun act(action: String): PendingIntent = PendingIntent.getService(
-            this, action.hashCode(),
-            Intent(this, MusicService::class.java).setAction(action),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        fun act(action: String, icon: Int, title: String): NotificationCompat.Action =
+            NotificationCompat.Action(
+                icon, title,
+                PendingIntent.getService(
+                    this, action.hashCode(),
+                    Intent(this, MusicService::class.java).setAction(action),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
+
+        val prev = act(ACTION_PREV, R.drawable.ic_n_prev, "上一首")
+        val toggle = act(
+            ACTION_TOGGLE,
+            if (playing) R.drawable.ic_n_pause else R.drawable.ic_n_play,
+            if (playing) "暂停" else "播放",
         )
+        val next = act(ACTION_NEXT, R.drawable.ic_n_next, "下一首")
 
-        val bar = RemoteViews(packageName, R.layout.notif_music)
-        bar.setOnClickPendingIntent(R.id.n_repeat, act(ACTION_REPEAT))
-        bar.setOnClickPendingIntent(R.id.n_prev, act(ACTION_PREV))
-        bar.setOnClickPendingIntent(R.id.n_play, act(ACTION_TOGGLE))
-        bar.setOnClickPendingIntent(R.id.n_next, act(ACTION_NEXT))
-        bar.setOnClickPendingIntent(R.id.n_fav, act(ACTION_FAV))
-        // 封面和歌名区域都点进播放页：整个头部可点，比只有一行文字好按
-        bar.setOnClickPendingIntent(R.id.n_cover, open)
-        bar.setOnClickPendingIntent(R.id.n_title, open)
-        bar.setOnClickPendingIntent(R.id.n_sub, open)
-
-        bar.setTextViewText(R.id.n_title, track?.title ?: "放映室")
-        bar.setTextViewText(R.id.n_sub, subtitle())
-        bar.setImageViewResource(R.id.n_prev, R.drawable.ic_n_prev)
-        bar.setImageViewResource(R.id.n_next, R.drawable.ic_n_next)
-        bar.setImageViewResource(R.id.n_play, if (playing) R.drawable.ic_n_pause else R.drawable.ic_n_play)
-        bar.setImageViewResource(R.id.n_repeat, repeatIcon())
-        bar.setImageViewResource(R.id.n_fav, if (MusicBox.fav) R.drawable.ic_n_heart_on else R.drawable.ic_n_heart)
-        bar.setImageViewBitmap(R.id.n_cover, cover)
-
-        // 自定义通知的底色由系统给（浅色主题就是白卡），
-        // 所以文字/图标不能写死白色 —— 这里按系统明暗换色
-        val night = (resources.configuration.uiMode and
-            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-        val textColor = if (night) 0xFFF4F5F7.toInt() else 0xFF12141A.toInt()
-        val subColor = if (night) 0xFFB3B8C3.toInt() else 0xFF5A6070.toInt()
-        // 白色描边的矢量图在浅色卡片上会消失，统一染一次色。
-        // 不用「仅在浅色时染色」，是因为 RemoteViews 没法清掉上一次的滤镜 ——
-        // 每次都给一个明确颜色，状态就永远是确定的。
-        val iconColor = if (night) 0xFFFFFFFF.toInt() else 0xFF12141A.toInt()
-        val heartColor = if (MusicBox.fav) {
-            if (night) 0xFFFFCF7A.toInt() else 0xFFC8871F.toInt()
-        } else iconColor
-        bar.setTextColor(R.id.n_title, textColor)
-        bar.setTextColor(R.id.n_sub, subColor)
-        listOf(R.id.n_repeat, R.id.n_prev, R.id.n_play, R.id.n_next)
-            .forEach { bar.setInt(it, "setColorFilter", iconColor) }
-        bar.setInt(R.id.n_fav, "setColorFilter", heartColor)
-
-        bar.setProgressBar(
-            R.id.n_progress, 1000,
-            if (MusicBox.duration > 0) {
-                (MusicBox.position * 1000 / MusicBox.duration).toInt().coerceIn(0, 1000)
-            } else 0,
-            false,
-        )
+        val style = androidx.media.app.NotificationCompat.MediaStyle()
+            // 绑 token 才有 QS 媒体轮播 / 锁屏控制；不绑就只是一张普通通知
+            .setMediaSession(session?.sessionToken)
+            // 三个主按钮放进收起态；不加这一行系统只会显示一个「播放」
+            .setShowActionsInCompactView(0, 1, 2)
 
         return NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_n_play)
+            // 状态栏最左边那颗图标：音符，不用播放三角 ——
+            // 三角和 App 图标（@android:drawable/ic_media_play）一模一样，分不清是应用还是歌
+            .setSmallIcon(R.drawable.ic_n_music)
             .setContentTitle(track?.title ?: "放映室")
             .setContentText(track?.artist.orEmpty())
+            // 歌词当前句走 subText：媒体卡里它显示在歌名下方，不占按钮位置
+            .setSubText(subtitle().takeIf { it.isNotBlank() && it != track?.artist })
+            .setLargeIcon(cover)
             .setContentIntent(open)
-            .setCustomContentView(bar)
-            .setCustomBigContentView(bar)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .addAction(prev)
+            .addAction(toggle)
+            .addAction(next)
+            .setStyle(style)
             .setOngoing(playing)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
@@ -300,16 +278,10 @@ class MusicService : Service() {
         }
     }
 
-    private fun repeatIcon(): Int = when (MusicBox.repeat) {
-        RepeatMode.All -> R.drawable.ic_n_repeat
-        RepeatMode.One -> R.drawable.ic_n_repeat_one
-        RepeatMode.Shuffle -> R.drawable.ic_n_shuffle
-    }
-
     /**
      * 拉封面并圆角化。
      *
-     * 通知里的图必须是 Bitmap（RemoteViews 只能塞 bitmap/resId），
+     * 系统媒体卡的大图只吃 Bitmap（不能给 URL），
      * 所以这里自己下、自己裁 —— 不用 Coil 是因为它的 API 在 app 模块
      * 拿 imageLoader 要绕一圈，为一张 54dp 的图不值当。
      */
