@@ -34,6 +34,18 @@ object NasStore {
             .edit().putString(KEY, url).apply()
     }
 
+    /**
+     * 用户主动跳过连接（暂时没 NAS，或想先用本地片源）。
+     *
+     * 记住它，下次启动才不会再弹一次输入地址 —— 地址入口只留在设置页。
+     */
+    fun skipped(ctx: Context): Boolean =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean("nas_skipped", false)
+
+    fun setSkipped(ctx: Context, v: Boolean) {
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean("nas_skipped", v).apply()
+    }
+
     fun clear(ctx: Context) {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().remove(KEY).apply()
     }
