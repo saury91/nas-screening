@@ -141,6 +141,9 @@ private fun depth(s: Screen): Int = when (s) {
     is Screen.Play, is Screen.MusicPlayer -> 3
 }
 
+/** 没配置 NAS 时的占位地址：本地片源用不到它，只是为了构造对象不崩 */
+private const val OFFLINE_BASE = "http://127.0.0.1:1"
+
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -254,6 +257,8 @@ class MainActivity : ComponentActivity() {
                 val scopeTop = rememberCoroutineScope()
                 // NAS 地址存本地；第一次启动先在局域网里找，找不到才让用户手填
                 var baseUrl by remember { mutableStateOf(NasStore.url(this@MainActivity)) }
+                // 用户跳过过连接：不再用输入地址页拦启动，地址入口只在设置里
+                var skipped by remember { mutableStateOf(NasStore.skipped(this@MainActivity)) }
                 var searching by remember { mutableStateOf(baseUrl == null) }
                 var findErr by remember { mutableStateOf<String?>(null) }
 
@@ -270,7 +275,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (baseUrl == null) {
+                if (baseUrl == null && !skipped) {
                     ConnectScreen(
                         isTv = onTv,
                         searching = searching,
@@ -289,12 +294,17 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         },
+                        onSkip = {
+                            NasStore.setSkipped(this@MainActivity, true)
+                            skipped = true
+                        },
                         onConnect = { raw ->
                             val url = NasStore.normalize(raw)
                             if (url == null) {
                                 findErr = "地址格式不对，示例：192.168.1.10:8899"
                             } else {
                                 NasStore.save(this@MainActivity, url)
+                                NasStore.setSkipped(this@MainActivity, false)
                                 baseUrl = url
                             }
                         },
@@ -313,7 +323,7 @@ class MainActivity : ComponentActivity() {
                         // 之前在 LaunchedEffect 里同步读，主线程一次卡 5 秒直接被判 ANR
                         io = Dispatchers.IO,
                     )
-                    NasApi(http, baseUrl = baseUrl!!)
+                    NasApi(http, baseUrl = baseUrl ?: OFFLINE_BASE)
                 }
                 /**
                  * 「真实」的 NAS 客户端：**不走磁盘缓存**。
@@ -323,7 +333,7 @@ class MainActivity : ComponentActivity() {
                  * 表现就是：NAS 上改了配置（换音乐接口、改片源），手机怎么点都还是旧的那份。
                  */
                 val rawApi = remember(baseUrl) {
-                    NasApi(OkHttpHttp(timeoutSeconds = 12), baseUrl = baseUrl!!)
+                    NasApi(OkHttpHttp(timeoutSeconds = 12), baseUrl = baseUrl ?: OFFLINE_BASE)
                 }
                 // ── 本地配置包 ──
                 // 片源清单、直播表、版本号都在这里。启动时先读本地（开机就能用），

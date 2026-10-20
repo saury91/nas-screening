@@ -60,6 +60,8 @@ fun ConnectScreen(
     version: String? = null,
     /** 传了才显示返回箭头 */
     onBack: (() -> Unit)? = null,
+    /** 传了才显示「先跳过」：没有 NAS 也能进 App，地址以后在设置里填 */
+    onSkip: (() -> Unit)? = null,
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     // 预填当前地址（去掉协议头，用户看到的是 ip:port）
@@ -185,6 +187,21 @@ fun ConnectScreen(
                     ConnectButton("连接", primary = true, Modifier.weight(1f)) {
                         if (text.isNotBlank()) onConnect(text)
                     }
+                }
+
+                // 没有 NAS 也能用：片源清单存在本地，直接进 App。
+                // 地址入口留在「我的 → 设置」，不需要每次启动都被拦在这里。
+                if (onSkip != null) {
+                    Spacer(Modifier.height(ProomSpace.md))
+                    Text(
+                        "先跳过，稍后在「设置」里填地址 ›",
+                        style = ProomType.meta,
+                        color = ProomColor.muted,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(ProomShape.sm))
+                            .clickable(onClick = onSkip)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
                 }
             }
 
