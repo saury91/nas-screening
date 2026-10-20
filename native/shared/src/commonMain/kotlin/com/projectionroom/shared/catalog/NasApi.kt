@@ -221,6 +221,8 @@ class NasApi(private val http: Http, baseUrl: String) {
                     .filter { it.name.isNotBlank() && it.urls.isNotEmpty() }
                     .map { LiveChannel(it.group, it.name, it.urls) },
             ),
+            // 音乐接口段要原样带过去：漏了它就等于配置里下发了个没人读的字段
+            music = d.music,
         )
     }
 
@@ -230,6 +232,7 @@ class NasApi(private val http: Http, baseUrl: String) {
         val generatedAt: Long = 0,
         val sources: List<Source> = emptyList(),
         val live: LiveResp = LiveResp(),
+        val music: MusicCfg = MusicCfg(),
     )
 
     suspend fun home(): HomeFeed {
@@ -523,4 +526,19 @@ data class ConfigBundle(
     val version: String = "",
     val sources: List<Source> = emptyList(),
     val live: NasApi.LiveFeed = NasApi.LiveFeed(),
+    /**
+     * 音乐聚合接口（上游转发）。
+     *
+     * 以前这是写死在 APK 里的一行常量：接口换域名、被封，只能等下一个版本。
+     * 现在跟着配置包走 —— NAS 改环境变量 `MUSICBOX_API` 重发配置即生效。
+     * 老版本配置包里没有这一段，[MusicCfg.api] 为空时 App 用内置默认。
+     */
+    val music: MusicCfg = MusicCfg(),
+)
+
+/** 音乐聚合接口的地址与 Referer；api 为空表示「没下发，用内置默认」 */
+@Serializable
+data class MusicCfg(
+    val api: String = "",
+    val referer: String = "",
 )

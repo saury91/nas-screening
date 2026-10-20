@@ -315,6 +315,16 @@ class MainActivity : ComponentActivity() {
                     )
                     NasApi(http, baseUrl = baseUrl!!)
                 }
+                /**
+                 * 「真实」的 NAS 客户端：**不走磁盘缓存**。
+                 *
+                 * 配置包和收藏同步要的是「NAS 现在到底是什么」，而不是「上次看到什么」。
+                 * 走 [CachingHttp] 时缓存命中就直接返回，10 分钟内根本不问网络 ——
+                 * 表现就是：NAS 上改了配置（换音乐接口、改片源），手机怎么点都还是旧的那份。
+                 */
+                val rawApi = remember(baseUrl) {
+                    NasApi(OkHttpHttp(timeoutSeconds = 12), baseUrl = baseUrl!!)
+                }
                 // ── 本地配置包 ──
                 // 片源清单、直播表、版本号都在这里。启动时先读本地（开机就能用），
                 // 再在后台向 NAS 要新的；版本没变就不重写。
@@ -334,9 +344,14 @@ class MainActivity : ComponentActivity() {
                     }
                     // NAS 可能永远不会再开机：拉不到就拉倒，本地配置照用
                     val fresh = NasGate.tryCall(timeoutMs = 8_000) {
-                        runCatching { api.bundle() }.getOrNull()
+                        runCatching { rawApi.bundle() }.getOrNull()
                     }
-                    if (fresh != null && fresh.sources.isNotEmpty() && fresh.version != bundle?.version) {
+                    // 比对整包内容，而不是只比 version。
+                    // 版本号只覆盖「NAS 那边内容变了」；还有一种情况是「App 这边解析器升级了」——
+                    // 比如新版本才开始读 music 段，而本地那份是旧解析器存的、同一个 version。
+                    // 只比 version 就永远补不上这个字段（真机实测踩过）。ConfigBundle 是 data class，
+                    // 88KB 的结构比较是这个调用里最便宜的一步。
+                    if (fresh != null && fresh.sources.isNotEmpty() && fresh != bundle) {
                         withContext(Dispatchers.IO) { ConfigStore.save(this@MainActivity, fresh) }
                         bundle = fresh
                         bundleAt = System.currentTimeMillis()
@@ -409,7 +424,18 @@ class MainActivity : ComponentActivity() {
                 // ── 音乐（上游聚合接口，App 直连）──
                 // 接口公开、无签名，只有聚合域名校验 Referer；CDN 本身不校验，
                 // 所以取到 CDN 地址后播放器可以直接播，NAS 完全不参与。
-                val musicApi = remember { com.projectionroom.shared.catalog.MusicApi(sourceHttp) }
+                // 聚合接口地址由配置包给出（NAS 改环境变量重发配置就换域名），
+                // 没下发才用内置默认 —— 所以没连过 NAS 的手机也有歌听。
+                val musicApi = remember(bundle?.music?.api, bundle?.music?.referer) {
+                    val cfg = bundle?.music
+                    com.projectionroom.shared.catalog.MusicApi(
+                        http = sourceHttp,
+                        base = cfg?.api?.takeIf { it.isNotBlank() }
+                            ?: com.projectionroom.shared.catalog.MusicApi.DEFAULT_BASE,
+                        referer = cfg?.referer?.takeIf { it.isNotBlank() }
+                            ?: com.projectionroom.shared.catalog.MusicApi.REFERER,
+                    )
+                }
                 val doMusicCats: suspend () -> List<NasApi.MusicCatGroup> = {
                     runCatching { musicApi.categories() }.getOrDefault(emptyList())
                         .ifEmpty { NasGate.tryCall { runCatching { api.musicCats() }.getOrNull() } ?: emptyList() }
@@ -436,12 +462,23 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // 音乐播放器是进程内单例：把「取播放地址」的能力注入一次，
-                // 之后切歌/续播都由它自己拉地址（地址带时效，不能预取）
-                LaunchedEffect(Unit) {
+                // 之后切歌/续播都由它自己拉地址（地址带时效，不能预取）。
+                // key 用 musicApi：配置包晚到会换掉实例，注入的 lambda 必须跟着换，
+                // 否则播放器一直用「配置到达前」那个内置地址。
+                LaunchedEffect(musicApi) {
                     com.projectionroom.ui.music.MusicBox.install(
                         resolve = { id -> doTrackUrl(id) },
                         lyric = { id -> runCatching { musicApi.lyric(id) }.getOrDefault(emptyList()) },
                     )
+                }
+
+                // 有歌在放就确保前台服务活着。
+                // onCreate 里只 startService 一次，那一次要是被系统挡掉（冷启动竞态），
+                // 整场播放都没有通知栏控制 —— 真机踩过，界面上还看不出异常。
+                LaunchedEffect(com.projectionroom.ui.music.MusicBox.current?.id) {
+                    if (com.projectionroom.ui.music.MusicBox.current != null) {
+                        MusicService.start(this@MainActivity)
+                    }
                 }
 
                 /** 直播：配置包里就带着整张频道表，NAS 不在也能列 */
@@ -458,11 +495,14 @@ class MainActivity : ComponentActivity() {
                     remember(allSources) {
                         { cat, pg, y, a ->
                             val srcs = allSources
+                            // 界面传进来的是 slug（movie/series/…），配置包里 cats 的 value 是中文。
+                            // 少翻这一步，本地永远匹配不到 type_id → 静默回落 NAS（NAS 一关片库就空）
+                            val catName = com.projectionroom.shared.catalog.Cats.nameOf(cat)
                             val local = if (srcs.isNotEmpty()) {
                                 runCatching {
                                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                                         com.projectionroom.shared.catalog.Catalog(sourceHttp)
-                                            .browse(cat, pg, y, a, srcs, deadlineMs = 9_000)
+                                            .browse(catName, pg, y, a, srcs, deadlineMs = 9_000)
                                     }
                                 }.getOrDefault(emptyList())
                             } else emptyList()
@@ -471,7 +511,7 @@ class MainActivity : ComponentActivity() {
                                 NasApi.BrowsePage(
                                     items = local,
                                     total = local.size,
-                                    sites = srcs.count { it.typeIdsOf(cat).isNotEmpty() },
+                                    sites = srcs.count { it.typeIdsOf(catName).isNotEmpty() },
                                     more = local.size >= 40,
                                 )
                             } else {
@@ -482,12 +522,9 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                // 同步专用的 api：**不能走缓存**。
-                // 收藏是「切换」语义，如果拿到的 NAS 现状是缓存里的旧快照，
-                // 会把「取消收藏」判成「已经一致」而跳过，结果 NAS 上那条永远删不掉。
-                val syncApi = remember(baseUrl) {
-                    NasApi(OkHttpHttp(timeoutSeconds = 10), baseUrl = baseUrl!!)
-                }
+                // 同步也用 rawApi：收藏是「切换」语义，拿到旧快照会把
+                // 「取消收藏」判成「已经一致」而跳过，NAS 上那条就永远删不掉
+                val syncApi = rawApi
 
                 var screen by remember { mutableStateOf<Screen>(Screen.Home) }
                 var searchHistory by remember { mutableStateOf(SearchStore.list(this@MainActivity)) }
@@ -564,6 +601,24 @@ class MainActivity : ComponentActivity() {
                         snapshot = withContext(Dispatchers.IO) {
                             HomeCache.read(this@MainActivity)
                         }
+                    }
+                    // 本地配置包还没读出来时先别急着问 NAS。
+                    // 冷启动这一瞬间 bundle 还在 IO 线程上解析，allSources 是空的，
+                    // 直接往下走必然是「本地拼不出来 → 问 NAS」，NAS 不在就白等一次超时。
+                    // 等 2 秒还不来才说明确实没有本地配置（新装 / 没导过订阅），这时才走 NAS。
+                    if (bundle == null && extra.sources.isEmpty()) {
+                        delay(2_000)
+                        if (bundle == null && extra.sources.isEmpty()) {
+                            runCatching { api.home() }.onSuccess { f ->
+                                snapshot = HomeSnapshot(
+                                    at = System.currentTimeMillis(),
+                                    latest = f.latest,
+                                    cats = f.cats,
+                                )
+                            }
+                            loading = false
+                        }
+                        return@LaunchedEffect
                     }
                     val srcs = allSources
                     // 有快照就先让首屏落地，隔一会儿再打源站：
@@ -714,6 +769,8 @@ class MainActivity : ComponentActivity() {
                                         onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
                                         onPlay = { vod -> playDirect(vod, s) },
                                         onSearch = { screen = Screen.Search(from = s) },
+                                        // 空首页那颗「去设置」：连 NAS、导配置、加订阅都在那一页
+                                        onOpenSettings = { screen = Screen.Settings(from = s) },
                                         // 下拉刷新：重新在本地拼一次首页（片源都在本地，不用问 NAS）
                                         onRefresh = {
                                             scope.launch {

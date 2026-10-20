@@ -18,7 +18,8 @@
 
     <application
         android:label="放映室 Native"
-        android:icon="@android:drawable/ic_media_play"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Proom"
         android:banner="@android:drawable/ic_media_play"
         android:usesCleartextTraffic="true">
