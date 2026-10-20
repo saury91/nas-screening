@@ -16,6 +16,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -51,7 +56,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -262,6 +269,23 @@ fun PlayerScreen(
     var duration by remember { mutableLongStateOf(0L) }
     var speed by remember { mutableFloatStateOf(1f) }
     var hint by remember { mutableStateOf<String?>(null) }
+
+    // ── 投屏（DLNA）──
+    // 设备发现、SOAP 控制在 shared 的 DlnaClient 里；这里只管界面状态
+    val dlna = remember { com.projectionroom.shared.cast.DlnaClient() }
+    val castScope = rememberCoroutineScope()
+    var castOpen by remember { mutableStateOf(false) }
+    var castScanning by remember { mutableStateOf(false) }
+    var castDevices by remember { mutableStateOf<List<com.projectionroom.shared.cast.CastDevice>>(emptyList()) }
+    var castTarget by remember { mutableStateOf<com.projectionroom.shared.cast.CastDevice?>(null) }
+    fun scanCast() {
+        if (castScanning) return
+        castScope.launch {
+            castScanning = true
+            castDevices = runCatching { dlna.discover() }.getOrDefault(emptyList())
+            castScanning = false
+        }
+    }
     // 拖动时屏幕两侧的竖条（亮度在左、音量在右），比中间一个小胶囊直观
     var gauge by remember { mutableStateOf<Gauge?>(null) }
     val brightness = remember { mutableFloatStateOf(currentBrightness(activity)) }
@@ -597,15 +621,8 @@ fun PlayerScreen(
                             }
                         },
                         onCast = {
-                            // 系统级的「投射」入口：本机装了 Cast/DLNA 接收端时能用。
-                            // App 内置的 DLNA 推流要单做一轮（发现 + SOAP 控制）。
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_CAST_SETTINGS)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                            }
-                            hint = "系统投屏"
+                            castOpen = true
+                            scanCast()
                         },
                     )
                 }
