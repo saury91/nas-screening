@@ -74,7 +74,16 @@ fun ConnectScreen(
         contentAlignment = Alignment.Center,
     ) {
         if (onBack != null) {
-            BackChip(Modifier.align(Alignment.TopStart), onBack)
+            // 电视端：面包屑式提示，不进焦点环（遥控器 BACK 键才是主路径）
+            if (isTv) {
+                com.projectionroom.ui.component.TvBackHint(
+                    onBack = onBack,
+                    modifier = Modifier.align(Alignment.TopStart)
+                        .padding(start = ProomSpace.lg, top = ProomSpace.sm),
+                )
+            } else {
+                BackChip(Modifier.align(Alignment.TopStart), onBack)
+            }
         }
 
         Column(
@@ -259,7 +268,7 @@ private fun ConnectButton(
     }
 }
 
-/** 「‹ 返回」：电视上也要有焦点环，否则遥控器不知道该按哪 */
+/** 手机端的「‹ 返回」胶囊；电视端换成 TvBackHint（不占焦点位） */
 @Composable
 private fun BackChip(modifier: Modifier = Modifier, onBack: () -> Unit) {
     var focused by remember { mutableStateOf(false) }

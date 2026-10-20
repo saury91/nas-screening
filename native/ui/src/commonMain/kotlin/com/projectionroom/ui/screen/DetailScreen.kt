@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
@@ -122,11 +123,61 @@ fun DetailScreen(
     // 电视的逻辑尺寸差别很大（960x540 / 1280x720 / 1920x1080 都有），
     // 海报宽度按可用高度取比例，避免在 4K 盒子上显得只有一小块
     val posterW = if (isTv) (maxHeight * 0.26f).coerceIn(110.dp, 280.dp) else 108.dp
+
+    // ── 氛围层 ──
+    // 封面按 80dp 解码再放大：`Modifier.blur` 在 API<31 是空操作，很多电视盒子
+    // 正好是 30，靠它只会得到「270px 海报拉大 7 倍」的脏糊。SoftBackdrop 用
+    // 小尺寸解码 + GPU 放大绕开这个平台差异，见它的注释。
+    if (vod.pic.isNotBlank()) {
+        // clipToBounds 不能省：放大后的图层若不裁剪，会溢出到这块 Box 下面的
+        // 选集区，那里没有渐变盖着，看起来就是下半屏突然冒出一块亮的图
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.72f)
+                .align(Alignment.TopStart)
+                .clipToBounds()
+        ) {
+            com.projectionroom.ui.component.SoftBackdrop(
+                model = vod.pic,
+                modifier = Modifier.fillMaxSize(),
+                decodeWidth = 38.dp,
+                alpha = 0.5f,
+            )
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(
+                        // 顶部压得更狠一点：返回提示和标题都压在这张模糊封面上，
+                        // 遇上亮封面（白墙、雪景、人脸特写）0.30 的暗度根本不够，
+                        // 11sp 的小字会直接糊进背景
+                        0f to ProomColor.bg.copy(alpha = 0.52f),
+                        0.32f to ProomColor.bg.copy(alpha = 0.42f),
+                        0.68f to ProomColor.bg.copy(alpha = 0.78f),
+                        1f to ProomColor.bg.copy(alpha = 1f),
+                    )
+                )
+            )
+        }
+    }
+
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = ProomSpace.xxl, vertical = ProomSpace.xl)
+            .padding(horizontal = ProomSpace.xxl)
+            // 顶栏必须让开状态栏：电视模拟器/部分盒子有状态栏，原来 8dp 起步
+            // 会把返回键压在时钟那一行上（截图里两者只差几个像素）
+            .padding(top = topInset + 4.dp, bottom = ProomSpace.xl)
     ) {
+        // 顶栏只留返回提示：收藏是「对这部片的动作」，跟立即播放放一起才对，
+        // 挂到右上角会离它要作用的对象太远，读起来像个页面级的设置开关。
+        Row(
+            Modifier.fillMaxWidth().height(40.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            com.projectionroom.ui.component.TvBackHint(onBack = onBack)
+        }
+        Spacer(Modifier.height(ProomSpace.sm))
+
         Row(Modifier.fillMaxWidth()) {
             Poster(vod, Modifier.width(posterW))
             Spacer(Modifier.width(ProomSpace.lg))
@@ -156,7 +207,10 @@ fun DetailScreen(
                     )
                 }
                 Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     FocusBox(
                         background = ProomColor.accent,
                         onClick = { if (line?.episodes?.isNotEmpty() == true) onPlay(lineIndex, 0) },
@@ -166,19 +220,18 @@ fun DetailScreen(
                         modifier = Modifier.focusRequester(firstFocus),
                         focusBorderColor = Color.White,
                     )
-                    FocusBox(
-                        background = if (isFavorite) ProomColor.accentSoft else ProomColor.surface,
+                    // 收藏紧跟主操作：它是「对这部片」的第二个动作，不是页面级开关。
+                    // 图标而不是文字：状态型操作，靠形状就能读（实心=已收），
+                    // 也不会和主按钮抢视觉权重
+                    FocusIcon(
+                        icon = if (isFavorite) {
+                            com.projectionroom.ui.component.TabIcons.HeartOn
+                        } else {
+                            com.projectionroom.ui.component.TabIcons.Heart
+                        },
+                        desc = if (isFavorite) "取消收藏" else "收藏",
+                        active = isFavorite,
                         onClick = onToggleFavorite,
-                        contentPadding = Padding(20, 11),
-                        label = if (isFavorite) "已收藏" else "收藏",
-                        labelColor = if (isFavorite) ProomColor.accent else ProomColor.text,
-                    )
-                    FocusBox(
-                        background = ProomColor.surface,
-                        onClick = onBack,
-                        contentPadding = Padding(20, 11),
-                        label = "返回",
-                        labelColor = ProomColor.text,
                     )
                 }
             }
@@ -565,6 +618,51 @@ private fun EpButton(name: String, onClick: () -> Unit) {
 }
 
 private data class Padding(val h: Int, val v: Int)
+
+/**
+ * 圆形图标按钮（返回 / 收藏）。
+ *
+ * 和 [FocusBox] 的区别：这里表达的是**状态**或**导航**，不是一条文案，
+ * 所以用图标 + 圆形热区；焦点态靠放大和金色描边，不换底色 ——
+ * 在模糊封面的背景上，换底色反而看不清焦点在哪。
+ */
+@Composable
+private fun FocusIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: androidx.compose.ui.unit.Dp = 44.dp,
+    /** 返回键不需要底色（压在模糊封面上会多一块圆斑），收藏需要 */
+    background: Color = ProomColor.surface.copy(alpha = 0.55f),
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        if (focused) 1.08f else 1f,
+        tween(ProomMotion.short, easing = ProomMotion.ease),
+        label = "icon-scale",
+    )
+    Box(
+        modifier
+            .scale(scale)
+            .size(size)
+            .clip(CircleShape)
+            .background(if (active) ProomColor.accentSoft else background)
+            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, CircleShape) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.material3.Icon(
+            imageVector = icon,
+            contentDescription = desc,
+            tint = if (active) ProomColor.accent else ProomColor.text,
+            modifier = Modifier.size(21.dp),
+        )
+    }
+}
+
 
 @Composable
 private fun FocusBox(

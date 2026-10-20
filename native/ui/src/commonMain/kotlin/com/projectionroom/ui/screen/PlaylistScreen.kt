@@ -273,16 +273,21 @@ fun PlaylistScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // 统一规格：48dp 热区 + 24dp 图标（左缘 4 + 12 = 16dp）
-                Box(
-                    Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = TabIcons.Back,
-                        contentDescription = "返回",
-                        tint = ProomColor.text,
-                        modifier = Modifier.size(22.dp),
-                    )
+                // 电视端换成面包屑提示：返回交给遥控器 BACK 键，不占焦点位
+                if (com.projectionroom.ui.theme.LocalProomTv.current) {
+                    com.projectionroom.ui.component.TvBackHint(onBack = onBack)
+                } else {
+                    Box(
+                        Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onBack),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = TabIcons.Back,
+                            contentDescription = "返回",
+                            tint = ProomColor.text,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
                 Text(
                     text = detail?.name.orEmpty(),

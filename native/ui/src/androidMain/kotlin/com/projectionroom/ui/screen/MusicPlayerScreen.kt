@@ -108,16 +108,15 @@ fun MusicPlayerScreen(
     BackHandler(enabled = !queueOpen) { onBack() }
 
     Box(Modifier.fillMaxSize().background(ProomColor.bg)) {
-        // 背景：封面重度模糊，只当氛围光。先放大 1.2 再模糊，否则边缘会露出一圈硬边
+        // 背景：封面只当氛围光。专辑图本身才 200~300px，铺满 1080p 屏要放大十几倍，
+        // 而 Modifier.blur 在 API<31 是空操作 —— 所以改用 SoftBackdrop 的小尺寸解码，
+        // 任何设备上都是同一种软色雾，不会是大头照糊斑。
         if (track.cover.isNotBlank()) {
-            AsyncImage(
+            com.projectionroom.ui.component.SoftBackdrop(
                 model = track.cover,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { scaleX = 1.2f; scaleY = 1.2f }
-                    .blur(60.dp),
+                modifier = Modifier.fillMaxSize(),
+                decodeWidth = 34.dp,
+                alpha = 0.85f,
             )
             Box(
                 Modifier.fillMaxSize().background(

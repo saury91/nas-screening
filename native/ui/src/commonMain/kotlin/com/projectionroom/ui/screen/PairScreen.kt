@@ -71,21 +71,19 @@ fun PairScreen(
     topInset: Dp = 0.dp,
     onBack: () -> Unit,
 ) {
-    val backFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { backFocus.requestFocus() } }
-
     Column(
         Modifier
             .fillMaxSize()
             .background(ProomColor.bg)
             .padding(top = topInset),
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = ProomSpace.xxl, top = ProomSpace.md),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            Modifier.fillMaxWidth().padding(start = ProomSpace.lg, end = ProomSpace.xxl, top = ProomSpace.md),
         ) {
-            BackPill2(backFocus, onBack)
-            Spacer(Modifier.width(ProomSpace.md))
+            // 电视端返回统一成面包屑提示：不进焦点环，也不抢初始焦点
+            // （原来这里是一颗「‹ 返回」胶囊，进页面按 OK 会直接退出去）
+            com.projectionroom.ui.component.TvBackHint(onBack = onBack)
+            Spacer(Modifier.height(2.dp))
             Text("用手机导入配置", style = ProomType.headline, color = ProomColor.text)
         }
 

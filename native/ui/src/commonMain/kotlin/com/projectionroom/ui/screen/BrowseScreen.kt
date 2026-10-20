@@ -69,6 +69,9 @@ fun BrowseScreen(
      */
     load: suspend (cat: String, page: Int, year: String, area: String) -> NasApi.BrowsePage,
     onOpen: (Vod) -> Unit,
+    /** 返回。手机上这会从 tab 里进来，电视上是遥控器 BACK 之外的兜底入口 */
+    onBack: (() -> Unit)? = null,
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     var year by remember(slug) { mutableStateOf("") }
     var area by remember(slug) { mutableStateOf("") }
@@ -131,8 +134,18 @@ fun BrowseScreen(
             verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Column(Modifier.padding(top = ProomSpace.xl)) {
-                    Text("片库", style = ProomType.eyebrow, color = ProomColor.accent)
+                Column(Modifier.padding(top = topInset)) {
+                    onBack?.let {
+                        // 电视：面包屑式提示（不进焦点环，返回交给遥控器 BACK 键）
+                        // 手机：左上角可点返回，和推送页的其它页一致
+                        if (com.projectionroom.ui.theme.LocalProomTv.current) {
+                            com.projectionroom.ui.component.TvBackHint(onBack = it)
+                        } else {
+                            com.projectionroom.ui.component.PageBackBar(onBack = it)
+                        }
+                    }
+                    Column(Modifier.padding(top = ProomSpace.sm)) {
+                        Text("片库", style = ProomType.eyebrow, color = ProomColor.accent)
                     Text(
                         CAT_NAMES[slug] ?: "片库",
                         style = ProomType.display,
@@ -150,6 +163,7 @@ fun BrowseScreen(
                         color = ProomColor.muted,
                         modifier = Modifier.padding(top = 8.dp),
                     )
+                    }
                 }
             }
 

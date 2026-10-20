@@ -65,12 +65,6 @@ fun TvMineScreen(
     onImportFromPhone: (() -> Unit)? = null,
     topInset: Dp = 0.dp,
 ) {
-    val backFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        withFrameNanos { }
-        runCatching { backFocus.requestFocus() }
-    }
-
     BoxWithConstraints(Modifier.fillMaxSize().background(ProomColor.bg)) {
         // 海报源图 270 宽：卡片别超过 ~120dp（240px），再大就糊
         val cardW = (maxWidth * 0.105f).coerceIn(88.dp, 128.dp)
@@ -86,7 +80,10 @@ fun TvMineScreen(
                         .padding(start = ProomSpace.lg, end = ProomSpace.xxl, top = topInset + ProomSpace.md, bottom = ProomSpace.sm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BackPill(backFocus, onBack)
+                    // 原来这里是一颗「‹ 返回」胶囊，还抢初始焦点 —— 进页面按一下 OK
+                    // 就直接退回去了。现在和其它电视页面一样做成不可聚焦的提示，
+                    // 初始焦点让给下面的内容。
+                    com.projectionroom.ui.component.TvBackHint(onBack = onBack)
                     Spacer(Modifier.width(ProomSpace.lg))
                     Text("我的", style = ProomType.headline, color = ProomColor.text)
                     if (loading) {
