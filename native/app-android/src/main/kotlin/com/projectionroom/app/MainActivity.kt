@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.togetherWith
@@ -147,6 +148,14 @@ private const val OFFLINE_BASE = "http://127.0.0.1:1"
 
 class MainActivity : ComponentActivity() {
 
+    /** 电视端 DLNA 接收器：App 在前台时对外可见，退出即关 */
+    private val dmr by lazy {
+        com.projectionroom.app.cast.DmrServer(
+            ctx = this,
+            friendlyName = "放映室 · ${android.os.Build.MODEL}",
+        )
+    }
+
     /**
      * 联调用：广播直接触发投屏（仅 debuggable 包）。
      *
@@ -177,6 +186,11 @@ class MainActivity : ComponentActivity() {
         }, filter, android.content.Context.RECEIVER_EXPORTED)
     }
 
+    override fun onDestroy() {
+        dmr.stop()
+        super.onDestroy()
+    }
+
 
     companion object {
         /** 落地页指令：`am start -n com.projectionroom.app/.MainActivity -e screen pair` */
@@ -191,6 +205,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        dmr.start(lifecycleScope)
+
         registerCastDebugHook()
 
         super.onCreate(savedInstanceState)

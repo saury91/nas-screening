@@ -54,5 +54,12 @@
             android:name=".MusicService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+    
+        <!-- 接收端播放页：DLNA 推流过来时打开，不对外导出 -->
+        <activity
+            android:name=".cast.CastPlayActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
     </application>
 </manifest>
