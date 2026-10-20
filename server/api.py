@@ -17,7 +17,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from .cache import cache_peek
-from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, NO_AUTH, SLUG_CAT, STATIC)
+from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, NO_AUTH, SLUG_CAT, STATIC,
+                     MUSICBOX_API, MUSICBOX_REFERER)
 from .db import (dbrun, note_search, pref_json, source_get, sources_list,
                  toggle_fav, touch_history)
 from .log import log
@@ -481,15 +482,27 @@ class Handler(BaseHTTPRequestHandler):
                     "type": x.get("type") or 0, "cat": x.get("cat"),
                     "cats": maps.get(x.get("name")) or {}}
                    for x in rows]
+
+            # 版本号要覆盖**整包内容**，不能只哈希片源。
+            # 只哈希 src 的时候，改了直播表或音乐接口地址版本号不变，
+            # App 看到 version 一样就不落盘 —— 配置改了等于没改。
+            body = {
+                "sources": src,
+                # 直播频道表也一起下发：App 首次冷启动（没网）也能把频道列出来
+                "live": {"groups": live.live_groups(), "items": live.live_list()},
+                # 音乐聚合接口也随配置走：接口换域名/失效时改环境变量重发配置就行，
+                # 不必等一个 APK 版本。App 端保留内置默认，NAS 不在时音乐照常能听。
+                "music": {"api": MUSICBOX_API, "referer": MUSICBOX_REFERER},
+            }
             ver = hashlib.sha1(
-                json.dumps(src, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")
             ).hexdigest()[:12]
-            # 直播频道表也一起下发：App 首次冷启动（没网）也能把频道列出来
             return _json({
                 "version": ver,
                 "generatedAt": int(time.time()),
-                "sources": src,
-                "live": {"groups": live.live_groups(), "items": live.live_list()},
+                "sources": body["sources"],
+                "live": body["live"],
+                "music": body["music"],
                 "ui": {"version": os.environ.get("UI_VERSION", "")},
             })
         if path == "/api/status":

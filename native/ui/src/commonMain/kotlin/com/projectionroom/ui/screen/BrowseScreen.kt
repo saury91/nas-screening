@@ -45,10 +45,8 @@ import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 
-val CAT_NAMES = mapOf(
-    "movie" to "电影", "series" to "剧集", "anime" to "动漫",
-    "variety" to "综艺", "doc" to "纪录片",
-)
+/** 分类 slug → 中文，直接用数据层那份，避免界面里再抄一遍走样 */
+val CAT_NAMES: Map<String, String> = com.projectionroom.shared.catalog.Cats.slugToName
 
 private val YEARS = listOf("", "2026", "2025", "2024", "2023", "2022", "2021", "2020")
 private val AREAS = listOf("", "内地", "中国香港", "中国台湾", "美国", "日本", "韩国", "英国")

@@ -18,10 +18,15 @@ import kotlinx.serialization.json.Json
  *
  * 只有聚合接口校验 Referer，网易云 CDN 本身不校验 ——
  * 所以播放地址可以「现取现给」，播放器直连 CDN，NAS 完全不参与。
+ *
+ * [base] / [referer] 由配置包（`bundle.music`）给出，缺省才用内置地址：
+ * 接口域名换人、被封、挂掉的时候，改 NAS 的环境变量重发一次配置就能修，
+ * 不用等下一个 APK 版本；NAS 不在（没有配置包）时仍有内置默认可用。
  */
 class MusicApi(
     private val http: Http,
     private val base: String = DEFAULT_BASE,
+    private val referer: String = REFERER,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -36,14 +41,14 @@ class MusicApi(
 
     // ── 推荐歌单 ──────────────────────────────────────────────
     suspend fun recommend(limit: Int = 14): List<NasApi.Playlist> {
-        val txt = http.get("$base/netease/playlist/recommend?limit=${limit.coerceIn(1, 30)}", REFERER)
+        val txt = http.get("$base/netease/playlist/recommend?limit=${limit.coerceIn(1, 30)}", referer)
         return parse { runCatching { json.decodeFromString<List<PlRaw>>(txt) }.getOrDefault(emptyList()) }
             .mapNotNull { it.toPlaylist() }
     }
 
     // ── 分类树 ────────────────────────────────────────────────
     suspend fun categories(): List<NasApi.MusicCatGroup> {
-        val txt = http.get("$base/getPlaylistCategory", REFERER)
+        val txt = http.get("$base/getPlaylistCategory", referer)
         val roots = parse { runCatching { json.decodeFromString<List<CatRoot>>(txt) }.getOrDefault(emptyList()) }
         // 上游会返回多个音源，只取第一个（netease）
         val groups = roots.firstOrNull()?.category.orEmpty()
@@ -60,7 +65,7 @@ class MusicApi(
         if (cat.isBlank()) return emptyList()
         val txt = http.get(
             "$base/netease/playlist/category?type=${cat.encodeQuery()}&limit=${limit.coerceIn(1, 60)}",
-            REFERER,
+            referer,
         )
         return parse { runCatching { json.decodeFromString<List<PlRaw>>(txt) }.getOrDefault(emptyList()) }
             .mapNotNull { it.toPlaylist() }
@@ -69,7 +74,7 @@ class MusicApi(
     // ── 歌单详情 ──────────────────────────────────────────────
     suspend fun playlist(id: String, limit: Int = 400): NasApi.PlaylistDetail {
         if (id.isBlank()) return NasApi.PlaylistDetail()
-        val txt = http.get("$base/meting/?server=netease&type=playlist&id=${id.encodeQuery()}", REFERER)
+        val txt = http.get("$base/meting/?server=netease&type=playlist&id=${id.encodeQuery()}", referer)
         val d = parse { runCatching { json.decodeFromString<PlDetailRaw>(txt) }.getOrNull() }
             ?: return NasApi.PlaylistDetail(id = id)
         val seen = HashSet<String>()
@@ -104,7 +109,7 @@ class MusicApi(
     suspend fun trackUrl(sid: String): String {
         if (sid.isBlank()) return ""
         val meting = "$base/meting/?server=netease&type=url&id=${sid.encodeQuery()}"
-        return http.resolveRedirect(meting, REFERER).takeIf { it.startsWith("http") }.orEmpty()
+        return http.resolveRedirect(meting, referer).takeIf { it.startsWith("http") }.orEmpty()
     }
 
     /**
