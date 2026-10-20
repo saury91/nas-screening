@@ -88,6 +88,8 @@ private sealed interface Screen {
         val from: Screen,
         /** 直播专用：每一台的备用源，空表示这是点播 */
         val liveUrls: List<List<String>> = emptyList(),
+        /** 联调用：进去就展开投屏面板（`-e screen cast`，仅 debuggable 包） */
+        val openCast: Boolean = false,
     ) : Screen
     /** 全屏音乐播放器：内容全部来自 MusicBox，这里只记「从哪来」 */
     data class MusicPlayer(val from: Screen = Home) : Screen
@@ -170,12 +172,23 @@ class MainActivity : ComponentActivity() {
         val filter = android.content.IntentFilter("com.projectionroom.app.DEBUG_CAST")
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(ctx: android.content.Context, intent: android.content.Intent) {
-                val host = intent.getStringExtra("host") ?: return
+                val host = intent.getStringExtra("host")
+                val pick = intent.getStringExtra("device")
                 val url = intent.getStringExtra("url") ?: "http://example.com/demo.m3u8"
                 kotlinx.coroutines.MainScope().launch {
                     val client = com.projectionroom.shared.cast.DlnaClient()
-                    val d = client.describe("http://$host/description.xml")
-                    android.util.Log.i("CASTDBG", "describe -> $d")
+                    // 没有 host 就走真实 SSDP 发现（验证两台设备在同一网段）
+                    val d = if (host != null) {
+                        client.describe("http://$host/description.xml")
+                    } else {
+                        val list = client.discover()
+                        android.util.Log.i(
+                            "CASTDBG",
+                            "scan -> " + list.joinToString { "${it.name}|${it.model}|${it.controlUrl}" },
+                        )
+                        list.firstOrNull { pick == null || it.name.contains(pick) }
+                    }
+                    android.util.Log.i("CASTDBG", "target -> $d")
                     if (d != null) {
                         val r = client.cast(d, url, "投屏联调")
                         android.util.Log.i("CASTDBG", "cast ok=${r.isSuccess} err=${r.exceptionOrNull()}")
@@ -205,7 +218,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        dmr.start(lifecycleScope)
+        // 电视判定必须在起接收端之前：DLNA 接收端只有电视该开。
+        // 手机也开的话，它会 SSDP 到**自己**（10.0.2.15 那种本机地址），
+        // 「投屏」列表里出现一台同名设备，点下去就是自己播自己。
+        // 调试用：--ez forcePhone true 可在电视上预览手机布局
+        val onTv = (isTvDevice() || intent.getBooleanExtra("forceTv", false)) &&
+            !intent.getBooleanExtra("forcePhone", false)
+        if (onTv) dmr.start(lifecycleScope)
 
         registerCastDebugHook()
 
@@ -249,8 +268,6 @@ class MainActivity : ComponentActivity() {
             getSharedPreferences("proom_progress", MODE_PRIVATE)
         }.start()
         // 调试用：adb ... --ez forcePhone true 可在电视上预览手机布局
-        val onTv = (isTvDevice() || intent.getBooleanExtra("forceTv", false)) &&
-            !intent.getBooleanExtra("forcePhone", false)
         // 系统栏高度：onCreate 里 rootWindowInsets 可能还是 null，先按资源兜底，
         // 拿到真实 insets 后再校正（不然直接解引用会崩在启动）
         fun statusBarPx(): Int {
@@ -615,6 +632,26 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(AppRoute.scanRequest) {
                     if (AppRoute.scanRequest > 0) screen = Screen.ScanPair(from = Screen.Home)
                 }
+                // 联调：一条假片子，只有一集，地址由 intent 给（见 AppRoute.castDemoUrl）
+                LaunchedEffect(AppRoute.castDemoUrl) {
+                    val u = AppRoute.castDemoUrl
+                    if (!u.isNullOrBlank()) {
+                        screen = Screen.Play(
+                            vod = Vod(
+                                name = "投屏联调",
+                                lines = listOf(
+                                    Line(site = "测试源", episodes = listOf(Episode("正片", u)))
+                                ),
+                            ),
+                            lineIndex = 0,
+                            epIndex = 0,
+                            from = Screen.Home,
+                            openCast = AppRoute.castDemoOpenSheet,
+                        )
+                        AppRoute.castDemoUrl = null
+                        AppRoute.castDemoOpenSheet = false
+                    }
+                }
 
                 // 「立即播放」：首页/电视 Hero 上那颗按钮要直接进播放器。
                 // 但首页卡片为了省内存把 lines 剥掉了，所以先补一次详情
@@ -947,6 +984,8 @@ class MainActivity : ComponentActivity() {
                                 loadCats = doMusicCats,
                                 loadPlaylists = doMusicLists,
                                 onOpenPlaylist = { p -> screen = Screen.Playlist(p.id, s) },
+                                onBack = { screen = s.from },
+                                topInset = barTop,
                             )
                         } else if (s.slug == "live") {
                             LiveScreen(
@@ -955,12 +994,16 @@ class MainActivity : ComponentActivity() {
                                     val lp = livePlay(chs, idx)
                                     screen = Screen.Play(lp.vod, 0, lp.index, s, lp.urls)
                                 },
+                                onBack = { screen = s.from },
+                                topInset = barTop,
                             )
                         } else {
                             BrowseScreen(
                                 slug = s.slug,
                                 load = doBrowse,
                                 onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
+                                onBack = { screen = s.from },
+                                topInset = barTop,
                             )
                         }
 
@@ -1459,6 +1502,10 @@ class MainActivity : ComponentActivity() {
                                 rotateLandscape = !onTv,
                                 live = isLive,
                                 liveUrls = s.liveUrls,
+                                // 电视是接收端：播放器右上角的锁/画中画/投屏都不该出现
+                                isTv = onTv,
+                                // 联调：`-e screen cast` 进来就展开投屏面板
+                                openCastOnEnter = s.openCast,
                                 // 直连源站：ExoPlayer 自己带 Referer/UA，不需要 NAS 中转。
                                 // NAS 关机也要能播 —— 这是把代理摘掉的原因。
                                 resolveUrl = { it },
@@ -1525,6 +1572,20 @@ class MainActivity : ComponentActivity() {
         when (intent?.getStringExtra(EXTRA_SCREEN)) {
             "pair" -> AppRoute.pairRequest += 1
             "scan" -> AppRoute.scanRequest += 1
+            // 联调落点：只在 debuggable 包里认，正式包忽略
+            "castdemo" -> if ((applicationInfo.flags and
+                    android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            ) {
+                AppRoute.castDemoUrl = intent.getStringExtra("url").orEmpty()
+            }
+            // 同上，但进去顺手把投屏面板展开：横屏播放器里 adb 点不准顶栏，
+            // 没有这条路就没法验面板版式
+            "cast" -> if ((applicationInfo.flags and
+                    android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            ) {
+                AppRoute.castDemoUrl = intent.getStringExtra("url").orEmpty()
+                AppRoute.castDemoOpenSheet = true
+            }
         }
         intent?.removeExtra(EXTRA_SCREEN)
     }
@@ -1616,6 +1677,17 @@ internal object AppRoute {
     var scanRequest by androidx.compose.runtime.mutableIntStateOf(0)
     /** 扫码/推送这类「不是页面自己发起」的结果，回设置页时显示一次 */
     var settingsMessage: String? = null
+    /**
+     * 联调专用：直接带着一个裸地址进播放页（仅 debuggable 包）。
+     *
+     * 投屏联调需要「播放器里正在放一个确定可播的地址」，但片库的线路
+     * 取决于采集站当下的状态，时有时无。这条路由让投屏面板可以稳定复现：
+     *   adb shell am start -n com.projectionroom.app/.MainActivity \
+     *     -e screen castdemo -e url http://10.0.2.2:8099/test.mp4
+     */
+    var castDemoUrl: String? = null
+    /** 上一条路由的附加动作：进播放页就展开投屏面板（`-e screen cast`） */
+    var castDemoOpenSheet: Boolean = false
 }
 
 @Composable

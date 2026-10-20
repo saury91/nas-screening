@@ -83,12 +83,13 @@ fun TvHero(
         ) { pic ->
             Box(Modifier.fillMaxSize()) {
                 if (pic.isNotBlank()) {
-                    AsyncImage(
+                    // 源图 270px 铺满全屏要放大 7 倍。blur 在 API<31 是空操作，
+                    // 靠它只会得到马赛克；SoftBackdrop 用小尺寸解码 + GPU 放大。
+                    com.projectionroom.ui.component.SoftBackdrop(
                         model = pic,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        // 源图 270px 铺满全屏要放大 7 倍，blur 不重就会看到马赛克
-                        modifier = Modifier.fillMaxSize().blur(48.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        decodeWidth = 34.dp,
+                        alpha = 0.9f,
                     )
                 }
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.52f)))

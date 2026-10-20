@@ -97,6 +97,9 @@ fun LiveScreen(
      * 只给一个频道的话，进了播放器就换不了台，只能退回来重点。
      */
     onPlay: (channels: List<NasApi.LiveChannel>, index: Int) -> Unit,
+    /** 返回。手机上从 tab 进来，电视上是遥控器 BACK 之外的兜底入口 */
+    onBack: (() -> Unit)? = null,
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     // 切 tab 会把整页销毁重建，没有缓存的话每次回来都要重新拉一遍频道表，
     // 中间闪一次骨架 —— 频道表几分钟内不会变，进程内留一份就够
@@ -158,6 +161,21 @@ fun LiveScreen(
         val columns = (maxWidth / 180.dp).toInt().coerceIn(3, 8)
 
         Column(Modifier.fillMaxSize()) {
+            onBack?.let {
+                if (isTv) {
+                    com.projectionroom.ui.component.TvBackHint(
+                        onBack = it,
+                        modifier = Modifier.padding(start = ProomSpace.lg),
+                        topInset = topInset,
+                    )
+                } else {
+                    com.projectionroom.ui.component.PageBackBar(
+                        onBack = it,
+                        modifier = Modifier.padding(start = ProomSpace.lg),
+                        topInset = topInset,
+                    )
+                }
+            }
             LiveHeader(
                 total = all.size,
                 groupCount = groups.size,

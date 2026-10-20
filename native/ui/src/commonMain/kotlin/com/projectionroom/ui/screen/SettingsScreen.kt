@@ -126,15 +126,20 @@ fun SettingsScreen(
             .padding(top = topInset)
     ) {
         // 顶栏：和「我的」同高同字重，只是左边是返回键
+        // 电视端返回不占焦点位（遥控器 BACK 才是主路径），所以换成面包屑提示
         Row(
             Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(TabIcons.Back, "返回", tint = ProomColor.text, modifier = Modifier.size(22.dp))
+            if (com.projectionroom.ui.theme.LocalProomTv.current) {
+                com.projectionroom.ui.component.TvBackHint(onBack = onBack)
+            } else {
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(TabIcons.Back, "返回", tint = ProomColor.text, modifier = Modifier.size(22.dp))
+                }
             }
             Text(
                 "设置",
