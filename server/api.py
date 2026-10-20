@@ -458,11 +458,29 @@ class Handler(BaseHTTPRequestHandler):
                               extra=[("Content-Disposition",
                                       'attachment; filename="projection-room-%s.apk"' % kind)])
         if path == "/api/config/bundle":
-            # 配置包：App 拉一次存本地，NAS 不在时也能自己问源站
+            # 配置包：App 拉一次存本地，之后搜索/列表/详情/播放全在本地做，
+            # NAS 只负责「发一次有效地址 + 分类映射」。
+            rows = [x for x in sources_list(kind="cms", enabled_only=True)
+                    if (x.get("url") or "").startswith("http")]
+            # 只下发确认能用的：status 为空的是刚导入还没验活，先放行一次
+            rows = [x for x in rows if (x.get("status") or "") in ("", "ok")]
+
+            # 各站的分类 ID 排法完全不同（暴风 t=20 才是电影，别家 t=6 就是），
+            # App 自己不可能猜对。映射由 catalog.warm_catmaps() 在后台探，
+            # 这里只读缓存 —— 配置包必须秒回，不能等 71 个源逐个探。
+            def _cached_catmap(x):
+                k = "catmap|" + (x.get("name") or "")
+                try:
+                    return cache_peek(k) or {}
+                except Exception:
+                    return {}
+
+            maps = {x.get("name"): _cached_catmap(x) for x in rows}
+
             src = [{"name": x.get("name"), "api": x.get("url"),
-                    "type": x.get("type") or 0, "cat": x.get("cat")}
-                   for x in sources_list(kind="cms", enabled_only=True)
-                   if (x.get("url") or "").startswith("http")]
+                    "type": x.get("type") or 0, "cat": x.get("cat"),
+                    "cats": maps.get(x.get("name")) or {}}
+                   for x in rows]
             ver = hashlib.sha1(
                 json.dumps(src, sort_keys=True, ensure_ascii=False).encode("utf-8")
             ).hexdigest()[:12]
