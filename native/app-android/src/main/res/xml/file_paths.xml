@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 分享配置用的临时目录：只暴露 cache/share，不开放其它路径 -->
+<paths>
+    <cache-path name="share" path="share/" />
+</paths>

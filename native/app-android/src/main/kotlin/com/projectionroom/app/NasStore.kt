@@ -13,6 +13,17 @@ object NasStore {
     private const val FILE = "proom"
     private const val KEY = "nas_url"
 
+    /**
+     * 预热 SharedPreferences。
+     *
+     * 首次 `getString` 会在**调用线程**上等整个 XML 解析完（awaitLoadedLocked），
+     * 而我们的第一次读取就在 composition 里 —— 主线程直接多出一次磁盘读。
+     * 在 onCreate 里先拿一次引用，解析就跑到后台线程上，等界面真正要值时通常已经好了。
+     */
+    fun warmUp(ctx: Context) {
+        runCatching { ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE) }
+    }
+
     fun url(ctx: Context): String? =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getString(KEY, null)

@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 扫码配对：手机端扫电视上的二维码 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- 均衡器（音效预设） -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- 通知栏媒体控制（MediaSession 前台服务 + 通知） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 电视：走 Leanback 启动器，不要求触屏 -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -17,7 +26,9 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|fontScale"
+            android:launchMode="singleTop"
+            android:supportsPictureInPicture="true"
             android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -25,5 +36,22 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 分享配置：把 cache/share 下的 JSON 交给系统分享面板 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- 音乐通知栏控制：media3 的 MediaSessionService -->
+        <service
+            android:name=".MusicService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

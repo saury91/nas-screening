@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 通知栏（自定义 RemoteViews）用到的无障碍文案 -->
+    <string name="notif_cover">封面</string>
+    <string name="notif_repeat">播放模式</string>
+    <string name="notif_prev">上一首</string>
+    <string name="notif_play">播放或暂停</string>
+    <string name="notif_next">下一首</string>
+    <string name="notif_fav">收藏</string>
+</resources>
