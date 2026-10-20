@@ -71,6 +71,10 @@ dependencies {
     implementation("androidx.media:media:1.7.0")
     // Coil 的网络层：Android 侧走 OkHttp
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
+    // 接收端播放页直接用 ExoPlayer（与 ui 模块同版本）
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
     // 手机↔电视配对：QR 生成/识别（zxing 是纯 JVM，不带 Android 依赖）
     implementation("com.google.zxing:core:3.5.3")
     // 扫码要用相机预览：CameraX 体量比自带 Camera2 封装小，行为也稳
