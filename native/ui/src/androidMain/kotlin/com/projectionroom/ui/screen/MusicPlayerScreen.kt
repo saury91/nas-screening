@@ -553,86 +553,62 @@ private fun SmallBtn(
  * 而且 48dp 的最小触控高度会把上下间距撑开。
  */
 @Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private fun MusicSeekBar(
     ratio: Float,
     onDrag: (Float) -> Unit,
     onCommit: (Float) -> Unit,
 ) {
-    var local by remember { mutableFloatStateOf(-1f) }
-    val shown = if (local >= 0f) local else ratio
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(28.dp)
-            .pointerInput(Unit) {
-                detectTapGestures { off ->
-                    val r = (off.x / size.width).coerceIn(0f, 1f)
-                    onCommit(r)
-                }
-            }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = { off ->
-                        local = (off.x / size.width).coerceIn(0f, 1f)
-                        onDrag(local)
-                    },
-                    onDragEnd = {
-                        onCommit(local.coerceIn(0f, 1f))
-                        local = -1f
-                    },
-                    onHorizontalDrag = { change, _ ->
-                        change.consume()
-                        local = (change.position.x / size.width).coerceIn(0f, 1f)
-                        onDrag(local)
-                    },
-                )
-            },
-    ) {
-        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-            val cy = size.height / 2f
-            val h = 3.dp.toPx()
-            val x = size.width * shown
-            // 底轨
-            drawLine(
-                color = Color.White.copy(alpha = 0.16f),
-                start = Offset(0f, cy),
-                end = Offset(size.width, cy),
-                strokeWidth = h,
-                cap = StrokeCap.Round,
+    // 交给系统 Slider：自绘手势在真机上出现过"拖不动 / 松手位置对不上"，
+    // 而 Slider 自带 48dp 热区、无障碍语义和取消处理。
+    // 外观仍按原来的细线定制：3dp 轨道 + 12dp 圆点。
+    var dragging by remember { mutableStateOf(false) }
+    var local by remember { mutableFloatStateOf(0f) }
+    val shown = if (dragging) local else ratio
+
+    androidx.compose.material3.Slider(
+        value = shown,
+        onValueChange = {
+            dragging = true
+            local = it
+            onDrag(it)
+        },
+        onValueChangeFinished = {
+            onCommit(local.coerceIn(0f, 1f))
+            dragging = false
+        },
+        colors = androidx.compose.material3.SliderDefaults.colors(
+            thumbColor = ProomColor.accent,
+            activeTrackColor = ProomColor.accent,
+            inactiveTrackColor = Color.White.copy(alpha = 0.16f),
+        ),
+        thumb = {
+            Box(
+                Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(ProomColor.accent)
             )
-            // 已播放：金色 → 暖橙的渐变，比一根纯色线有「在走」的感觉
-            if (x > 0.5f) {
+        },
+        track = { state ->
+            androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(3.dp)) {
+                val cy = size.height / 2f
+                val w = 3.dp.toPx()
                 drawLine(
-                    brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                        0f to ProomColor.accent,
-                        1f to ProomColor.accent2,
-                    ),
+                    color = Color.White.copy(alpha = 0.16f),
+                    start = Offset(0f, cy), end = Offset(size.width, cy),
+                    strokeWidth = w, cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = ProomColor.accent,
                     start = Offset(0f, cy),
-                    end = Offset(x, cy),
-                    strokeWidth = h,
-                    cap = StrokeCap.Round,
+                    end = Offset(size.width * state.value.coerceIn(0f, 1f), cy),
+                    strokeWidth = w, cap = StrokeCap.Round,
                 )
             }
-            // 拖拽时拇指放大 + 一圈柔光，手指压上去有反馈
-            val dragging = local >= 0f
-            val r = (if (dragging) 6.5f else 4.5f).dp.toPx()
-            if (dragging) {
-                drawCircle(
-                    color = ProomColor.accent.copy(alpha = 0.22f),
-                    radius = r * 2.4f,
-                    center = Offset(x, cy),
-                )
-            }
-            // 拇指本体带一点渐变，和小尺寸下的纯色点区分开
-            drawCircle(
-                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                    listOf(Color.White, ProomColor.accent)
-                ),
-                radius = r,
-                center = Offset(x, cy),
-            )
-        }
-    }
+        },
+        modifier = Modifier.fillMaxWidth().height(28.dp),
+    )
 }
 
 private fun clock(ms: Long): String {

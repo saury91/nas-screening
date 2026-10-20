@@ -1,5 +1,12 @@
 package com.projectionroom.ui.music
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -18,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -124,13 +132,57 @@ fun MiniPlayerBar(
     }
 }
 
+/**
+ * 顶部进度条：既能看，也能拖。
+ *
+ * 视觉只有 1.5dp，但**触控高度给到 20dp**（线在中间），否则手指根本按不住。
+ * 点一下跳转，按住左右拖是连续 seek —— 与全屏播放页的 MusicSeekBar 行为一致。
+ */
 @Composable
 private fun ProgressLine() {
     val p = if (MusicBox.duration > 0) {
         (MusicBox.position.toFloat() / MusicBox.duration).coerceIn(0f, 1f)
     } else 0f
-    Box(Modifier.fillMaxWidth().height(1.5.dp).background(ProomColor.line)) {
-        Box(Modifier.fillMaxWidth(p).height(1.5.dp).background(ProomColor.accent))
+
+    // 拖动时先跟随手指，松手才真正 seek，避免每秒 60 次 seek 打满解码器
+    var local by remember { mutableFloatStateOf(-1f) }
+    val shown = if (local >= 0f) local else p
+
+    fun seekTo(r: Float) {
+        val d = MusicBox.duration
+        if (d > 0) MusicBox.seek((r.coerceIn(0f, 1f) * d).toLong())
+    }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(20.dp)
+            .pointerInput(Unit) {
+                detectTapGestures { off ->
+                    seekTo(off.x / size.width)
+                }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { off ->
+                        local = (off.x / size.width).coerceIn(0f, 1f)
+                    },
+                    onDragEnd = {
+                        seekTo(local)
+                        local = -1f
+                    },
+                    onDragCancel = { local = -1f },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        local = (change.position.x / size.width).coerceIn(0f, 1f)
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.fillMaxWidth().height(1.5.dp).background(ProomColor.line)) {
+            Box(Modifier.fillMaxWidth(shown).height(1.5.dp).background(ProomColor.accent))
+        }
     }
 }
 
