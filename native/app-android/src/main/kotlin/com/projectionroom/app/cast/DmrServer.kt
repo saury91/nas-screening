@@ -56,6 +56,8 @@ class DmrServer(
     fun start(scope: CoroutineScope) {
         if (job != null) return
         val ip = localIp() ?: return
+        // 登记自己的 UDN：手机端的投屏列表靠它把自己剔掉
+        com.projectionroom.shared.cast.CastIdentity.udn = uuid
         val location = "http://$ip:$port/description.xml"
 
         // 收到 SetAVTransportURI 就直接拉起播放页（电视端没有"先确认再播"的交互）
@@ -76,6 +78,9 @@ class DmrServer(
         runCatching { ssdp?.close() }
         runCatching { lock?.release() }
         http = null; ssdp = null; job = null; job2 = null
+        if (com.projectionroom.shared.cast.CastIdentity.udn == uuid) {
+            com.projectionroom.shared.cast.CastIdentity.udn = ""
+        }
     }
 
     private fun serveHttp() {
@@ -164,7 +169,11 @@ class DmrServer(
             CastReceiver.state = "STOPPED"
             val u = CastReceiver.uri
             val t = CastReceiver.title
-            main.post { CastReceiver.onPlay?.invoke(u, t) }
+            android.util.Log.i("CASTDBG", "dmr set-uri uri=$u title=$t hasCb=${CastReceiver.onPlay != null}")
+            main.post {
+                runCatching { CastReceiver.onPlay?.invoke(u, t) }
+                    .onFailure { android.util.Log.e("CASTDBG", "dmr onPlay failed", it) }
+            }
             Dmr.setUriResponse()
         }
 
