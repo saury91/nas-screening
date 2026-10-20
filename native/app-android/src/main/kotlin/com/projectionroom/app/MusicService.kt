@@ -237,7 +237,7 @@ class MusicService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL)
             // 状态栏那颗：与 App 图标同一个字形（矢量，系统按 alpha 上色）
-            .setSmallIcon(R.drawable.ic_n_music)
+            .setSmallIcon(R.drawable.ic_launcher_mono)
             .setColor(0xFFFFCF7A.toInt())
             // 不声明 CATEGORY_TRANSPORT：声明后系统会用自带的播放三角替换小图标
             .addAction(NotificationCompat.Action(repeatIcon, "播放模式", pi(ACTION_REPEAT)))
