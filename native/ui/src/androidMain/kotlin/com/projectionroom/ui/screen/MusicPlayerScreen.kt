@@ -1,6 +1,11 @@
 package com.projectionroom.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -152,13 +157,30 @@ fun MusicPlayerScreen(
                         modifier = Modifier.size(22.dp),
                     )
                 }
-                Text(
-                    "正在播放",
-                    color = ProomColor.muted,
-                    fontSize = 12.sp,
-                    letterSpacing = 1.4.sp,
-                    modifier = Modifier.align(Alignment.Center),
-                )
+                // 中间不是固定文字：加载中转文字，播放中是一条律动的音柱，
+                // 暂停时才是「已暂停」。状态全放在这一处，页面就不会因为
+                // 「正在加载…」那一行出现/消失而上下跳。
+                when {
+                    MusicBox.loading -> Text(
+                        "正在加载中",
+                        color = ProomColor.muted,
+                        fontSize = 12.sp,
+                        letterSpacing = 1.4.sp,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+
+                    MusicBox.playing -> NowPlayingBars(
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+
+                    else -> Text(
+                        "已暂停",
+                        color = ProomColor.muted,
+                        fontSize = 12.sp,
+                        letterSpacing = 1.4.sp,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
                 // 收藏 / 音效：都是「对当前这首」的设置，放顶栏比堆在底部省一整行
                 Row(
                     Modifier.align(Alignment.CenterEnd),
@@ -329,7 +351,8 @@ fun MusicPlayerScreen(
 
             // 状态行只在出错 / 加载时出现：
             // 「6 / 61 首」这种信息播放列表里已经写着，占一整行不值
-            val status = MusicBox.error ?: if (MusicBox.loading) "正在加载…" else null
+            // 加载状态已经挪到顶栏的律动动画里，这里只在出错时出现
+            val status = MusicBox.error
             if (status != null) {
                 Text(
                     text = status,
@@ -460,6 +483,40 @@ fun MusicPlayerScreen(
 }
 
 /* ─────────────────── 小组件 ─────────────────── */
+
+/** 播放中的律动：三根音柱错峰跳动（高度 4~14dp），比一行"正在播放"更有生命力 */
+@Composable
+private fun NowPlayingBars(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "bars")
+    Row(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        repeat(3) { i ->
+            val h by transition.animateFloat(
+                initialValue = 0.30f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(
+                        durationMillis = 520,
+                        delayMillis = i * 130,
+                        easing = FastOutSlowInEasing,
+                    ),
+                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+                ),
+                label = "bar$i",
+            )
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height((14f * h).dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(ProomColor.accent)
+            )
+        }
+    }
+}
 
 @Composable
 private fun SmallBtn(
