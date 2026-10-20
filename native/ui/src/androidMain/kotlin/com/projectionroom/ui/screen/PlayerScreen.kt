@@ -208,6 +208,10 @@ fun PlayerScreen(
      */
     liveFavOf: (name: String) -> Boolean = { false },
     onToggleLiveFav: (name: String) -> Unit = {},
+    /** 电视端：收掉锁/画中画/投屏这三个对电视无意义的按钮 */
+    isTv: Boolean = false,
+    /** 联调用：进播放页就展开投屏面板（只在 debuggable 包由壳开启） */
+    openCastOnEnter: Boolean = false,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -286,6 +290,60 @@ fun PlayerScreen(
             castScanning = true
             castDevices = runCatching { dlna.discover() }.getOrDefault(emptyList())
             castScanning = false
+        }
+    }
+
+    // 联调入口：横屏播放器里 adb 的点击坐标经常对不上（见顶栏那段注释），
+    // 投屏面板点不开就等于没法验版式。壳用 `-e screen cast` 置这个开关，
+    // 进播放页就展开面板并顺手搜一次。
+    LaunchedEffect(openCastOnEnter) {
+        if (openCastOnEnter) {
+            castOpen = true
+            scanCast()
+        }
+    }
+
+    /** 把当前地址推到选中的接收端：手机退回遥控器 */
+    fun doCast(d: com.projectionroom.shared.cast.CastDevice) {
+        castOpen = false
+        castScope.launch {
+            val r = dlna.cast(d, playUrl.orEmpty(), vod.name)
+            if (r.isSuccess) {
+                castTarget = d
+                casting = true
+                // 本机暂停，声音只从电视出
+                exo.pause()
+                hint = "已投屏到 ${d.name}"
+            } else {
+                hint = "投屏失败：${r.exceptionOrNull()?.message ?: "电视没响应"}"
+            }
+        }
+    }
+
+    /**
+     * 手动地址投屏。
+     *
+     * 电视不答 SSDP 的情况真实存在：路由开了 AP 隔离、电视和手机在
+     * 不同 VLAN、老电视的 SSDP 只回广播不回组播。这时候填一句
+     * `192.0.2.8:49520` 就能连上，比「找不到设备」干瞪眼强。
+     */
+    fun castManual(raw: String) {
+        val addr = raw.trim()
+        if (addr.isBlank()) return
+        val loc = when {
+            addr.startsWith("http://") || addr.startsWith("https://") ->
+                if (addr.endsWith(".xml")) addr else addr.trimEnd('/') + "/description.xml"
+            else -> "http://" + addr.trimEnd('/') + "/description.xml"
+        }
+        castScope.launch {
+            castScanning = true
+            val d = dlna.describe(loc)
+            castScanning = false
+            when {
+                d == null -> hint = "连不上 $addr"
+                !d.canCast -> hint = "这台设备不支持投屏"
+                else -> doCast(d)
+            }
         }
     }
     // 拖动时屏幕两侧的竖条（亮度在左、音量在右），比中间一个小胶囊直观
@@ -413,8 +471,8 @@ fun PlayerScreen(
     // 4 秒无操作自动收起（锁定时只留锁图标）
     // key 必须带上 sidePanel：否则打开抽屉时计时器还在跑，
     // 4 秒后照样把整个控制层（含抽屉）一起收掉。
-    LaunchedEffect(controlsVisible, locked, panel, sidePanel) {
-        if (controlsVisible && !locked && panel == Panel.None && !sidePanel) {
+    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen) {
+        if (controlsVisible && !locked && panel == Panel.None && !sidePanel && !castOpen) {
             delay(5_000)
             controlsVisible = false
         }
@@ -626,11 +684,13 @@ fun PlayerScreen(
                             castOpen = true
                             scanCast()
                         },
+                        isTv = isTv,
                     )
                 }
 
                 // 锁定时顶栏整条都收起来了，得单独留一个锁图标，否则解不开
-                if (locked) {
+                // 电视端没有锁定入口（isTv 收掉了那个按钮），这块自然也不会出现
+                if (locked && !isTv) {
                     LockButton(
                         locked = true,
                         modifier = Modifier.align(Alignment.CenterEnd).padding(end = 20.dp),
@@ -749,6 +809,28 @@ fun PlayerScreen(
                 }
             }
         }
+
+        // ── 投屏面板 ──
+        // 挂在控制层**外面**：控制层 5 秒自动收起时，面板不该跟着一起消失。
+        if (castOpen) {
+            CastSheet(
+                devices = castDevices,
+                scanning = castScanning,
+                current = castTarget?.name.orEmpty(),
+                casting = casting,
+                onRescan = { scanCast() },
+                onPick = { d -> doCast(d) },
+                onManual = { addr -> castManual(addr) },
+                onStop = {
+                    castTarget?.let { d -> castScope.launch { dlna.stop(d) } }
+                    castTarget = null
+                    casting = false
+                    castOpen = false
+                    hint = "已停止投屏"
+                },
+                onClose = { castOpen = false },
+            )
+        }
     }
 }
 
@@ -767,6 +849,14 @@ private fun PlayerTopBar(
     onBack: () -> Unit,
     onPip: () -> Unit,
     onCast: () -> Unit,
+    /**
+     * 电视端：右上角那三个（锁 / 画中画 / 投屏）全部不画。
+     *
+     * 电视是**接收端**，投屏按钮点了只能投自己；画中画在电视上系统不支持；
+     * 锁屏是为了防手指误触，而电视根本没有触摸。留着就是三个点不动的假按钮
+     * —— 遥控器一按过去就卡在那里，比没有更糟。
+     */
+    isTv: Boolean = false,
 ) {
     Row(
         Modifier
@@ -825,13 +915,18 @@ private fun PlayerTopBar(
                 )
             }
         }
-        CircleIcon(
-            if (locked) PlayerIcons.Lock else PlayerIcons.Unlock,
-            if (locked) "解锁" else "锁定",
-            onToggleLock,
-        )
-        CircleIcon(PlayerIcons.Pip, "画中画", onPip)
-        CircleIcon(PlayerIcons.Cast, "投屏", onCast)
+        // 锁和画中画/投屏并排放在右上：之前挂在屏幕右中，横屏下
+        // 和手势/内容层叠在一起，点起来很飘。
+        // 电视端只留返回和标题（见 isTv 的注释）。
+        if (!isTv) {
+            CircleIcon(
+                if (locked) PlayerIcons.Lock else PlayerIcons.Unlock,
+                if (locked) "解锁" else "锁定",
+                onToggleLock,
+            )
+            CircleIcon(PlayerIcons.Pip, "画中画", onPip)
+            CircleIcon(PlayerIcons.Cast, "投屏", onCast)
+        }
     }
 }
 
@@ -1424,5 +1519,233 @@ private fun PanelRow(label: String, selected: Boolean, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.width(150.dp),
         )
+    }
+}
+
+/* ─────────────────────── 投屏面板 ─────────────────────── */
+
+/**
+ * 投屏面板：列出同一网络里的电视，点一台就把当前地址推过去。
+ *
+ * 三条状态必须都画出来，否则用户分不清「没搜到」和「还没搜完」：
+ * 正在搜索 / 搜到 N 台 / 一台都没有（附排查提示）。
+ */
+@Composable
+private fun CastSheet(
+    devices: List<com.projectionroom.shared.cast.CastDevice>,
+    scanning: Boolean,
+    current: String,
+    casting: Boolean,
+    onRescan: () -> Unit,
+    onPick: (com.projectionroom.shared.cast.CastDevice) -> Unit,
+    onManual: (String) -> Unit,
+    onStop: () -> Unit,
+    onClose: () -> Unit,
+) {
+    // 面板高度上限按屏幕来算，而不是写死一个 dp：
+    // 横屏（约 390dp 高）放不下 500dp 的面板，设备一多就会被屏幕切掉底部，
+    // 倍速/线路面板之前就是这么翻车的。
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    val maxH = (cfg.screenHeightDp * 0.88f).dp
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            // 遮罩只「吃掉」点击，不做关闭：点投屏图标那一下，down 落在图标上、
+            // up 可能落到刚合成出来的遮罩上，遮罩一旦执行关闭就成了「开了立刻关」。
+            // 关面板只认右上角那个 ✕。
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            ),
+    ) {
+        Column(
+            Modifier
+                // 居中而不是贴底：横屏手机屏幕很宽、很矮，贴底的面板会缩在屏幕
+                // 下沿一条窄带里，看起来像「没对齐」。居中后四周留白对称，
+                // 也不再受导航栏高度影响（原来贴底 + navigationBarsPadding 时
+                // 面板底边会在部分机型上被顶到导航栏上方，下面留一条黑缝）。
+                .align(Alignment.Center)
+                .widthIn(max = 460.dp)
+                .fillMaxWidth()
+                .heightIn(max = maxH)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF16181D))
+                // 拦掉面板内部的点击，不然点标题也会把面板关掉
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                )
+                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (casting) "正在投屏" else "投屏到电视",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        when {
+                            // 投屏中先说「投到哪」，比继续说「正在搜索」有用
+                            casting && current.isNotBlank() -> "已投屏到 $current"
+                            scanning -> "正在搜索同一网络下的电视…"
+                            devices.isEmpty() -> "没找到电视 · 确认手机和电视连的是同一个 Wi-Fi"
+                            else -> "找到 ${devices.size} 台设备"
+                        },
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                if (scanning) {
+                    BufferDots()
+                } else {
+                    Text(
+                        "重新搜索",
+                        color = ProomColor.accent,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onRescan)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("✕", color = Color.White.copy(alpha = 0.65f), fontSize = 15.sp)
+                }
+            }
+
+            if (devices.isNotEmpty()) {
+                LazyColumn(Modifier.padding(top = 10.dp).heightIn(max = 260.dp)) {
+                    items(devices) { d ->
+                        val active = casting && d.name == current
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (active) ProomColor.accentSoft else Color.White.copy(alpha = 0.06f)
+                                )
+                                .clickable { onPick(d) }
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                PlayerIcons.Cast,
+                                contentDescription = null,
+                                tint = if (active) ProomColor.accent else Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(
+                                    d.name,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (d.model.isNotBlank()) {
+                                    Text(
+                                        d.model,
+                                        color = Color.White.copy(alpha = 0.4f),
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 2.dp),
+                                    )
+                                }
+                            }
+                            if (active) {
+                                Text("投屏中", color = ProomColor.accent, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 手动地址是**兜底**，不是正常路径：默认收起，只有搜不到才露出来。
+            // 正常用户不该知道 IP 是什么东西。
+            var showManual by remember { mutableStateOf(false) }
+            var manual by remember { mutableStateOf("") }
+            if (showManual) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = manual,
+                        onValueChange = { manual = it },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = Color.White,
+                            fontSize = 13.sp,
+                        ),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(ProomColor.accent),
+                        modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                        decorationBox = { inner ->
+                            if (manual.isEmpty()) {
+                                Text(
+                                    "电视地址，如 192.0.2.8:49520",
+                                    color = Color.White.copy(alpha = 0.3f),
+                                    fontSize = 12.sp,
+                                )
+                            }
+                            inner()
+                        },
+                    )
+                    Text(
+                        "连接",
+                        color = ProomColor.accent,
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onManual(manual) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    )
+                }
+            } else if (devices.isEmpty() && !scanning && current.isBlank()) {
+                Text(
+                    "电视不答搜索？手动填地址 ›",
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showManual = true }
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                )
+            }
+
+            if (casting) {
+                Text(
+                    "停止投屏",
+                    color = Color(0xFFFF6B6B),
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onStop)
+                        .padding(vertical = 12.dp),
+                )
+            }
+        }
     }
 }

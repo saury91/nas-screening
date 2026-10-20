@@ -75,6 +75,9 @@ fun MusicScreen(
     /** 某个分类下的歌单；传空串表示「推荐」 */
     loadPlaylists: suspend (cat: String) -> List<NasApi.Playlist>,
     onOpenPlaylist: (NasApi.Playlist) -> Unit,
+    /** 返回。手机上从 tab 进来，电视上是遥控器 BACK 之外的兜底入口 */
+    onBack: (() -> Unit)? = null,
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     var cats by remember { mutableStateOf(MusicCache.cats()) }
     // 推荐区
@@ -139,7 +142,16 @@ fun MusicScreen(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                MusicHeader(recCount = rec.size, catCount = cats.size, isTv = isTv)
+                Column(Modifier.padding(top = topInset)) {
+                    onBack?.let {
+                        if (isTv) {
+                            com.projectionroom.ui.component.TvBackHint(onBack = it)
+                        } else {
+                            com.projectionroom.ui.component.PageBackBar(onBack = it)
+                        }
+                    }
+                    MusicHeader(recCount = rec.size, catCount = cats.size, isTv = isTv)
+                }
             }
 
             // ── 推荐歌单 ──
