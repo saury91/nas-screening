@@ -144,7 +144,39 @@ private fun depth(s: Screen): Int = when (s) {
 /** 没配置 NAS 时的占位地址：本地片源用不到它，只是为了构造对象不崩 */
 private const val OFFLINE_BASE = "http://127.0.0.1:1"
 
+
 class MainActivity : ComponentActivity() {
+
+    /**
+     * 联调用：广播直接触发投屏（仅 debuggable 包）。
+     *
+     * 横屏播放器里 adb 的点击坐标常对不上，端到端验证协议链路需要一条
+     * 不依赖 UI 的入口：
+     *   adb shell am broadcast -a com.projectionroom.app.DEBUG_CAST \
+     *     --es host 10.0.2.2:49600 --es url http://a/b.m3u8 -p com.projectionroom.app
+     */
+    private fun registerCastDebugHook() {
+        val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (!debuggable) return
+        val filter = android.content.IntentFilter("com.projectionroom.app.DEBUG_CAST")
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context, intent: android.content.Intent) {
+                val host = intent.getStringExtra("host") ?: return
+                val url = intent.getStringExtra("url") ?: "http://example.com/demo.m3u8"
+                kotlinx.coroutines.MainScope().launch {
+                    val client = com.projectionroom.shared.cast.DlnaClient()
+                    val d = client.describe("http://$host/description.xml")
+                    android.util.Log.i("CASTDBG", "describe -> $d")
+                    if (d != null) {
+                        val r = client.cast(d, url, "投屏联调")
+                        android.util.Log.i("CASTDBG", "cast ok=${r.isSuccess} err=${r.exceptionOrNull()}")
+                        android.util.Log.i("CASTDBG", "state=${client.state(d)}")
+                    }
+                }
+            }
+        }, filter, android.content.Context.RECEIVER_EXPORTED)
+    }
+
 
     companion object {
         /** 落地页指令：`am start -n com.projectionroom.app/.MainActivity -e screen pair` */
@@ -159,6 +191,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        registerCastDebugHook()
+
         super.onCreate(savedInstanceState)
         // Debug 包开 StrictMode：主线程一碰磁盘/网络就在 logcat 里留一条
         // "StrictMode policy violation"，不用等 ANR 才发现。

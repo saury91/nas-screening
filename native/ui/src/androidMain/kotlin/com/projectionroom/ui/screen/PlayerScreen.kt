@@ -278,6 +278,8 @@ fun PlayerScreen(
     var castScanning by remember { mutableStateOf(false) }
     var castDevices by remember { mutableStateOf<List<com.projectionroom.shared.cast.CastDevice>>(emptyList()) }
     var castTarget by remember { mutableStateOf<com.projectionroom.shared.cast.CastDevice?>(null) }
+    // 电视那边当前是不是在播：手机当遥控器时要靠它决定发 pause 还是 play
+    var casting by remember { mutableStateOf(false) }
     fun scanCast() {
         if (castScanning) return
         castScope.launch {
@@ -652,6 +654,11 @@ fun PlayerScreen(
                         isPlaying = exo.isPlaying,
                         modifier = Modifier.align(Alignment.BottomCenter),
                         onSeek = {
+                            // 投屏中把进度也发给电视：本机在放的是同一路流，
+                            // 只改本机会出现"手机跳了电视没动"的诡异状态
+                            castTarget?.let { d ->
+                                castScope.launch { dlna.seek(d, it / 1000) }
+                            }
                             exo.seekTo(it)
                             position = it
                         },
@@ -662,7 +669,19 @@ fun PlayerScreen(
                                 controlsVisible = true
                             }
                         },
-                        onTogglePlay = { if (exo.isPlaying) exo.pause() else exo.play() },
+                        onTogglePlay = {
+                            val d = castTarget
+                            if (d != null) {
+                                // 投屏中：手机变成遥控器，本机保持暂停
+                                val wasPlaying = casting
+                                castScope.launch {
+                                    if (wasPlaying) dlna.pause(d) else dlna.resume(d)
+                                    casting = !wasPlaying
+                                }
+                            } else {
+                                if (exo.isPlaying) exo.pause() else exo.play()
+                            }
+                        },
                         onSpeed = { panel = Panel.Speed },
                         onSettings = { sidePanel = true },
                     )
