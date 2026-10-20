@@ -3,6 +3,7 @@ package com.projectionroom.app
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.widget.RemoteViews
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -222,49 +223,55 @@ class MusicService : Service() {
                 .putExtra(EXTRA_OPEN_PLAYER, true),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        fun act(action: String, icon: Int, title: String): NotificationCompat.Action =
-            NotificationCompat.Action(
-                icon, title,
-                PendingIntent.getService(
-                    this, action.hashCode(),
-                    Intent(this, MusicService::class.java).setAction(action),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                ),
-            )
-
-        val prev = act(ACTION_PREV, R.drawable.ic_n_prev, "上一首")
-        val toggle = act(
-            ACTION_TOGGLE,
-            if (playing) R.drawable.ic_n_pause else R.drawable.ic_n_play,
-            if (playing) "暂停" else "播放",
+        fun pi(action: String): PendingIntent = PendingIntent.getService(
+            this, action.hashCode(),
+            Intent(this, MusicService::class.java).setAction(action),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val next = act(ACTION_NEXT, R.drawable.ic_n_next, "下一首")
 
-        val style = androidx.media.app.NotificationCompat.MediaStyle()
-            // 绑 token 才有 QS 媒体轮播 / 锁屏控制；不绑就只是一张普通通知
-            .setMediaSession(session?.sessionToken)
-            // 三个主按钮放进收起态；不加这一行系统只会显示一个「播放」
-            .setShowActionsInCompactView(0, 1, 2)
+        val repeatIcon = when (MusicBox.repeat) {
+            com.projectionroom.ui.music.RepeatMode.One -> R.drawable.ic_n_repeat_one
+            com.projectionroom.ui.music.RepeatMode.Shuffle -> R.drawable.ic_n_shuffle
+            else -> R.drawable.ic_n_repeat
+        }
 
         return NotificationCompat.Builder(this, CHANNEL)
-            // 状态栏最左边那颗图标：音符，不用播放三角 ——
-            // 三角和 App 图标（@android:drawable/ic_media_play）一模一样，分不清是应用还是歌
             // 状态栏那颗：与 App 图标同一个字形（矢量，系统按 alpha 上色）
             .setSmallIcon(R.drawable.ic_n_music)
-            // 主题色：Android 5~11 会用它给图标底色上色，跟界面里的金色保持一致
             .setColor(0xFFFFCF7A.toInt())
-            .setContentTitle(track?.title ?: "放映室")
-            .setContentText(track?.artist.orEmpty())
-            // 歌词当前句走 subText：媒体卡里它显示在歌名下方，不占按钮位置
-            .setSubText(subtitle().takeIf { it.isNotBlank() && it != track?.artist })
-            // 封面是异步下载的，没到之前先给兜底图 —— 否则媒体卡的大图位置是空的，
-            // 看起来就像"两个不同的通知栏样式"
-            .setLargeIcon(cover ?: fallbackIcon())
+            // 不声明 CATEGORY_TRANSPORT：声明后系统会用自带的播放三角替换小图标
+            .addAction(NotificationCompat.Action(repeatIcon, "播放模式", pi(ACTION_REPEAT)))
+            .addAction(NotificationCompat.Action(R.drawable.ic_n_prev, "上一首", pi(ACTION_PREV)))
+            .addAction(
+                NotificationCompat.Action(
+                    if (playing) R.drawable.ic_n_pause else R.drawable.ic_n_play,
+                    if (playing) "暂停" else "播放",
+                    pi(ACTION_TOGGLE),
+                )
+            )
+            .addAction(NotificationCompat.Action(R.drawable.ic_n_next, "下一首", pi(ACTION_NEXT)))
+            .addAction(
+                NotificationCompat.Action(
+                    if (MusicBox.fav) R.drawable.ic_n_heart_on else R.drawable.ic_n_heart,
+                    "收藏",
+                    pi(ACTION_FAV),
+                )
+            )
+            .setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(session?.sessionToken)
+                    // 收起态显示中间三个（上一首 / 播放暂停 / 下一首）
+                    .setShowActionsInCompactView(1, 2, 3)
+            )
+            // 进度条：系统会画在文案下方、按钮上方
+            .setProgress(
+                1000,
+                if (MusicBox.duration > 0) {
+                    ((MusicBox.position * 1000) / MusicBox.duration).toInt().coerceIn(0, 1000)
+                } else 0,
+                false,
+            )
             .setContentIntent(open)
-            .addAction(prev)
-            .addAction(toggle)
-            .addAction(next)
-            .setStyle(style)
             .setOngoing(playing)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
