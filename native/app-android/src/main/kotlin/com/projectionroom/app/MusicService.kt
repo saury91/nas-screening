@@ -239,6 +239,10 @@ class MusicService : Service() {
             // 状态栏那颗：与 App 图标同一个字形（矢量，系统按 alpha 上色）
             .setSmallIcon(R.drawable.ic_launcher_mono)
             .setColor(0xFFFFCF7A.toInt())
+            // 封面 + 歌名 + 当前歌词（没歌词时退回歌手）
+            .setContentTitle(track?.title ?: "放映室")
+            .setContentText(subtitle())
+            .setLargeIcon(cover ?: fallbackIcon())
             // 不声明 CATEGORY_TRANSPORT：声明后系统会用自带的播放三角替换小图标
             .addAction(NotificationCompat.Action(repeatIcon, "播放模式", pi(ACTION_REPEAT)))
             .addAction(NotificationCompat.Action(R.drawable.ic_n_prev, "上一首", pi(ACTION_PREV)))
