@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -141,11 +142,15 @@ fun MusicPlayerScreen(
             //
             // 用 Box 三向对齐，而不是 Row + 两个 weight：
             // 右边现在有两个按钮，weight 会把「正在播放」推得偏左。
-            Box(Modifier.fillMaxWidth().height(52.dp)) {
+            Box(Modifier.fillMaxWidth().height(56.dp)) {
+                // 返回键和搜索页/详情页同一条基准线：48dp 热区 + 24dp 图标，
+                // 图标视觉左缘落在 20dp。本页内容留白是 26dp，所以热区要往左挪 18dp，
+                // 否则会比其它页面的返回键右移 15dp，看着"缩在内容里"。
                 Box(
                     Modifier
                         .align(Alignment.CenterStart)
-                        .size(40.dp)
+                        .offset(x = (-18).dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .clickable(onClick = onBack),
                     contentAlignment = Alignment.Center,
@@ -154,7 +159,7 @@ fun MusicPlayerScreen(
                         imageVector = TabIcons.Back,
                         contentDescription = "返回",
                         tint = ProomColor.text,
-                        modifier = Modifier.size(22.dp),
+                        modifier = Modifier.size(24.dp),
                     )
                 }
                 // 中间不是固定文字：加载中转文字，播放中是一条律动的音柱，
