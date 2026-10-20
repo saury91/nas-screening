@@ -8,6 +8,11 @@ import android.content.Context
  */
 object SearchStore {
 
+    /** 预热：首次读 SharedPreferences 会在调用线程解析 XML，启动时先让它后台加载 */
+    fun warmUp(ctx: android.content.Context) {
+        runCatching { ctx.getSharedPreferences(FILE, android.content.Context.MODE_PRIVATE) }
+    }
+
     private const val FILE = "proom_search"
     private const val KEY = "history"
     private const val SEP = "\u0001"
