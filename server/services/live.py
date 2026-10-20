@@ -49,7 +49,10 @@ def parse_live(text):
             m = re.search(r'group-title="([^"]*)"', s)
             g = m.group(1).strip() if m and m.group(1).strip() else grp
             nm = s.split(",", 1)[1].strip() if "," in s else ""
-            out.append(["meta", g, nm])
+            # 台标：不少 IPTV 源自带 tvg-logo，直接拿来用，比空白格子强得多
+            lg = re.search(r'tvg-logo="([^"]*)"', s)
+            logo = lg.group(1).strip() if lg else ""
+            out.append(["meta", g, nm, logo])
             continue
         m = re.match(r"^([^,#]+),\s*(https?://\S+)$", s)
         if m:
@@ -57,7 +60,7 @@ def parse_live(text):
             continue
         if s.startswith("http") and out and out[-1][0] == "meta":
             k = out.pop()
-            out.append(["ch", k[1], k[2], s])
+            out.append(["ch", k[1], k[2], s, k[3] if len(k) > 3 else ""])
     chans = []
     for it in out:
         if it[0] != "ch":
@@ -67,7 +70,8 @@ def parse_live(text):
         if _BAD_HOST.match(url) or "更新" in it[2] or len(it[2]) > 30:
             continue
         chans.append({"group": _fix_group(it[1]),
-                      "name": it[2][:40], "url": url})
+                      "name": it[2][:40], "url": url,
+                      "logo": (it[4] if len(it) > 4 else "")})
     return chans
 
 
@@ -95,9 +99,10 @@ def refresh_live(src_name=None, url=None):
             dbrun("UPDATE sources SET status=?, checked_at=?, api_count=0 "
                   "WHERE kind='live' AND name=?", ("fail", int(time.time()), nm))
         for c in chans:
-            dbrun("""INSERT OR IGNORE INTO live(grp,name,url,src,added_at)
-                     VALUES(?,?,?,?,?)""",
-                  (c["group"], c["name"], c["url"], nm, int(time.time())))
+            dbrun("""INSERT OR IGNORE INTO live(grp,name,url,src,added_at,logo)
+                     VALUES(?,?,?,?,?,?)""",
+                  (c["group"], c["name"], c["url"], nm, int(time.time()),
+                   c.get("logo") or None))
         total += len(chans)
         dbrun("UPDATE sources SET status=?, checked_at=?, api_count=? "
               "WHERE kind='live' AND name=?",
@@ -113,7 +118,7 @@ def live_groups():
 
 
 def live_list(grp=None, kw=None, limit=500):
-    sql = "SELECT grp,name,url,alive FROM live WHERE 1=1"
+    sql = "SELECT grp,name,url,alive,logo FROM live WHERE 1=1"
     args = []
     if grp:
         sql += " AND grp=?"
@@ -127,11 +132,15 @@ def live_list(grp=None, kw=None, limit=500):
     # 同名频道合并源
     seen = {}
     order = []
-    for g, n, u, alive in rows:
+    for g, n, u, alive, logo in rows:
         k = (g, n)
         if k not in seen:
-            seen[k] = {"group": g, "name": n, "urls": [], "alive": alive}
+            seen[k] = {"group": g, "name": n, "urls": [], "alive": alive,
+                       "logo": logo or ""}
             order.append(k)
+        # 同名频道里只要有一条带台标就用它
+        if not seen[k].get("logo") and logo:
+            seen[k]["logo"] = logo
         if len(seen[k]["urls"]) < 6:
             seen[k]["urls"].append(u)
         # 只要有一条线路测出来可用，整条频道就算可用
