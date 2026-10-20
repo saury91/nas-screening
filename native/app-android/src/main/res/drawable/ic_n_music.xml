@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  通知栏小图标（状态栏那颗）。
+
+  两点必须遵守，之前的版本踩过：
+  1) **必须和 App 图标同一个字形** —— 直接把启动图标前景里那条音符路径搬过来，
+     否则通知栏是"另一个音符"，和桌面图标对不上。
+  2) **必须是矢量 + 纯白单色** —— 系统只取 alpha 当遮罩上色，
+     位图（之前是 5 套 PNG）在高密度屏上会发虚，边缘也和旁边三个矢量按钮不一致。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 与 ic_launcher_fg 完全相同的路径 -->
+    <path
+        android:pathData="M12,3v10.55A4,4 0 1,0 14,17V7h4V3h-6z"
+        android:fillColor="#FFFFFFFF" />
+</vector>
