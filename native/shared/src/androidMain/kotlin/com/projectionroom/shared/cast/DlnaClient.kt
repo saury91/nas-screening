@@ -69,7 +69,16 @@ class DlnaClient(
         // 只为拿到名字：描述文件通常几十 KB，并发拉，3 秒超时的不等
         coroutineScope {
             locations.map { loc -> async { describe(loc) } }.awaitAll()
-        }.filterNotNull().filter { it.canCast }.distinctBy { it.udn.ifBlank { it.location } }
+        }
+            .filterNotNull()
+            .filter { it.canCast }
+            // 自己回自己也算发现成功（同一份 APK 两端都在跑）。
+            // 按 UDN 剔，不按 IP：同机双实例、手机双网卡时 IP 会撞。
+            .filterNot { d ->
+                val self = CastIdentity.udn
+                self.isNotBlank() && d.udn == self
+            }
+            .distinctBy { it.udn.ifBlank { it.location } }
     }
 
     /** 拉设备描述并解析出 AVTransport 控制地址 */
