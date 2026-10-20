@@ -1,19 +1,36 @@
 package com.projectionroom.shared.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * 一条采集源。字段与 NAS 下发的 `config/bundle` 一一对应：
  * `{ name, api, type, cat }`，不额外发明字段，方便两端对拍。
  */
+@Serializable
 data class Source(
     val name: String,
     val api: String,
     val type: Int = 1,
     val cat: String = "综合",
-)
+    /**
+     * 该站的分类 ID → 大类映射，例如 `{"20": "电影", "21": "剧集"}`。
+     *
+     * 各站 type_id 排法完全不同（暴风 t=20 才是电影，别家 t=6 就是），
+     * App 自己猜不出来，所以由 NAS 探好后随配置包下发。
+     * 为空表示这个源没探到映射 —— 浏览时跳过它，搜索不受影响。
+     */
+    val cats: Map<String, String> = emptyMap(),
+) {
+    /** 某个大类在这个源上的所有 type_id */
+    fun typeIdsOf(cat: String): List<String> =
+        cats.entries.filter { it.value == cat }.map { it.key }
+}
 
+@Serializable
 data class Episode(val name: String, val url: String)
 
 /** 一部片在某个源上的全部选集。同一部片可以有多条线路（多个源）。 */
+@Serializable
 data class Line(
     val site: String,
     val remarks: String = "",
@@ -23,6 +40,7 @@ data class Line(
     val count: Int get() = episodes.size
 }
 
+@Serializable
 data class Vod(
     val name: String,
     val year: String = "",

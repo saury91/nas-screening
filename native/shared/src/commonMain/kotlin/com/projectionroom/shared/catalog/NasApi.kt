@@ -3,10 +3,13 @@ package com.projectionroom.shared.catalog
 import com.projectionroom.shared.model.Episode
 import com.projectionroom.shared.model.Line
 import com.projectionroom.shared.model.Quality
+import com.projectionroom.shared.model.Source
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.shared.net.Http
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 /**
@@ -19,6 +22,16 @@ import kotlinx.serialization.json.Json
 class NasApi(private val http: Http, baseUrl: String) {
 
     private val base = baseUrl.trimEnd('/')
+
+    /**
+     * 解析也切到后台。
+     *
+     * http.get 内部已经切了 IO，但**返回后协程回到调用方线程** ——
+     * 调用方基本是 LaunchedEffect（主线程），于是反序列化留在主线程上。
+     * bundle 有 271KB~1.2MB，这一下足够让主线程掉几十帧。
+     */
+    private suspend fun <T> parse(block: suspend () -> T): T =
+        withContext(Dispatchers.Default) { block() }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -77,7 +90,7 @@ class NasApi(private val http: Http, baseUrl: String) {
         if (kw.isEmpty()) return emptyList()
         val url = "$base/api/online?kw=${kw.encodeQuery()}"
         val text = http.get(url)
-        val resp = json.decodeFromString<SearchResp>(text)
+        val resp = parse { json.decodeFromString<SearchResp>(text) }
         return resp.items.map {
             Vod(
                 name = it.name,
@@ -93,7 +106,7 @@ class NasApi(private val http: Http, baseUrl: String) {
         if (name.isBlank()) return null
         val url = "$base/api/detail?n=${name.encodeQuery()}&y=${year.encodeQuery()}"
         val text = http.get(url)
-        val d = json.decodeFromString<DetailResp>(text)
+        val d = parse { json.decodeFromString<DetailResp>(text) }
         if (d.name.isBlank()) return null
         return Vod(
             name = d.name,
@@ -126,6 +139,7 @@ class NasApi(private val http: Http, baseUrl: String) {
         val cats: List<CatGroup> = emptyList(),
     )
 
+    @Serializable
     data class CatGroup(
         val cat: String = "",
         val count: Int = 0,
@@ -189,8 +203,37 @@ class NasApi(private val http: Http, baseUrl: String) {
         val area: String = "",
     )
 
+    /**
+     * 配置包：**这是 App 唯一真正依赖 NAS 的东西**。
+     *
+     * 里面是片源清单 + 直播频道表 + 版本号，拉一次存本地就能长期用：
+     * 之后搜索、详情、播放全部直连源站，NAS 关不关机都不影响。
+     * 版本号只用来判断「要不要更新」，不是用来判断「能不能用」。
+     */
+    suspend fun bundle(): ConfigBundle {
+        val d = parse { json.decodeFromString<BundleResp>(http.get("$base/api/config/bundle")) }
+        return ConfigBundle(
+            version = d.version,
+            sources = d.sources.filter { it.api.startsWith("http") },
+            live = LiveFeed(
+                groups = d.live.groups.map { LiveGroup(it.group, it.count) },
+                channels = d.live.items
+                    .filter { it.name.isNotBlank() && it.urls.isNotEmpty() }
+                    .map { LiveChannel(it.group, it.name, it.urls) },
+            ),
+        )
+    }
+
+    @Serializable
+    private data class BundleResp(
+        val version: String = "",
+        val generatedAt: Long = 0,
+        val sources: List<Source> = emptyList(),
+        val live: LiveResp = LiveResp(),
+    )
+
     suspend fun home(): HomeFeed {
-        val d = json.decodeFromString<HomeResp>(http.get("$base/api/home"))
+        val d = parse { json.decodeFromString<HomeResp>(http.get("$base/api/home")) }
         return HomeFeed(
             // 只取点播记录；直播/音乐不进「继续观看」
             continueWatching = d.history
@@ -222,14 +265,17 @@ class NasApi(private val http: Http, baseUrl: String) {
         desc = desc,
     )
 
+    @Serializable
     data class LiveChannel(
         val group: String = "",
         val name: String = "",
         val urls: List<String> = emptyList(),
     )
 
+    @Serializable
     data class LiveGroup(val name: String = "", val count: Int = 0)
 
+    @Serializable
     data class LiveFeed(
         val groups: List<LiveGroup> = emptyList(),
         val channels: List<LiveChannel> = emptyList(),
@@ -253,7 +299,7 @@ class NasApi(private val http: Http, baseUrl: String) {
 
     /** 直播频道表（分组 + 频道，同名频道已由服务端合并多线路） */
     suspend fun live(): LiveFeed {
-        val d = json.decodeFromString<LiveResp>(http.get("$base/api/live"))
+        val d = parse { json.decodeFromString<LiveResp>(http.get("$base/api/live")) }
         return LiveFeed(
             groups = d.groups.map { LiveGroup(it.group, it.count) },
             channels = d.items.filter { it.name.isNotBlank() && it.urls.isNotEmpty() }
@@ -268,7 +314,7 @@ class NasApi(private val http: Http, baseUrl: String) {
             if (year.isNotBlank()) append("&year=").append(year.encodeQuery())
             if (area.isNotBlank()) append("&area=").append(area.encodeQuery())
         }
-        val d = json.decodeFromString<BrowseResp>(http.get("$base/api/browse$q"))
+        val d = parse { json.decodeFromString<BrowseResp>(http.get("$base/api/browse$q")) }
         return BrowsePage(
             items = d.items.map { it.toVod() },
             total = d.total,
@@ -285,7 +331,7 @@ class NasApi(private val http: Http, baseUrl: String) {
 
     /** 我的收藏 */
     suspend fun favorites(): List<Vod> {
-        val d = json.decodeFromString<LibResp>(http.get("$base/api/library?kind=fav"))
+        val d = parse { json.decodeFromString<LibResp>(http.get("$base/api/library?kind=fav")) }
         return d.items.filter { it.title.isNotBlank() }.map {
             Vod(name = it.title, pic = it.cover, type = it.ep)
         }
@@ -293,7 +339,7 @@ class NasApi(private val http: Http, baseUrl: String) {
 
     /** 播放记录（带进度） */
     suspend fun history(): List<Vod> {
-        val d = json.decodeFromString<LibResp>(http.get("$base/api/library?kind=history"))
+        val d = parse { json.decodeFromString<LibResp>(http.get("$base/api/library?kind=history")) }
         return d.items.filter { it.kind == "online" && it.title.isNotBlank() }
             .distinctBy { it.title }
             .map {
@@ -306,6 +352,30 @@ class NasApi(private val http: Http, baseUrl: String) {
             }
     }
 
+    /** 上报播放进度（NAS 在线时的同步用；离线时由 App 本地库暂存） */
+    suspend fun writeHistory(
+        vod: Vod,
+        ep: String,
+        position: Long,
+        duration: Long,
+    ): Boolean {
+        val body = buildString {
+            append("{\"kind\":\"online\",\"key\":\"").append(vod.name.escapeJson())
+            append("\",\"title\":\"").append(vod.name.escapeJson())
+            append("\",\"cover\":\"").append(vod.pic.escapeJson())
+            append("\",\"ep\":\"").append(ep.escapeJson())
+            append("\",\"year\":\"").append(vod.year.escapeJson())
+            append("\",\"position\":").append(position)
+            append(",\"duration\":").append(duration)
+            append("}")
+        }
+        val d = parse { json.decodeFromString<OkResp>(http.post("$base/api/history", body)) }
+        return d.ok
+    }
+
+    @Serializable
+    private data class OkResp(val ok: Boolean = false, val fav: Boolean = false)
+
     /** 切换收藏，返回切换后的状态 */
     suspend fun toggleFavorite(vod: Vod): Boolean {
         val body = buildString {
@@ -314,7 +384,7 @@ class NasApi(private val http: Http, baseUrl: String) {
             append("\",\"cover\":\"").append(vod.pic.escapeJson())
             append("\"}")
         }
-        val d = json.decodeFromString<FavResp>(http.post("$base/api/fav", body))
+        val d = parse { json.decodeFromString<FavResp>(http.post("$base/api/fav", body)) }
         return d.fav
     }
 
@@ -401,13 +471,13 @@ class NasApi(private val http: Http, baseUrl: String) {
     private data class UrlResp(val url: String = "")
 
     suspend fun musicRecommend(): List<Playlist> {
-        val d = json.decodeFromString<PlResp>(http.get("$base/api/music/playlists/recommend"))
+        val d = parse { json.decodeFromString<PlResp>(http.get("$base/api/music/playlists/recommend")) }
         return d.items.filter { it.name.isNotBlank() }
             .map { Playlist(it.id, it.name, it.cover, it.count, it.play) }
     }
 
     suspend fun musicCats(): List<MusicCatGroup> {
-        val d = json.decodeFromString<CatsResp>(http.get("$base/api/music/playlists/cats"))
+        val d = parse { json.decodeFromString<CatsResp>(http.get("$base/api/music/playlists/cats")) }
         return d.groups.map { g -> MusicCatGroup(g.name, g.subs.map { MusicCat(it.name, it.id) }) }
     }
 
@@ -415,13 +485,13 @@ class NasApi(private val http: Http, baseUrl: String) {
     suspend fun musicPlaylists(cat: String = ""): List<Playlist> {
         if (cat.isBlank()) return musicRecommend()
         val url = "$base/api/music/playlists?cat=${cat.encodeQuery()}"
-        val d = json.decodeFromString<PlResp>(http.get(url))
+        val d = parse { json.decodeFromString<PlResp>(http.get(url)) }
         return d.items.filter { it.name.isNotBlank() }
             .map { Playlist(it.id, it.name, it.cover, it.count, it.play) }
     }
 
     suspend fun musicPlaylist(id: String): PlaylistDetail {
-        val d = json.decodeFromString<PlDetail>(http.get("$base/api/music/playlist?id=${id.encodeQuery()}"))
+        val d = parse { json.decodeFromString<PlDetail>(http.get("$base/api/music/playlist?id=${id.encodeQuery()}")) }
         return PlaylistDetail(
             id = d.id, name = d.name, cover = d.cover, desc = d.desc, count = d.count,
             tracks = d.tracks.map { Track(it.id, it.title, it.artist, it.cover) },
@@ -440,3 +510,17 @@ class NasApi(private val http: Http, baseUrl: String) {
     suspend fun alive(): Boolean = runCatching { http.get("$base/api/status") }.isSuccess
 
 }
+
+/**
+ * NAS 下发的配置包。
+ *
+ * App 真正需要从 NAS 拿的只有这一份东西：片源清单 + 直播频道表 + 版本号。
+ * 存本地之后，搜索/详情/播放全部直连源站 —— NAS 关机不影响使用，
+ * 它只是「配置更新源」。
+ */
+@Serializable
+data class ConfigBundle(
+    val version: String = "",
+    val sources: List<Source> = emptyList(),
+    val live: NasApi.LiveFeed = NasApi.LiveFeed(),
+)
