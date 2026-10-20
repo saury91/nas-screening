@@ -268,29 +268,26 @@ fun MusicPlayerScreen(
             Spacer(Modifier.height(ProomSpace.sm))
 
             // ── 进度 ──
-            var dragging by remember { mutableStateOf(false) }
-            var dragValue by remember { mutableFloatStateOf(0f) }
-            val ratio = if (dragValue >= 0f) dragValue else {
-                if (MusicBox.duration > 0) {
-                    (MusicBox.position.toFloat() / MusicBox.duration).coerceIn(0f, 1f)
-                } else 0f
-            }
+            // -1f 表示"没在拖"，只有拖的时候才用它盖住实时位置。
+            // 之前这里初始化成 0f，条件 dragValue >= 0f 恒成立 → 拇指永远贴在左边，
+            // 时间却在走，看起来就是"进度条不同步"。
+            var preview by remember { mutableFloatStateOf(-1f) }
+            val live = if (MusicBox.duration > 0) {
+                (MusicBox.position.toFloat() / MusicBox.duration).coerceIn(0f, 1f)
+            } else 0f
+            val ratio = if (preview >= 0f) preview else live
 
             MusicSeekBar(
                 ratio = ratio,
-                onDrag = {
-                    dragging = true
-                    dragValue = it
-                },
+                onDrag = { preview = it },
                 onCommit = {
-                    dragging = false
                     if (MusicBox.duration > 0) MusicBox.seek((it * MusicBox.duration).toLong())
-                    dragValue = -1f
+                    preview = -1f
                 },
             )
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    clock(if (dragging) (ratio * MusicBox.duration).toLong() else MusicBox.position),
+                    clock(if (preview >= 0f) (preview * MusicBox.duration).toLong() else MusicBox.position),
                     color = ProomColor.muted,
                     fontSize = 11.sp,
                 )
@@ -561,22 +558,12 @@ private fun MusicSeekBar(
 ) {
     // 交给系统 Slider：自绘手势在真机上出现过"拖不动 / 松手位置对不上"，
     // 而 Slider 自带 48dp 热区、无障碍语义和取消处理。
-    // 外观仍按原来的细线定制：3dp 轨道 + 12dp 圆点。
-    var dragging by remember { mutableStateOf(false) }
-    var local by remember { mutableFloatStateOf(0f) }
-    val shown = if (dragging) local else ratio
-
+    // **本组件不持有状态**：值由调用方传入（拖动时是预览值，否则是实时位置），
+    // 避免"页面一份、组件一份"两套状态不一致。
     androidx.compose.material3.Slider(
-        value = shown,
-        onValueChange = {
-            dragging = true
-            local = it
-            onDrag(it)
-        },
-        onValueChangeFinished = {
-            onCommit(local.coerceIn(0f, 1f))
-            dragging = false
-        },
+        value = ratio.coerceIn(0f, 1f),
+        onValueChange = { onDrag(it) },
+        onValueChangeFinished = { onCommit(ratio.coerceIn(0f, 1f)) },
         colors = androidx.compose.material3.SliderDefaults.colors(
             thumbColor = ProomColor.accent,
             activeTrackColor = ProomColor.accent,
