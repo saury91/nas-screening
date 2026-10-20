@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -57,6 +58,7 @@ import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.PhoneHero
 import com.projectionroom.ui.component.PosterCard
 import com.projectionroom.ui.component.PosterSkeleton
+import com.projectionroom.ui.component.SkeletonBlock
 import com.projectionroom.ui.component.WideSkeleton
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.component.WideCard
@@ -94,6 +96,8 @@ fun PhoneFilm(
     loading: Boolean,
     onOpen: (Vod) -> Unit,
     onSearch: () -> Unit,
+    /** 「立即播放」：直接进播放器（壳层会先把线路补全），别再绕一遍详情页 */
+    onPlay: (Vod) -> Unit = onOpen,
     /** 状态栏高度：顶栏画在它下面，Hero 背景通到屏幕最顶 */
     statusInset: Dp = 0.dp,
     /** 下拉刷新：首页重拉 feed；分类 tab 由内部重拉第一页 */
@@ -128,6 +132,7 @@ fun PhoneFilm(
                 refreshing = refreshing,
                 onRefresh = ::pull,
                 onOpen = onOpen,
+                onPlay = onPlay,
                 onMore = { cat ->
                     val i = FILM_TABS.indexOfFirst { it.second == cat }
                     if (i > 0) tab = i
@@ -253,11 +258,16 @@ private fun HomePane(
     statusInset: Dp,
     onRefresh: () -> Unit,
     onOpen: (Vod) -> Unit,
+    onPlay: (Vod) -> Unit,
     onMore: (String) -> Unit,
     onScrolled: (Boolean) -> Unit,
 ) {
     val continueWatching = (feed?.continueWatching.orEmpty() + feed?.liked.orEmpty()).take(8)
     val hot = feed?.latest.orEmpty()
+    // Hero 已经把它们轮播展示了，下面「热门推荐」就不该再从第一条开始重复一遍。
+    // 前 6 条给 Hero，剩下的进网格。
+    val heroItems = hot.take(6)
+    val hotRest = hot.drop(heroItems.size)
     val cats = feed?.cats.orEmpty()
     val state = rememberLazyGridState()
 
@@ -280,20 +290,26 @@ private fun HomePane(
                 columns = GridCells.Fixed(3),
                 state = state,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 28.dp),
+                // 左右各留 20dp：之前只有 bottom，三列海报直接顶到屏幕边
+                // （Hero 例外，它要通栏，所以单独出血，见 bleedHorizontal）
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
             ) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    if (hot.isNotEmpty()) {
+                    if (heroItems.isNotEmpty()) {
                         PhoneHero(
-                            items = hot.take(6),
-                            onPlay = onOpen,
+                            items = heroItems,
+                            onPlay = onPlay,
                             onDetail = onOpen,
                             // 让开浮动顶栏，否则海报会顶到 tab 行上
                             topInset = TopBarH + TabBarH + statusInset,
+                            // Hero 是首屏的底图，必须通栏：把网格的内边距抵回去
+                            modifier = Modifier.bleedHorizontal(20.dp),
                         )
-                    } else {
+                    } else if (!(loading && hot.isEmpty())) {
+                        // 骨架期不放这段占位：下面已经有 HeroSkeleton 了，
+                        // 再垫 180dp 会把整块往下推，首屏多出一条黑带
                         Spacer(Modifier.height(180.dp))
                     }
                 }
@@ -301,7 +317,7 @@ private fun HomePane(
                 if (continueWatching.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Column {
-                            SectionTitle("继续观看", "接着看")
+                            SectionTitle("继续观看", "接着看", hPad = 0.dp)
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
@@ -314,9 +330,9 @@ private fun HomePane(
                     }
                 }
 
-                if (hot.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("热门推荐", "") }
-                    items(hot.take(18)) { v ->
+                if (hotRest.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("热门推荐", "", hPad = 0.dp) }
+                    items(hotRest.take(18)) { v ->
                         PosterCard(
                             title = v.name,
                             meta = listOf(v.year, v.type).filter { it.isNotBlank() }.joinToString(" · "),
@@ -331,6 +347,7 @@ private fun HomePane(
                         CatRail(
                             group = group,
                             cardW = railW,
+                            hPad = 0.dp,
                             onOpen = onOpen,
                             onMore = { onMore(group.cat) },
                         )
@@ -339,15 +356,25 @@ private fun HomePane(
 
                 // 首屏骨架：形状按真实内容摆好，数据一到直接替换
                 if (loading && hot.isEmpty()) {
+                    // Hero 也要占位，否则一进来第一屏是「一大坨空白」，
+                    // 等内容到了再整块跳出来，比骨架本身更难看。
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        Column(Modifier.padding(horizontal = 20.dp)) {
-                            SectionTitle("继续观看", "")
+                        HeroSkeleton(
+                            topInset = TopBarH + TabBarH + statusInset,
+                            modifier = Modifier.bleedHorizontal(20.dp),
+                        )
+                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        // 别再自己加 20dp：网格已经给了左右边距，
+                        // 再叠一层标题就比下面「热门推荐」多缩进 20dp。
+                        Column {
+                            SectionTitle("继续观看", "", hPad = 0.dp)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm)) {
                                 items(3) { WideSkeleton(Modifier.width(wideW)) }
                             }
                         }
                     }
-                    item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("热门推荐", "") }
+                    item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("热门推荐", "", hPad = 0.dp) }
                     items(9) { PosterSkeleton() }
                 } else if (loading) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
@@ -513,9 +540,9 @@ private fun CategoryPane(
 /* ─────────────────────── 小组件 ─────────────────────── */
 
 @Composable
-private fun SectionTitle(title: String, sub: String) {
+private fun SectionTitle(title: String, sub: String, hPad: Dp = 20.dp) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = ProomSpace.sm),
+        Modifier.fillMaxWidth().padding(horizontal = hPad, vertical = ProomSpace.sm),
         verticalAlignment = Alignment.Bottom,
     ) {
         Text(title, style = ProomType.title, color = ProomColor.text)
@@ -538,10 +565,11 @@ private fun CatRail(
     cardW: Dp,
     onOpen: (Vod) -> Unit,
     onMore: () -> Unit,
+    hPad: Dp = 20.dp,
 ) {
     Column {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            Modifier.fillMaxWidth().padding(horizontal = hPad),
             verticalAlignment = Alignment.Bottom,
         ) {
             Text(group.cat, style = ProomType.title, color = ProomColor.text)
@@ -563,7 +591,7 @@ private fun CatRail(
         }
         Spacer(Modifier.height(ProomSpace.sm))
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 20.dp),
+            contentPadding = PaddingValues(horizontal = hPad),
             horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
         ) {
             items(group.items.take(12)) { v ->
@@ -578,3 +606,63 @@ private fun CatRail(
         }
     }
 }
+
+/**
+ * 首屏 Hero 的骨架。
+ *
+ * 形状照着 `PhoneHero` 摆：左边竖版海报、右边标题/信息两行、底下两个按钮。
+ * 背景只用一层很淡的竖向渐变 —— 骨架期没有图，画模糊底反而像加载失败的脏块。
+ */
+@Composable
+private fun HeroSkeleton(topInset: Dp, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .height(300.dp + topInset)
+            .background(
+                Brush.verticalGradient(
+                    listOf(ProomColor.surface2, ProomColor.bg)
+                )
+            )
+            .padding(start = 20.dp, end = 20.dp, top = topInset, bottom = 34.dp),
+        verticalArrangement = Arrangement.Bottom,
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            SkeletonBlock(Modifier.width(96.dp).height(144.dp), radius = 14.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                SkeletonBlock(Modifier.width(56.dp), height = 10.dp, radius = 5.dp)
+                Spacer(Modifier.height(12.dp))
+                SkeletonBlock(Modifier.fillMaxWidth(0.92f), height = 22.dp, radius = 6.dp)
+                Spacer(Modifier.height(8.dp))
+                SkeletonBlock(Modifier.fillMaxWidth(0.6f), height = 22.dp, radius = 6.dp)
+                Spacer(Modifier.height(12.dp))
+                SkeletonBlock(Modifier.width(118.dp), height = 11.dp, radius = 5.dp)
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SkeletonBlock(Modifier.weight(1f), height = 44.dp, radius = ProomShape.sm)
+            SkeletonBlock(Modifier.width(96.dp), height = 44.dp, radius = ProomShape.sm)
+        }
+    }
+}
+
+/**
+ * 在「左右有内边距」的网格里重新铺满整宽。
+ *
+ * LazyVerticalGrid 的 contentPadding 会让**每个** item 都内缩，
+ * 但 Hero 这种首屏底图必须通栏 —— 测量时把约束放宽 2×pad，再整体左移 pad，
+ * 画出来就是 0..全宽，且不影响行高计算。
+ */
+private fun Modifier.bleedHorizontal(pad: Dp): Modifier =
+    this.layout { measurable, constraints ->
+        val px = pad.roundToPx()
+        val w = constraints.maxWidth + px * 2
+        val placeable = measurable.measure(
+            constraints.copy(minWidth = w, maxWidth = w)
+        )
+        // 只放宽、不偏移：item 的起点本来就在 0（contentPadding 只收窄了约束），
+        // 再 left 移一次会把 Hero 内部的 20dp 边距也吃掉，海报就贴到屏幕边缘了。
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
