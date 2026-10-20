@@ -144,12 +144,13 @@ fun MusicPlayerScreen(
             // 右边现在有两个按钮，weight 会把「正在播放」推得偏左。
             Box(Modifier.fillMaxWidth().height(56.dp)) {
                 // 返回键和搜索页/详情页同一条基准线：48dp 热区 + 24dp 图标，
-                // 图标视觉左缘落在 20dp。本页内容留白是 26dp，所以热区要往左挪 18dp，
+                // 图标视觉左缘落在 16dp（与其它页面统一）。本页内容留白是 26dp，
+                // 所以热区要往左挪 22dp，
                 // 否则会比其它页面的返回键右移 15dp，看着"缩在内容里"。
                 Box(
                     Modifier
                         .align(Alignment.CenterStart)
-                        .offset(x = (-18).dp)
+                        .offset(x = (-22).dp)
                         .size(48.dp)
                         .clip(CircleShape)
                         .clickable(onClick = onBack),
