@@ -83,6 +83,8 @@ class MusicService : Service() {
     private var cover: Bitmap? = null
     /** 封面正在为哪首歌下载 —— 用它丢弃「切歌后上一首的封面才到」的迟到结果 */
     private var coverFor = ""
+    /** 封面还没到时的兜底大图（深底 + 金色音符），保证卡片不会空着一块 */
+    private var fallbackLarge: Bitmap? = null
 
     private val tick = object : Runnable {
         override fun run() {
@@ -247,12 +249,17 @@ class MusicService : Service() {
         return NotificationCompat.Builder(this, CHANNEL)
             // 状态栏最左边那颗图标：音符，不用播放三角 ——
             // 三角和 App 图标（@android:drawable/ic_media_play）一模一样，分不清是应用还是歌
+            // 状态栏那颗：与 App 图标同一个字形（矢量，系统按 alpha 上色）
             .setSmallIcon(R.drawable.ic_n_music)
+            // 主题色：Android 5~11 会用它给图标底色上色，跟界面里的金色保持一致
+            .setColor(0xFFFFCF7A.toInt())
             .setContentTitle(track?.title ?: "放映室")
             .setContentText(track?.artist.orEmpty())
             // 歌词当前句走 subText：媒体卡里它显示在歌名下方，不占按钮位置
             .setSubText(subtitle().takeIf { it.isNotBlank() && it != track?.artist })
-            .setLargeIcon(cover)
+            // 封面是异步下载的，没到之前先给兜底图 —— 否则媒体卡的大图位置是空的，
+            // 看起来就像"两个不同的通知栏样式"
+            .setLargeIcon(cover ?: fallbackIcon())
             .setContentIntent(open)
             .addAction(prev)
             .addAction(toggle)
@@ -263,6 +270,28 @@ class MusicService : Service() {
             .setShowWhen(false)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
+    }
+
+    /**
+     * 兜底大图：深色圆角底 + 金色音符（与 App 图标同一个字形）。
+     * 只在封面下载完成前用，尺寸给 256 够系统各种展示位。
+     */
+    private fun fallbackIcon(): Bitmap {
+        fallbackLarge?.let { return it }
+        val size = 256
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1B1D24.toInt() }
+        c.drawRoundRect(RectF(0f, 0f, size.toFloat(), size.toFloat()), 24f, 24f, bg)
+        runCatching {
+            androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_n_music)?.apply {
+                setTint(0xFFFFCF7A.toInt())
+                setBounds(size / 4, size / 4, size * 3 / 4, size * 3 / 4)
+                draw(c)
+            }
+        }
+        fallbackLarge = bmp
+        return bmp
     }
 
     /** 第二行：有歌词就显示当前这句，没有才退回歌手名 */
