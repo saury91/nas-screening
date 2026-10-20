@@ -19,9 +19,21 @@ import kotlinx.serialization.json.Json
  * 那边已经做过跨源合并、去重、画质探测，App 只需要渲染。
  * （NAS 不在时才回落到本地聚合，那是后面才接的能力。）
  */
-class NasApi(private val http: Http, baseUrl: String) {
+class NasApi(
+    private val http: Http,
+    baseUrl: String,
+    /**
+     * 本地片源（来自配置包）。非空时 home / browse / search / detail 全部**直连源站**，
+     * NAS 只是配置中心，关机也不影响点播、搜索、详情。
+     */
+    private val localSources: List<com.projectionroom.shared.model.Source> = emptyList(),
+) {
 
     private val base = baseUrl.trimEnd('/')
+
+    /** 有本地片源就说明能离线跑 */
+    val offlineCapable: Boolean get() = localSources.isNotEmpty()
+    private val localCatalog by lazy { Catalog(http) }
 
     /**
      * 解析也切到后台。
@@ -88,6 +100,9 @@ class NasApi(private val http: Http, baseUrl: String) {
     suspend fun search(keyword: String): List<Vod> {
         val kw = keyword.trim()
         if (kw.isEmpty()) return emptyList()
+        if (localSources.isNotEmpty()) {
+            return localCatalog.search(kw, localSources)
+        }
         val url = "$base/api/online?kw=${kw.encodeQuery()}"
         val text = http.get(url)
         val resp = parse { json.decodeFromString<SearchResp>(text) }
@@ -104,6 +119,9 @@ class NasApi(private val http: Http, baseUrl: String) {
     /** 详情：全部线路与选集。画质标签直接用 NAS 探好的结果，不再自己猜。 */
     suspend fun detail(name: String, year: String = ""): Vod? {
         if (name.isBlank()) return null
+        if (localSources.isNotEmpty()) {
+            return localCatalog.detail(name, year, localSources)
+        }
         val url = "$base/api/detail?n=${name.encodeQuery()}&y=${year.encodeQuery()}"
         val text = http.get(url)
         val d = parse { json.decodeFromString<DetailResp>(text) }
@@ -236,6 +254,14 @@ class NasApi(private val http: Http, baseUrl: String) {
     )
 
     suspend fun home(): HomeFeed {
+        if (localSources.isNotEmpty()) {
+            // 片源在本地，首页自己拼；「继续观看 / 收藏」仍读 NAS，读不到就空着
+            val f = LocalHome.build(http, localSources)
+            // history() 已经是 Vod；NAS 关机时它就是空列表
+            val cw = runCatching { history() }.getOrDefault(emptyList())
+            val liked = runCatching { favorites() }.getOrDefault(emptyList())
+            return HomeFeed(continueWatching = cw, latest = f.latest, liked = liked, cats = f.cats)
+        }
         val d = parse { json.decodeFromString<HomeResp>(http.get("$base/api/home")) }
         return HomeFeed(
             // 只取点播记录；直播/音乐不进「继续观看」
@@ -312,6 +338,19 @@ class NasApi(private val http: Http, baseUrl: String) {
 
     /** 片库：cat 用 slug（movie/series/anime/variety/documentary） */
     suspend fun browse(cat: String, page: Int = 1, year: String = "", area: String = ""): BrowsePage {
+        if (localSources.isNotEmpty()) {
+            // slug → 中文大类（movie → 电影）：配置包里 type_id 是按中文归类的
+            val cn = Cats.nameOf(cat)
+            val items = localCatalog.browse(
+                cat = cn, page = page, year = year, area = area, sources = localSources,
+            )
+            return BrowsePage(
+                items = items,
+                total = items.size,
+                sites = localSources.size,
+                more = items.isNotEmpty(),
+            )
+        }
         val q = buildString {
             append("?cat=").append(cat.encodeQuery()).append("&pg=").append(page)
             if (year.isNotBlank()) append("&year=").append(year.encodeQuery())
