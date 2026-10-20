@@ -374,6 +374,17 @@ class MainActivity : ComponentActivity() {
                 }
 
                 /**
+                 * 给界面用的 api：**带着本地片源**。
+                 *
+                 * 影视页的分类（电影/剧集/纪录片…）走 [NasApi.browse]，
+                 * 一旦 localSources 非空，它就直连采集站，完全不碰 NAS ——
+                 * 这是"NAS 关机也能刷分类"的关键（之前这里报 Failed to connect）。
+                 */
+                val uiApi = remember(baseUrl, allSources) {
+                    NasApi(sourceHttp, baseUrl ?: "", allSources)
+                }
+
+                /**
                  * 搜索：**先本地**（直连所有源，并发合并），本地一条都没搜到才问 NAS。
                  *
                  * 这样 NAS 关机时搜索照常能用；NAS 在线时也基本用不到它。
@@ -762,7 +773,7 @@ class MainActivity : ComponentActivity() {
                                 onTab = { phoneTab = it },
                                 home = {
                                     PhoneFilm(
-                                        api = api,
+                                        api = uiApi,
                                         feed = homeFeed,
                                         loading = loading,
                                         statusInset = barTop,
