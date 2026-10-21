@@ -19,8 +19,24 @@ data class CastDevice(
     /** AVTransport 控制地址；为空说明这台设备不能推流（比如纯 MediaServer） */
     val controlUrl: String = "",
     val udn: String = "",
+    val manufacturer: String = "",
 ) {
     val canCast: Boolean get() = controlUrl.isNotBlank()
+
+    /**
+     * 是不是自家的电视端。
+     *
+     * 认这个是为了置顶 —— 一个客厅里能搜出七八台设备：电视、机顶盒、路由器上的
+     * 媒体服务、隔壁的电视。用户要投的永远是那台装着放映室的。
+     * 另外自家电视能读 `x-proom-*` 请求头，投屏成功率也更高。
+     */
+    val isOwn: Boolean
+        get() = manufacturer.contains(OWN_MANUFACTURER, ignoreCase = true) ||
+            model.contains("放映室", ignoreCase = true)
+
+    companion object {
+        const val OWN_MANUFACTURER = "Projection Room"
+    }
 }
 
 object Ssdp {
@@ -56,6 +72,7 @@ object UpnpDesc {
 
     private val FRIENDLY = Regex("<friendlyName>([^<]*)</friendlyName>", RegexOption.IGNORE_CASE)
     private val MODEL = Regex("<modelName>([^<]*)</modelName>", RegexOption.IGNORE_CASE)
+    private val VENDOR = Regex("<manufacturer>([^<]*)</manufacturer>", RegexOption.IGNORE_CASE)
     private val UDN = Regex("<UDN>([^<]*)</UDN>", RegexOption.IGNORE_CASE)
     private val SERVICE = Regex("<service>(.*?)</service>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val CONTROL = Regex("<controlURL>([^<]*)</controlURL>", RegexOption.IGNORE_CASE)
@@ -79,6 +96,7 @@ object UpnpDesc {
             model = MODEL.find(xml)?.groupValues?.get(1)?.trim().orEmpty(),
             controlUrl = if (control.isBlank()) "" else resolve(location, control),
             udn = UDN.find(xml)?.groupValues?.get(1)?.trim().orEmpty(),
+            manufacturer = VENDOR.find(xml)?.groupValues?.get(1)?.trim().orEmpty(),
         )
     }
 
@@ -110,9 +128,13 @@ object AvTransport {
         append("</s:Body></s:Envelope>")
     }
 
-    fun setUri(uri: String, title: String): String =
+    fun setUri(
+        uri: String,
+        title: String,
+        headers: Map<String, String> = emptyMap(),
+    ): String =
         envelope("SetAVTransportURI", "<CurrentURI>${esc(uri)}</CurrentURI>" +
-            "<CurrentURIMetaData>${esc(metadata(uri, title))}</CurrentURIMetaData>")
+            "<CurrentURIMetaData>${esc(metadata(uri, title, headers))}</CurrentURIMetaData>")
 
     fun play(): String = envelope("Play", "<Speed>1</Speed>")
     fun pause(): String = envelope("Pause", "")
@@ -125,17 +147,52 @@ object AvTransport {
     fun getTransportInfo(): String = envelope("GetTransportInfo", "")
     fun getPositionInfo(): String = envelope("GetPositionInfo", "")
 
-    /** 部分电视要求带 DIDL 元数据才显示片名；不带也能播，但电视上会显示成 URL */
-    fun metadata(uri: String, title: String): String = buildString {
-        append("""<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" """)
-        append("""xmlns:dc="http://purl.org/dc/elements/1.1/" """)
-        append("""xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">""")
-        append("""<item id="0" parentID="-1" restricted="1">""")
-        append("<dc:title>").append(esc(title)).append("</dc:title>")
-        append("<upnp:class>object.item.videoItem</upnp:class>")
-        append("""<res protocolInfo="http-get:*:video/mp4:*">""").append(esc(uri)).append("</res>")
-        append("</item></DIDL-Lite>")
+    /**
+     * DIDL 元数据。
+     *
+     * 部分电视要求带它才显示片名；不带也能播，但电视上会显示成一串 URL。
+     *
+     * [headers] 会写成 `x-proom-*` 扩展属性跟着 `<res>` 一起过去。标准 DLNA 没有
+     * 「传请求头」这个概念，但采集站的 m3u8 大多校验 Referer/UA，不带就是 403 ——
+     * 手机能播、投到电视黑屏，绝大多数是这个原因。自家接收端会读这几个属性，
+     * 第三方设备不认识就忽略（它们本来也不校验这些头）。
+     */
+    fun metadata(uri: String, title: String, headers: Map<String, String> = emptyMap()): String =
+        buildString {
+            append("""<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" """)
+            append("""xmlns:dc="http://purl.org/dc/elements/1.1/" """)
+            append("""xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">""")
+            append("""<item id="0" parentID="-1" restricted="1">""")
+            append("<dc:title>").append(esc(title)).append("</dc:title>")
+            append("<upnp:class>object.item.videoItem</upnp:class>")
+            append("""<res protocolInfo="http-get:*:${mimeOf(uri)}:*"""")
+            headers["User-Agent"]?.let { append(""" x-proom-ua="${esc(it)}"""") }
+            headers["Referer"]?.let { append(""" x-proom-ref="${esc(it)}"""") }
+            append(">").append(esc(uri)).append("</res>")
+            append("</item></DIDL-Lite>")
+        }
+
+    /**
+     * 按地址猜 MIME。
+     *
+     * 以前写死 `video/mp4`，可实际推出去的十有八九是 m3u8。严格的接收端会照着
+     * protocolInfo 选解码器，声明成 mp4 就成了「能连上、放不出来」。
+     */
+    fun mimeOf(uri: String): String {
+        val path = uri.substringBefore('?').substringBefore('#').lowercase()
+        return when {
+            path.endsWith(".m3u8") -> "application/vnd.apple.mpegurl"
+            path.endsWith(".mpd") -> "application/dash+xml"
+            path.endsWith(".m4v") || path.endsWith(".mp4") -> "video/mp4"
+            path.endsWith(".mkv") -> "video/x-matroska"
+            path.endsWith(".flv") -> "video/x-flv"
+            path.endsWith(".ts") -> "video/mp2t"
+            path.endsWith(".webm") -> "video/webm"
+            else -> "video/mp4"
+        }
     }
+
+
 
     private val STATE = Regex("<CurrentTransportState>([^<]*)</CurrentTransportState>", RegexOption.IGNORE_CASE)
     private val REL = Regex("<RelTime>([^<]*)</RelTime>", RegexOption.IGNORE_CASE)
@@ -166,4 +223,9 @@ object AvTransport {
     fun esc(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         .replace("\"", "&quot;").replace("'", "&apos;")
+
+    /** 只反转义 [esc] 会产出的那五个，顺序与 [esc] 相反 */
+    fun unesc(s: String): String = s
+        .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+        .replace("&apos;", "'").replace("&amp;", "&")
 }

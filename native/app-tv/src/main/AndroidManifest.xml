@@ -7,7 +7,11 @@
     <!-- 音乐前台服务（电视上虽然没有通知栏，但 MusicService 仍是播放的持有者） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- 投屏接收端常驻：DMR 得比 Activity 活得久，否则回一趟桌面就搜不到了 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 后台拉不起播放页时用全屏通知兜底 -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- 电视：走 Leanback 启动器，不要求触屏 -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -58,5 +62,15 @@
             android:exported="false"
             android:screenOrientation="landscape"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+
+        <!-- 投屏接收端：前台服务，App 退到后台也依然能被手机发现 -->
+        <service
+            android:name="com.projectionroom.app.cast.CastService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="dlna-renderer" />
+        </service>
     </application>
 </manifest>

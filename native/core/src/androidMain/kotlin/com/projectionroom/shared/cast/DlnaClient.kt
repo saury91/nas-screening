@@ -23,12 +23,15 @@ import java.util.concurrent.TimeUnit
  * 为什么不引 cling / jupnp：这两个库一个停更十年、一个要 Android 4.x 兼容层，
  * 体积几十万行，而我们只用 AVTransport 的 5 个动作。
  */
-class DlnaClient(
+class DlnaClient {
+
+    // 不放在构造函数参数里：ui-media 调 DlnaClient() 时会去解析签名，
+    // 而咱们没把 okhttp 暴露给上层模块（implementation 不传递），
+    // 「Cannot access class okhttp3.OkHttpClient」就是这么来的。
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
-        .build(),
-) {
+        .build()
 
     private val xml = "text/xml; charset=\"utf-8\"".toMediaType()
 
@@ -79,6 +82,9 @@ class DlnaClient(
                 self.isNotBlank() && d.udn == self
             }
             .distinctBy { it.udn.ifBlank { it.location } }
+            // 自家电视置顶：一个客厅里能搜出七八台设备，用户要投的永远是装着
+            // 放映室的那台；排在第一位就少一次辨认
+            .sortedByDescending { it.isOwn }
     }
 
     /** 拉设备描述并解析出 AVTransport 控制地址 */
@@ -92,10 +98,15 @@ class DlnaClient(
         }.getOrNull()
     }
 
-    suspend fun cast(device: CastDevice, url: String, title: String): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun cast(
+        device: CastDevice,
+        url: String,
+        title: String,
+        headers: Map<String, String> = emptyMap(),
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             // 先设地址再播：顺序反了电视会播上一个内容
-            soap(device, "SetAVTransportURI", AvTransport.setUri(url, title)).getOrThrow()
+            soap(device, "SetAVTransportURI", AvTransport.setUri(url, title, headers)).getOrThrow()
             soap(device, "Play", AvTransport.play()).getOrThrow()
             Unit
         }

@@ -107,6 +107,30 @@ private sealed interface Screen {
     data class Pair(val from: Screen = Home) : Screen
     /** 手机端：扫电视上的二维码 */
     data class ScanPair(val from: Screen = Home) : Screen
+
+    /**
+     * 投屏遥控器页。
+     *
+     * 独立一屏而不是播放器里的浮层：投上去以后本地播放器整个销毁（声音只从电视出），
+     * 页面再留着进度手势、亮度、锁定就没有意义了。
+     *
+     * 只带「哪个设备」和「播到第几集」，进度/倍速/音量全部由电视回报 ——
+     * 手机记一份必然和电视对不上。
+     */
+    data class CastRemote(
+        val vod: Vod,
+        val lineIndex: Int,
+        val epIndex: Int,
+        val live: Boolean,
+        val liveUrls: List<List<String>>,
+        /** NAS 名录里的电视；为空说明走的是局域网 DLNA */
+        val nasId: String = "",
+        val nasName: String = "",
+        /** DLNA 设备描述地址与名字，nasId 为空时有效 */
+        val dlnaLocation: String = "",
+        val dlnaName: String = "",
+        val from: Screen = Home,
+    ) : Screen
 }
 
 private data class LivePlay(
@@ -145,7 +169,7 @@ private fun depth(s: Screen): Int = when (s) {
     is Screen.Browse, is Screen.Search, is Screen.Playlist, is Screen.Connect, is Screen.Mine -> 1
     is Screen.Settings, is Screen.Pair, is Screen.ScanPair -> 2
     is Screen.Detail -> 2
-    is Screen.Play, is Screen.MusicPlayer -> 3
+    is Screen.Play, is Screen.MusicPlayer, is Screen.CastRemote -> 3
 }
 
 /** 没配置 NAS 时的占位地址：本地片源用不到它，只是为了构造对象不崩 */
@@ -153,14 +177,6 @@ private const val OFFLINE_BASE = "http://127.0.0.1:1"
 
 
 class MainActivity : ComponentActivity() {
-
-    /** 电视端 DLNA 接收器：App 在前台时对外可见，退出即关 */
-    private val dmr by lazy {
-        com.projectionroom.app.cast.DmrServer(
-            ctx = this,
-            friendlyName = "放映室 · ${android.os.Build.MODEL}",
-        )
-    }
 
     /**
      * 联调用：广播直接触发投屏（仅 debuggable 包）。
@@ -203,10 +219,6 @@ class MainActivity : ComponentActivity() {
         }, filter, android.content.Context.RECEIVER_EXPORTED)
     }
 
-    override fun onDestroy() {
-        dmr.stop()
-        super.onDestroy()
-    }
 
 
     companion object {
@@ -391,6 +403,19 @@ class MainActivity : ComponentActivity() {
                  */
                 val rawApi = remember(baseUrl) {
                     NasApi(OkHttpHttp(timeoutSeconds = 12), baseUrl = baseUrl ?: OFFLINE_BASE)
+                }
+                // 投屏走 NAS 桥接：这样手机在 4G 下也能投到家里的电视。
+                // 读超时给 35 秒 —— 电视端是长轮询（服务端挂 8 秒），
+                // 用 rawApi 那个 12 秒的会被自己掐断。
+                LaunchedEffect(baseUrl) {
+                    // remember 的委托属性没法直接 smart cast，先落到局部变量
+                    val base = baseUrl ?: return@LaunchedEffect
+                    if (base.isBlank()) return@LaunchedEffect
+                    com.projectionroom.shared.cast.CastHub.install(
+                        http = OkHttpHttp(timeoutSeconds = 35),
+                        baseUrl = base,
+                        selfId = DeviceId.get(this@MainActivity),
+                    )
                 }
                 // ── 本地配置包 ──
                 // 片源清单、直播表、版本号都在这里。启动时先读本地（开机就能用），
@@ -917,6 +942,9 @@ class MainActivity : ComponentActivity() {
                     screen = when (val cur = screen) {
                         is Screen.Detail -> cur.from
                         is Screen.Play -> cur.from
+                        // 遥控页的返回 = 退出投屏回到上一级，不是回播放页：
+                        // 想接着在手机上看，页内有专门的「拿回手机看」
+                        is Screen.CastRemote -> cur.from
                         is Screen.MusicPlayer -> cur.from
                         is Screen.Search -> cur.from
                         is Screen.Browse -> cur.from
@@ -1697,7 +1725,47 @@ class MainActivity : ComponentActivity() {
                                         }.onSuccess { lib = it }
                                     }
                                 },
+                                // 投上去就把这一页换掉：PlayerScreen 一销毁，本地播放器
+                                // 跟着 release，缓冲和声音都停，手机彻底变成遥控器
+                                onCastStarted = { line, ep, nas, dlna ->
+                                    screen = Screen.CastRemote(
+                                        vod = s.vod,
+                                        lineIndex = line,
+                                        epIndex = ep,
+                                        live = isLive,
+                                        liveUrls = s.liveUrls,
+                                        nasId = nas?.id.orEmpty(),
+                                        nasName = nas?.name.orEmpty(),
+                                        dlnaLocation = dlna?.location.orEmpty(),
+                                        dlnaName = dlna?.name.orEmpty(),
+                                        from = s.from,
+                                    )
+                                },
                                 onBack = { screen = s.from },
+                            )
+                        }
+
+                        is Screen.CastRemote -> {
+                            // 只传 id：设备状态由遥控页自己按 id 轮询，
+                            // 传快照的话电视一重连，页面就永远显示离线
+                            val dlna = if (s.dlnaLocation.isNotBlank()) {
+                                com.projectionroom.shared.cast.CastDevice(
+                                    name = s.dlnaName,
+                                    location = s.dlnaLocation,
+                                )
+                            } else null
+
+                            com.projectionroom.ui.screen.CastRemoteScreen(
+                                vod = s.vod,
+                                startLine = s.lineIndex,
+                                startEp = s.epIndex,
+                                live = s.live,
+                                liveUrls = s.liveUrls,
+                                nasId = s.nasId,
+                                nasName = s.nasName,
+                                dlnaTarget = dlna,
+                                // 退出后回上一个页面（投屏已在页内 stop 掉）
+                                onExitCast = { screen = s.from },
                             )
                         }
 

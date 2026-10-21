@@ -5,6 +5,7 @@ import android.net.wifi.WifiManager
 import com.projectionroom.shared.cast.Dmr
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -31,6 +32,14 @@ class DmrServer(
     private val ctx: Context,
     private val friendlyName: String = "放映室 TV",
     private val port: Int = 49520,
+    /**
+     * 收到 SetAVTransportURI 时怎么办。
+     *
+     * 由宿主注入（电视端是 [CastService]）而不是在这里直接 startActivity：
+     * 服务在 App 退到后台后仍然活着，从服务里拉 Activity 会被 Android 10+
+     * 的后台启动限制拦掉，兜底逻辑（发通知让用户点）只有宿主清楚该怎么做。
+     */
+    private val onPlay: ((String, String, Map<String, String>) -> Unit)? = null,
 ) {
 
     private var http: ServerSocket? = null
@@ -55,19 +64,17 @@ class DmrServer(
 
     fun start(scope: CoroutineScope) {
         if (job != null) return
-        val ip = localIp() ?: return
+        val ip = localIp() ?: run {
+            android.util.Log.e("CASTDBG", "dmr: 取不到局域网 IP，接收端不启动")
+            return
+        }
+        android.util.Log.i("CASTDBG", "dmr: start ip=$ip port=$port")
         // 登记自己的 UDN：手机端的投屏列表靠它把自己剔掉
         com.projectionroom.shared.cast.CastIdentity.udn = uuid
         val location = "http://$ip:$port/description.xml"
 
         // 收到 SetAVTransportURI 就直接拉起播放页（电视端没有"先确认再播"的交互）
-        CastReceiver.onPlay = { url, title ->
-            if (url.isNotBlank()) {
-                runCatching {
-                    ctx.startActivity(CastPlayActivity.intent(ctx, url, title))
-                }
-            }
-        }
+        CastReceiver.onPlay = onPlay
         job = scope.launch(Dispatchers.IO) { serveHttp() }
         job2 = scope.launch(Dispatchers.IO) { answerSearch(location) }
     }
@@ -78,16 +85,19 @@ class DmrServer(
         runCatching { ssdp?.close() }
         runCatching { lock?.release() }
         http = null; ssdp = null; job = null; job2 = null
+        CastReceiver.onPlay = null
         if (com.projectionroom.shared.cast.CastIdentity.udn == uuid) {
             com.projectionroom.shared.cast.CastIdentity.udn = ""
         }
     }
 
-    private fun serveHttp() {
+    private suspend fun serveHttp() {
         val srv = runCatching { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(port)) } }
+            .onFailure { android.util.Log.e("CASTDBG", "dmr: bind $port 失败", it) }
             .getOrNull() ?: return
         http = srv
-        while (job?.isActive == true && !srv.isClosed) {
+        android.util.Log.i("CASTDBG", "dmr: http 已在 $port 监听")
+        while (coroutineContext.isActive && !srv.isClosed) {
             val c = runCatching { srv.accept() }.getOrNull() ?: continue
             runCatching {
                 c.use { sock ->
@@ -159,8 +169,12 @@ class DmrServer(
 
     private fun handleSoap(action: String, body: String): String = when (action) {
         "SetAVTransportURI" -> {
+            val meta = Dmr.arg(body, "CurrentURIMetaData")
             CastReceiver.uri = Dmr.arg(body, "CurrentURI").orEmpty()
-            CastReceiver.title = Dmr.arg(body, "CurrentURIMetaData")
+            // 推流方把播放器用的 UA/Referer 写在 DIDL 的 x-proom-* 属性里，
+            // 读回来交给播放页，否则源站校验的 m3u8 在电视上直接 403
+            CastReceiver.uriHeaders = meta?.let { Dmr.headersOf(it) } ?: emptyMap()
+            CastReceiver.title = meta
                 ?.let { Regex("<dc:title>(.*?)</dc:title>").find(it)?.groupValues?.get(1) }
                 ?.let { Dmr.unesc(it) }
                 ?.takeIf { it.isNotBlank() }
@@ -169,9 +183,13 @@ class DmrServer(
             CastReceiver.state = "STOPPED"
             val u = CastReceiver.uri
             val t = CastReceiver.title
-            android.util.Log.i("CASTDBG", "dmr set-uri uri=$u title=$t hasCb=${CastReceiver.onPlay != null}")
+            val h = CastReceiver.uriHeaders
+            android.util.Log.i(
+                "CASTDBG",
+                "dmr set-uri uri=$u title=$t headers=${h.keys} hasCb=${CastReceiver.onPlay != null}",
+            )
             main.post {
-                runCatching { CastReceiver.onPlay?.invoke(u, t) }
+                runCatching { CastReceiver.onPlay?.invoke(u, t, h) }
                     .onFailure { android.util.Log.e("CASTDBG", "dmr onPlay failed", it) }
             }
             Dmr.setUriResponse()
@@ -213,7 +231,7 @@ class DmrServer(
         else -> Dmr.error(401, "Invalid Action")
     }
 
-    private fun answerSearch(location: String) {
+    private suspend fun answerSearch(location: String) {
         runCatching {
             val wifi = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             lock = wifi.createMulticastLock("proom-dmr").apply { setReferenceCounted(false); acquire() }
@@ -227,7 +245,7 @@ class DmrServer(
         }.getOrNull() ?: return
         ssdp = sock
         val buf = ByteArray(2048)
-        while (job2?.isActive == true && !sock.isClosed) {
+        while (coroutineContext.isActive && !sock.isClosed) {
             val pkt = DatagramPacket(buf, buf.size)
             val ok = runCatching { sock.receive(pkt) }.isSuccess
             if (!ok) continue
