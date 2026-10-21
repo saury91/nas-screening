@@ -19,6 +19,21 @@ from server.services import auth, catalog, live as live_svc, music, musicbox
 from server.services.qbt import QBT
 
 
+def pic_host_loop():
+    """每半小时重探一次各站的封面图床。
+
+    图床会临时或永久挂掉（实测一天之内挂了 6 个），
+    启动时探一次不够，隔一段时间重探才能自愈。
+    """
+    time.sleep(120)         # 让启动那次全量探测先跑完
+    while True:
+        try:
+            catalog.refresh_pic_hosts()
+        except Exception as e:
+            log("图床探测失败：%s" % str(e)[:160])
+        time.sleep(1800)
+
+
 def live_auto_loop():
     """每 30 分钟看一次是否到了每日维护时间。
 
@@ -124,8 +139,9 @@ def main():
 
     srv = Srv((HOST, PORT), Handler)
 
-    # 首页推荐、分类映射、直播频道都在后台预热，避免第一次打开干等
-    for fn in (catalog.refresh_recommend_async, catalog.catmap_warm):
+    # 首页推荐、分类映射、封面图床、直播频道都在后台预热，避免第一次打开干等
+    for fn in (catalog.refresh_recommend_async, catalog.catmap_warm,
+               catalog.refresh_pic_hosts):
         try:
             threading.Thread(target=fn, daemon=True).start()
         except Exception:
@@ -138,6 +154,8 @@ def main():
 
     # 每日直播维护：抓源 → 探活 → 清理连续失效的频道
     threading.Thread(target=live_auto_loop, daemon=True).start()
+    # 封面图床定时重探
+    threading.Thread(target=pic_host_loop, daemon=True).start()
     # 在线歌单推荐预热
     threading.Thread(target=music_warm, daemon=True).start()
     # 电视端自动发现

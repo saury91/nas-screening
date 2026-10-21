@@ -14,13 +14,17 @@ case "$KIND" in
   tv|phone) ;;
   *) echo "用法: ./tools/publish-apk.sh [tv|phone]  （默认 tv）"; exit 1 ;;
 esac
-APK="android/app/build/outputs/apk/$KIND/release/app-$KIND-release.apk"
-META="android/app/build/outputs/apk/$KIND/release/output-metadata.json"
+case "$KIND" in
+  tv) MODULE="app-tv" ;;
+  phone) MODULE="app-phone" ;;
+esac
+APK="native/$MODULE/build/outputs/apk/release/$MODULE-release.apk"
+META="native/$MODULE/build/outputs/apk/release/output-metadata.json"
 OUT="data/apps"
 
 if [ ! -f "$APK" ]; then
   echo "找不到 APK：$APK"
-  echo "先构建：cd android && gradle assemble${KIND^}Release"
+  echo "先构建：cd native && ./gradlew :$MODULE:assembleRelease"
   exit 1
 fi
 

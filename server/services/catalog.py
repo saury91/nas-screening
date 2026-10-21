@@ -5,11 +5,13 @@ import json
 import re
 import threading
 import time
+import urllib.error
+import urllib.request
 
 from ..cache import cache_age, cache_peek, cache_put, cache_valid
 from ..config import (BROWSE_SITES, CAT_ORDER, CATMAP_TTL, FALLBACK_HOT,
                       RECOMMEND_TTL, SEARCH_DEADLINE, TIMEOUT)
-from ..db import dbrun
+from ..db import dbrun, pref_json, pref_set_json
 from ..log import log
 from ..net import http_get, raw_get
 from ..providers import active_sites
@@ -71,21 +73,200 @@ def _cat(t):
     return ""
 
 
+# ── 封面图床可用性 ───────────────────────────────────────────
+# 各采集站有各自的图床（暴风 p.bfvp26.com、量子 img.lzipic.com、极速
+# disabled.invalid……），偶尔某个图床会整体连不上（实测 disabled.invalid
+# 的 443 被 RST），那一站的封面就全是空白。同一部片在别的站也有，封面域名
+# 不同，所以这里记住每个图床还能不能用，选封面时优先挑能连上的。
+#
+# 判定用 TLS 握手而不是 HTTP 请求：图床根路径 404 也算可用，握手失败才是
+# 真的连不上。结论缓存半小时并落库，重启后不用重新等。
+
+_PIC_TTL = 1800
+_PIC_STATE = {}          # host -> {"ok": bool, "at": ts}
+_PIC_LK = threading.Lock()
+_PIC_LOADED = False
+_PIC_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=8, thread_name_prefix="pic-probe")
+
+
+def _pic_host(url):
+    """取 URL 的 host[:port]，空串表示不是绝对地址"""
+    if "://" not in url:
+        return ""
+    rest = url.split("://", 1)[1]
+    return rest.split("/", 1)[0].strip().lower()
+
+
+def _pic_known(host):
+    """已知结论返回 True/False；没探测过或结论过期返回 None"""
+    if not host:
+        return None
+    st = _PIC_STATE.get(host)
+    if not st:
+        return None
+    if time.time() - st.get("at", 0) > _PIC_TTL:
+        return None
+    return st.get("ok")
+
+
+def _pic_load():
+    global _PIC_LOADED
+    if _PIC_LOADED:
+        return
+    _PIC_LOADED = True
+    try:
+        d = pref_json("pic.hosts", {}) or {}
+        for h, st in d.items():
+            if isinstance(st, dict) and "ok" in st:
+                _PIC_STATE[h] = {"ok": bool(st["ok"]), "at": float(st.get("at") or 0)}
+    except Exception:
+        pass
+
+
+def _pic_probe(host):
+    """对图床发一个真实请求：只要有 HTTP 响应（哪怕 404）就算可用。
+
+    不能用 TLS 握手判断 —— 实测 disabled.invalid 这类 Cloudflare 站点握手能过，
+    但随后的 HTTP 请求被 RST，用户看到的还是空封面。
+    """
+    try:
+        port = int(host.split(":")[1]) if ":" in host else 443
+        scheme = "https" if port == 443 else "http"
+        req = urllib.request.Request(
+            f"{scheme}://{host}/",
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "image/*,*/*"},
+        )
+        with urllib.request.urlopen(req, timeout=4) as r:
+            r.read(64)
+        return True
+    except urllib.error.HTTPError:
+        return True       # 403/404 也说明这台机器连得上
+    except Exception:
+        return False
+
+
+def _pic_store(host, ok):
+    with _PIC_LK:
+        _PIC_STATE[host] = {"ok": bool(ok), "at": time.time()}
+        snapshot = dict(_PIC_STATE)
+    try:
+        pref_set_json("pic.hosts", snapshot)
+    except Exception:
+        pass
+
+
+def _pic_warm(hosts, timeout=3.0):
+    """并发探测一批未知域名，最多等 timeout 秒；没回来的当未知（下次再说）"""
+    todo = [h for h in dict.fromkeys(hosts) if h and _pic_known(h) is None]
+    if not todo:
+        return
+    futs = {_PIC_POOL.submit(_pic_probe, h): h for h in todo}
+    done, pending = concurrent.futures.wait(list(futs), timeout=timeout)
+    for f in done:
+        try:
+            _pic_store(futs[f], f.result())
+        except Exception:
+            pass
+    for f in pending:
+        f.cancel()
+
+
+def _pick_cover(pics):
+    """同一部片的多个源各有封面，挑一个图床能连上的。
+
+    顺序：已确认可用 → 还没探测过（乐观沿用原行为）→ 已知不可用。
+    只有候选 ≥2 才会同步探测一次，单封面不会为它多等 3 秒。
+    """
+    pics = [p for p in dict.fromkeys(pics) if (p or "").strip()]
+    if not pics:
+        return ""
+    _pic_load()
+    if len(pics) > 1:
+        _pic_warm([_pic_host(p) for p in pics])
+    for p in pics:
+        if _pic_known(_pic_host(p)) is True:
+            return p
+    for p in pics:
+        if _pic_known(_pic_host(p)) is None:
+            return p
+    return pics[0]
+
+
+def bad_pic_hosts():
+    """当前判定为连不上的封面图床，随配置包下发。
+
+    App 的片库是直连采集站拉的（不走 /api/browse），拿不到这边择优过的封面，
+    所以把结论一并给它：同一个域名下它就不用再去试一遍了。
+    """
+    _pic_load()
+    return sorted(h for h, st in _PIC_STATE.items() if st.get("ok") is False)
+
+
+def refresh_pic_hosts(timeout=40.0):
+    """把各采集站实际在用的封面图床都探一遍。
+
+    App 直连采集站时，黑名单必须由服务端给全 —— 只靠 /api/browse 沿途碰到的
+    那几个域名不够，容易被某个只在 App 侧出现的图床漏掉。
+    各站拉一页样本即可拿到它们的图床域名，几十个域名并发探测，几十秒就能跑完。
+    """
+    def one(s):
+        try:
+            items = _qs(s, "ac=detail&pg=1")
+        except Exception:
+            return set()
+        out = set()
+        for v in items[:20]:
+            h = _pic_host((v.get("pic") or "").strip())
+            if h:
+                out.add(h)
+        return out
+
+    hosts = set()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            for hs in ex.map(one, active_sites()):
+                hosts |= hs
+    except Exception:
+        pass
+    if hosts:
+        _pic_warm(sorted(hosts), timeout=timeout)
+    return bad_pic_hosts()
+
+
 def _dedup(items, limit=0):
     """同名同年份只留一条。
 
     片名里带不带年份、括号打不打，各家源都不一样（「夺命狂花」vs「夺命狂花 2026」），
     所以把名字尾部的年份剥掉再比，年份统一看 year 字段——
     这样既不漏合并，也不会把「沙丘 1984」和「沙丘 2021」当成同一部。
+
+    留下的那条沿用第一份数据，但封面会在同片各源的候选里挑一个能打开的
+    （见 _pick_cover）：某个图床整体连不上时，不至于整页都是空白卡。
     """
-    seen, out = set(), []
+    groups, order = {}, []
     for it in items:
         k = _norm_key(it.get("name", ""))
         k = re.sub(r"(19|20)\d{2}$", "", k) or k
+        if not k:
+            continue
         key = (k, str(it.get("year") or "").strip())
-        if k and key not in seen:
-            seen.add(key)
-            out.append(it)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(it)
+
+    out = []
+    for key in order:
+        g = groups[key]
+        first = g[0]
+        pics = [(x.get("pic") or "").strip() for x in g]
+        if any(pics):
+            cover = _pick_cover(pics)
+            if cover and cover != (first.get("pic") or ""):
+                first = dict(first)
+                first["pic"] = cover
+        out.append(first)
     return out[:limit] if limit else out
 
 
@@ -372,13 +553,17 @@ def search_online(kw, deadline=None):
         if k not in merged:
             merged[k] = {
                 "name": r["name"], "year": r["year"], "pic": r["pic"],
-                "type": r["type"], "sources": [],
+                "type": r["type"], "sources": [], "pics": [],
                 "desc": "", "actor": "", "director": "", "area": "",
                 "lang": "", "score": "", "pubdate": "", "total": "",
             }
         m = merged[k]
-        # 封面/年份/类型/演员… 取第一个非空的
-        for f in ("pic", "year", "type", "actor", "director",
+        # 每个源的封面都留着，最后统一挑一个图床能连上的
+        pp = (r.get("pic") or "").strip()
+        if pp and pp not in m["pics"]:
+            m["pics"].append(pp)
+        # 年份/类型/演员… 取第一个非空的
+        for f in ("year", "type", "actor", "director",
                   "area", "lang", "pubdate", "total"):
             if not m.get(f) and r.get(f):
                 m[f] = r[f]
@@ -399,6 +584,7 @@ def search_online(kw, deadline=None):
         # 画质高的排前面（默认就会选中最高画质的线路），同画质再看站点与集数
         it["sources"].sort(key=lambda s: (Q_RANK.get(s.get("q") or "", 9),
                                           s["site"] != "暴风资源", -s["count"]))
+        it["pic"] = _pick_cover(it.pop("pics", []) or [it.get("pic") or ""])
         it["ep_count"] = max(s["count"] for s in it["sources"])
         it["site_count"] = len(it["sources"])
         it["rel"] = _relevance(it["name"], kws)

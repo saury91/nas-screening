@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths>
-    <!-- 升级包下到 cache/apk/，只把这一块暴露给安装器 -->
-    <cache-path name="apk" path="apk/" />
-</paths>

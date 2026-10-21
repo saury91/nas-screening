@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  单色层（monochrome）。Android 13+ 用它画：
+    · 桌面「主题图标」着色
+    · **状态栏的媒体播放指示器**（正在播放时那颗小图标）
+  没有这一层时，系统会拿一个通用图形兜底 —— 表现就是"通知栏图标和 App 不一样"。
+  这一层只能是单色遮罩、没法做挖空，所以用线框播放键 + 实心音符表达同一个意思。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54"
+        android:scaleX="0.74" android:scaleY="0.74">
+        <path
+            android:pathData="M37,25 L85,54 L37,83 Z"
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="7"
+            android:strokeLineJoin="round" />
+        <group android:translateX="41" android:translateY="39"
+            android:scaleX="1.2" android:scaleY="1.2">
+            <path
+                android:pathData="M12,3v10.55A4,4 0 1,0 14,17V7h4V3h-6z"
+                android:fillColor="#FFFFFFFF" />
+        </group>
+    </group>
+</vector>

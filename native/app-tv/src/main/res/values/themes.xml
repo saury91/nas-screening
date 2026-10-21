@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 去掉 ActionBar 但**保留状态栏**：Fullscreen 会把系统状态栏整个藏掉，
+         导致时间/电量消失、内容顶到挖孔里。沉浸感靠界面自己画渐变，
+         而不是把系统 UI 关掉。 -->
+    <style name="Theme.Proom" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#07080B</item>
+        <item name="android:statusBarColor">#07080B</item>
+        <item name="android:navigationBarColor">#07080B</item>
+    </style>
+</resources>

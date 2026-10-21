@@ -1,8 +1,7 @@
 name: native
 
 # 原生端（KMP）的回归闸门。
-# 旧的 android.yml 只覆盖 android/**（WebView 版），native/** 一直没人跑 ——
-# 数据层的合并/解析逻辑改动最频繁，也最容易在别处悄悄坏掉。
+# 数据层的合并/解析逻辑改动最频繁，也最容易在别处悄悄坏掉，所以单测必跑。
 on:
   push:
     paths:
@@ -41,14 +40,16 @@ jobs:
 
       # 纯 Kotlin，不碰 Android，几十秒出结果 —— 先失败先暴露
       - name: 数据层单测
-        run: ./gradlew :shared:jvmTest --no-daemon
+        run: ./gradlew :core:jvmTest --no-daemon
 
       - name: 编译 debug APK
-        run: ./gradlew :app-android:assembleDebug --no-daemon
+        run: ./gradlew :app-tv:assembleDebug :app-phone:assembleDebug --no-daemon
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
           name: native-debug-apk
-          path: native/app-android/build/outputs/apk/debug/*.apk
+          path: |
+            native/app-tv/build/outputs/apk/debug/*.apk
+            native/app-phone/build/outputs/apk/debug/*.apk
           if-no-files-found: error
