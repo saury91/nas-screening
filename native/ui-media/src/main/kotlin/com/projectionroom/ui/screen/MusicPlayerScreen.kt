@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -296,9 +297,11 @@ fun MusicPlayerScreen(
                     // 上下全是空，看着像缩略图。现在按「宽度减边距」算，
                     // 再用高度的 52% 兜底，避免矮屏上把歌词和进度条顶出去。
                     val cfg = LocalConfiguration.current
+                    // 0.44 会把竖屏塞满：歌词区被压到 30dp 上下，两行字只剩几像素。
+                    // 0.34 让出约 100dp 给歌词（3 行以上），封面仍然接近屏宽
                     val coverSize = minOf(
                         cfg.screenWidthDp.dp - 72.dp,
-                        cfg.screenHeightDp.dp * 0.44f,
+                        cfg.screenHeightDp.dp * 0.34f,
                     )
                     CoverArt(track.cover, coverSize)
                     Spacer(Modifier.height(ProomSpace.lg))
@@ -316,7 +319,7 @@ fun MusicPlayerScreen(
                         current = MusicBox.lyricAt,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 80.dp)
+                            .heightIn(min = 96.dp)
                             .weight(1f),
                     )
                 }
@@ -750,9 +753,16 @@ private fun LyricsPane(
     }
     val state = rememberLazyListState()
     LaunchedEffect(current, lines) {
-        if (current >= 0) {
-            state.animateScrollToItem((current - 2).coerceAtLeast(0))
-        }
+        if (current < 0 || lines.isEmpty()) return@LaunchedEffect
+        // 等这一帧量完再算偏移：首帧 layoutInfo 的 viewport 高度还是 0
+        withFrameNanos { }
+        val vp = state.layoutInfo.viewportSize.height
+        val row = state.layoutInfo.visibleItemsInfo.firstOrNull()?.size ?: 0
+        // 固定「往上退 2 行」在不同面板高度下完全不是居中：面板矮时当前句会被顶出屏幕。
+        // 按实际视口和行高算居中偏移。注意 scrollOffset 是正数把条目往上推，
+        // 要居中得取负值，否则当前句会顶到面板上沿被切掉一半
+        val offset = if (vp > 0 && row > 0) -((vp - row) / 2) else 0
+        state.animateScrollToItem(current, offset)
     }
     LazyColumn(
         state = state,

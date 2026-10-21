@@ -23,10 +23,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -72,7 +75,19 @@ fun TvHero(
     onDetail: (Vod) -> Unit,
 ) {
     if (items.isEmpty()) return
-    val vod = items[index.coerceIn(0, items.lastIndex)]
+
+    // 自动轮播：遥控器焦点停在 Hero 的按钮上时不动 ——
+    // 否则用户正要去按「立即播放」，底下的片子会被换掉。
+    var cur by remember { mutableIntStateOf(index.coerceAtLeast(0)) }
+    var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(items.size) {
+        if (items.size < 2) return@LaunchedEffect
+        while (true) {
+            delay(7_000)
+            if (!focused) cur = (cur + 1) % items.size
+        }
+    }
+    val vod = items[cur.coerceIn(0, items.lastIndex)]
 
     Box(Modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(0.dp))) {
         // ── 背景三层 ──
@@ -177,8 +192,13 @@ fun TvHero(
                         primary = true,
                         focusRequester = playFocusRequester,
                         upTarget = navFocusRequester,
+                        onFocus = { focused = it },
                     ) { onPlay(vod) }
-                    HeroButton("详情", upTarget = navFocusRequester) { onDetail(vod) }
+                    HeroButton(
+                        "详情",
+                        upTarget = navFocusRequester,
+                        onFocus = { focused = it },
+                    ) { onDetail(vod) }
                 }
             }
 
@@ -193,12 +213,19 @@ fun TvHero(
                     .background(ProomColor.card)
             ) {
                 if (vod.pic.isNotBlank()) {
-                    RemoteImage(
-                        model = vod.pic,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    // 自动轮播时海报不能硬切：和背景一样淡入淡出
+                    AnimatedContent(
+                        targetState = vod.pic,
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "hero-poster",
+                    ) { pic ->
+                        RemoteImage(
+                            model = pic,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
         }
@@ -212,7 +239,7 @@ fun TvHero(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 repeat(items.size.coerceAtMost(8)) { i ->
-                    val on = i == index
+                    val on = i == cur
                     Box(
                         Modifier
                             .height(3.dp)
@@ -235,6 +262,8 @@ private fun HeroButton(
     primary: Boolean = false,
     focusRequester: FocusRequester? = null,
     upTarget: FocusRequester? = null,
+    /** 焦点进出时通知上层：自动轮播要据此暂停，不能把用户要按的那张换掉 */
+    onFocus: (Boolean) -> Unit = {},
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -254,7 +283,10 @@ private fun HeroButton(
                     Modifier.border(2.dp, if (primary) Color.White else ProomColor.accent, shape)
                 } else Modifier
             )
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                onFocus(it.isFocused)
+            }
             .clickable(onClick = onClick)
             .padding(horizontal = 26.dp, vertical = 13.dp),
     ) {

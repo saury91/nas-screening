@@ -84,7 +84,6 @@ import com.projectionroom.app.NasStore
 import com.projectionroom.app.Pair
 import com.projectionroom.app.PairServer
 import com.projectionroom.app.SearchStore
-import com.projectionroom.app.cast.DmrServer
 import com.projectionroom.app.ExtraStore
 import com.projectionroom.app.HomeSnapshot
 import com.projectionroom.app.LibFile
@@ -182,14 +181,6 @@ private const val OFFLINE_BASE = "http://127.0.0.1:1"
 
 class MainActivity : ComponentActivity() {
 
-    /** 电视端 DLNA 接收器：App 在前台时对外可见，退出即关 */
-    private val dmr by lazy {
-        com.projectionroom.app.cast.DmrServer(
-            ctx = this,
-            friendlyName = "放映室 · ${android.os.Build.MODEL}",
-        )
-    }
-
     /**
      * 联调用：广播直接触发投屏（仅 debuggable 包）。
      *
@@ -231,10 +222,6 @@ class MainActivity : ComponentActivity() {
         }, filter, android.content.Context.RECEIVER_EXPORTED)
     }
 
-    override fun onDestroy() {
-        dmr.stop()
-        super.onDestroy()
-    }
 
 
     companion object {
@@ -244,8 +231,18 @@ class MainActivity : ComponentActivity() {
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // DLNA 接收端只在电视端开启（手机端那份代码里没有这个启动）
-        dmr.start(lifecycleScope)
+        // DLNA 接收端只在电视端开启。交给前台服务而不是 Activity：
+        // 用户按 Home 回到桌面后，这台电视仍然要能被手机搜到
+        com.projectionroom.app.cast.CastService.start(this)
+
+        // Android 13+ 不给通知权限，投屏时「后台拉不起播放页」的兜底通知就发不出来，
+        // 表现为手机显示已投屏、电视毫无反应
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+        }
 
         registerCastDebugHook()
 

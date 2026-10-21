@@ -61,6 +61,24 @@ object Dmr {
     fun actionOf(soapAction: String?): String =
         soapAction.orEmpty().trim().trim('"').substringAfterLast('#').trim()
 
+    private val UA_ATTR = Regex("""x-proom-ua="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val REF_ATTR = Regex("""x-proom-ref="([^"]*)"""", RegexOption.IGNORE_CASE)
+
+    /**
+     * 从推流方给的 DIDL 里读回 `x-proom-*` 请求头。
+     *
+     * 标准 DLNA 没有「传请求头」这回事，但采集站的 m3u8 校验 Referer/UA，
+     * 不带就是 403（手机上正常、投到电视黑屏）。这两个属性是 [AvTransport.metadata]
+     * 写的，只有自家接收端认识，第三方设备直接忽略。
+     *
+     * 只认这两个，其它一律不传 —— 推流方能往 DIDL 里塞任意属性，
+     * 没有白名单就等于让电视替它发任意请求。
+     */
+    fun headersOf(didl: String): Map<String, String> = buildMap {
+        UA_ATTR.find(didl)?.groupValues?.get(1)?.let { put("User-Agent", unesc(it)) }
+        REF_ATTR.find(didl)?.groupValues?.get(1)?.let { put("Referer", unesc(it)) }
+    }
+
     /** 取一个参数值（<CurrentURI>…</CurrentURI>）；没有返回 null */
     fun arg(soap: String, name: String): String? {
         val m = Regex("<$name>(.*?)</$name>", RegexOption.DOT_MATCHES_ALL).find(soap) ?: return null

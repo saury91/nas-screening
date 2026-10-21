@@ -291,10 +291,24 @@ private fun HomePane(
 ) {
     val continueWatching = (feed?.continueWatching.orEmpty() + feed?.liked.orEmpty()).take(8)
     val hot = feed?.latest.orEmpty()
+    // 首页快照是流式拼出来的：缓存、各分类陆续到达，每来一批都会重新排序。
+    // Hero 直接跟着换，用户看到的就是「几张图快速闪一遍，最后停在第一张」。
+    // 保序合并 + 300ms 静默窗口：已经在的条目留在原位，新出现的补在后面，
+    // 第一张定下来就不动。
+    var heroShown by remember { mutableStateOf(emptyList<Vod>()) }
+    LaunchedEffect(hot) {
+        if (hot.isEmpty()) return@LaunchedEffect
+        delay(300)
+        val next = hot.take(6)
+        heroShown = if (heroShown.isEmpty()) next else {
+            val kept = heroShown.filter { o -> next.any { it.name == o.name } }
+            val added = next.filter { n -> heroShown.none { it.name == n.name } }
+            (kept + added).take(6)
+        }
+    }
     // Hero 已经把它们轮播展示了，下面「热门推荐」就不该再从第一条开始重复一遍。
-    // 前 6 条给 Hero，剩下的进网格。
-    val heroItems = hot.take(6)
-    val hotRest = hot.drop(heroItems.size)
+    val heroItems = heroShown.ifEmpty { hot.take(6) }
+    val hotRest = hot.filterNot { v -> heroItems.any { it.name == v.name } }
     val cats = feed?.cats.orEmpty()
     // 从详情返回时接上次的位置：不接的话整页回到顶部，和「被刷新了」没区别
     val state = rememberLazyGridState(FilmUiState.homeIndex, FilmUiState.homeOffset)

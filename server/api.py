@@ -440,7 +440,10 @@ class Handler(BaseHTTPRequestHandler):
             me = self.me() or {}
             return _json({"ok": True, "items": cast.targets(exclude=qs.get("id") or me.get("id", ""))})
         if path == "/api/cast/poll":
-            return _json({"ok": True, "commands": cast.poll(qs.get("id") or "")})
+            # wait>0 走长轮询：电视挂着等，有指令立刻回来。
+            # 客户端不传就是老行为（立即返回），旧版电视端不会被这个改动卡住。
+            return _json({"ok": True,
+                          "commands": cast.poll(qs.get("id") or "", qs.get("wait") or 0)})
         if path == "/api/app/latest":
             kind = (qs.get("kind") or "tv").replace("/", "")
             meta = os.path.join(APPS_DIR, kind + ".json")
@@ -855,9 +858,19 @@ class Handler(BaseHTTPRequestHandler):
             return send({"ok": True, "device": dev})
         if path == "/api/cast/send":
             try:
-                cast.send(b.get("target") or "", b)
+                cast.send(b.get("target") or "", b, owner=b.get("from") or "")
             except KeyError as e:
                 return send({"ok": False, "msg": str(e).strip("'")})
+            except ValueError as e:
+                return send({"ok": False, "msg": str(e)})
+            return send({"ok": True})
+        if path == "/api/cast/state":
+            # 电视上报播放进度。顺带续心跳，播放中的电视不用再单发 register。
+            try:
+                cast.report_state(b.get("id") or "", b)
+            except KeyError as e:
+                # 电视刚重启、名录已过期：让它重新注册，而不是把错误弹给用户
+                return send({"ok": False, "code": "offline", "msg": str(e).strip("'")})
             except ValueError as e:
                 return send({"ok": False, "msg": str(e)})
             return send({"ok": True})

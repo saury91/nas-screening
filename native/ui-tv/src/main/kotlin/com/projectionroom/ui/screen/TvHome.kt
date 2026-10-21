@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,9 +100,24 @@ fun TvHome(
         // 海报源图只有 270x385，裁成 16:9 后横向只剩 270px；卡片别超过 300dp
         val wideCardW = (maxWidth * 0.16f).coerceIn(160.dp, 300.dp)
 
-        // Hero 已经展示了前 6 条，下面的「最近更新」不再重复
-        val heroItems = latest.take(6)
-        val latestRest = latest.drop(heroItems.size)
+        // 首页快照是流式拼出来的：各分类陆续到达，每来一批都会重新排序。
+        // Hero 直接跟着换就是「几张图快速闪一遍，最后停在第一张」。
+        // 保序合并 + 300ms 静默窗口：已有的条目留在原位，新出现的补在后面。
+        var heroShown by remember { mutableStateOf(emptyList<Vod>()) }
+        LaunchedEffect(latest) {
+            if (latest.isEmpty()) return@LaunchedEffect
+            delay(300)
+            val next = latest.take(6)
+            heroShown = if (heroShown.isEmpty()) next else {
+                val kept = heroShown.filter { o -> next.any { it.name == o.name } }
+                val added = next.filter { n -> heroShown.none { it.name == n.name } }
+                (kept + added).take(6)
+            }
+        }
+        val heroItems = heroShown.ifEmpty { latest.take(6) }
+        // Hero 已经展示了这些，下面的「最近更新」不再重复（按名字去重，
+        // 因为 Hero 的顺序是合并后的，和 latest 前 6 条不一定一致）
+        val latestRest = latest.filterNot { v -> heroItems.any { it.name == v.name } }
 
         androidx.compose.foundation.lazy.LazyColumn(
             Modifier.fillMaxSize(),

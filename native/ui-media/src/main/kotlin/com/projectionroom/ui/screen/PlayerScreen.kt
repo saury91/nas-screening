@@ -11,6 +11,8 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Rational
 import androidx.activity.compose.BackHandler
+import com.projectionroom.shared.cast.CastApi
+import com.projectionroom.shared.cast.CastHub
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -108,7 +110,7 @@ import kotlin.math.roundToInt
  *  3. 缓冲用波点而不是转圈（关掉系统 spinner）。
  */
 /** 采集站挑 UA，空 UA 直接 403；和 OkHttpHttp 保持一致 */
-private const val PLAYER_UA =
+internal const val PLAYER_UA =
     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/120.0 Mobile Safari/537.36"
 
@@ -212,6 +214,16 @@ fun PlayerScreen(
     isTv: Boolean = false,
     /** 联调用：进播放页就展开投屏面板（只在 debuggable 包由壳开启） */
     openCastOnEnter: Boolean = false,
+    /**
+     * 投屏成功。
+     *
+     * 壳收到后把页面换成遥控器页，同时本页整个销毁 —— 本地播放器跟着释放，
+     * 缓冲和声音一起停掉。这正是「投上去以后手机不该继续放着」的意思。
+     *
+     * 两个参数只会有一个非空：走 NAS 名录的电视给 Target，局域网 DLNA 给 CastDevice。
+     */
+    onCastStarted: (line: Int, ep: Int, nas: CastApi.Target?, dlna: com.projectionroom.shared.cast.CastDevice?) -> Unit =
+        { _, _, _, _ -> },
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -282,14 +294,81 @@ fun PlayerScreen(
     var castScanning by remember { mutableStateOf(false) }
     var castDevices by remember { mutableStateOf<List<com.projectionroom.shared.cast.CastDevice>>(emptyList()) }
     var castTarget by remember { mutableStateOf<com.projectionroom.shared.cast.CastDevice?>(null) }
+    // 经 NAS 名录找到的电视：手机在 4G / 公司网下也能投，靠的就是这一组
+    var castNasDevices by remember {
+        mutableStateOf<List<com.projectionroom.shared.cast.CastApi.Target>>(emptyList())
+    }
+    var castNas by remember { mutableStateOf<com.projectionroom.shared.cast.CastApi.Target?>(null) }
     // 电视那边当前是不是在播：手机当遥控器时要靠它决定发 pause 还是 play
     var casting by remember { mutableStateOf(false) }
     fun scanCast() {
         if (castScanning) return
         castScope.launch {
             castScanning = true
+            // 两条腿一起扫：NAS 名录覆盖跨网，SSDP 覆盖「NAS 关机但同 Wi-Fi」。
+            // NAS 不可达时 targets() 返回空，不影响局域网这一路。
+            val nasList = com.projectionroom.shared.cast.CastHub.client
+                ?.targets(com.projectionroom.shared.cast.CastHub.selfId)
+                .orEmpty()
+            castNasDevices = nasList.filter {
+                it.isTv && !com.projectionroom.shared.cast.CastHub.isMine(it)
+            }
+            // 退出播放页再进来：电视还在替自己播，但 castNas 是 remember，
+            // 页面一换就没了 —— 不接回来的话面板写着「正在播」，手机上按暂停
+            // 却只暂停了本机。owner 是自己才恢复，别人投的不碰。
+            if (castNas == null) {
+                castNas = nasList.firstOrNull {
+                    it.owner.isNotBlank() &&
+                        it.owner == com.projectionroom.shared.cast.CastHub.selfId &&
+                        it.state?.playing == true
+                }
+            }
             castDevices = runCatching { dlna.discover() }.getOrDefault(emptyList())
             castScanning = false
+        }
+    }
+
+    // 投屏中，控制条要显示电视那一份进度。本地播放器已经暂停，继续显示
+    // 本机 position 就成了「电视播到 20 分钟，手机上还停在 0:27」，
+    // 拖进度条时更是无从判断拖到了哪
+    var nasPos by remember { mutableStateOf(0L) }
+    var nasDur by remember { mutableStateOf(0L) }
+    var nasPlaying by remember { mutableStateOf(false) }
+    LaunchedEffect(castNas?.id) {
+        val target = castNas ?: return@LaunchedEffect
+        while (true) {
+            val d = com.projectionroom.shared.cast.CastHub.client
+                ?.targets(com.projectionroom.shared.cast.CastHub.selfId)
+                ?.firstOrNull { it.id == target.id }
+            d?.state?.let {
+                nasPos = it.position
+                nasDur = it.duration
+                nasPlaying = it.playing
+            }
+            // 被另一台手机抢走控制权：遥控器身份作废，别继续装作还能控制
+            if (d != null && d.owner.isNotBlank() &&
+                d.owner != com.projectionroom.shared.cast.CastHub.selfId
+            ) {
+                castNas = null
+                casting = false
+                hint = "控制权被另一台手机接管了"
+                break
+            }
+            kotlinx.coroutines.delay(2_000)
+        }
+    }
+
+    /**
+     * 采集站校验 Referer/UA，手机端播放器自己带了才播得动。推裸地址过去，
+     * 电视端裸拉就是 403 —— 手机上正常、投上去黑屏，就是这个原因。
+     */
+    fun castHeaders(): Map<String, String> {
+        val u = playUrl.orEmpty()
+        val origin = runCatching { java.net.URI(u) }.getOrNull()
+            ?.let { "${it.scheme}://${it.host}/" }.orEmpty()
+        return buildMap {
+            put("User-Agent", PLAYER_UA)
+            if (origin.isNotBlank()) put("Referer", origin)
         }
     }
 
@@ -306,16 +385,63 @@ fun PlayerScreen(
     /** 把当前地址推到选中的接收端：手机退回遥控器 */
     fun doCast(d: com.projectionroom.shared.cast.CastDevice) {
         castOpen = false
+        val url = playUrl.orEmpty()
+        // 自家接收端会从 DIDL 的 x-proom-* 属性里读回来
+        val headers = castHeaders()
         castScope.launch {
-            val r = dlna.cast(d, playUrl.orEmpty(), vod.name)
+            val r = dlna.cast(d, url, vod.name, headers)
             if (r.isSuccess) {
                 castTarget = d
+                castNas = null
                 casting = true
                 // 本机暂停，声音只从电视出
                 exo.pause()
-                hint = "已投屏到 ${d.name}"
+                onCastStarted(lineIndex, epIndex, null, d)
             } else {
                 hint = "投屏失败：${r.exceptionOrNull()?.message ?: "电视没响应"}"
+            }
+        }
+    }
+
+    /**
+     * 经 NAS 投到电视。
+     *
+     * 和局域网那条路的区别是「跨网」：手机在 4G 下也能投。至于后台启动限制，
+     * 两条路是一样的（电视 App 在后台就只能发通知等用户点），但这条路至少
+     * 能确认指令送达，手机不会显示成功之后一片沉默。
+     */
+    fun doCastNas(t: com.projectionroom.shared.cast.CastApi.Target) {
+        castOpen = false
+        val url = playUrl.orEmpty()
+        if (url.isBlank()) { hint = "还没有可播的地址"; return }
+        val client = com.projectionroom.shared.cast.CastHub.client ?: run {
+            hint = "没有连接 NAS，无法跨网投屏"
+            return
+        }
+        castScope.launch {
+            val ok = client.send(
+                target = t.id,
+                from = com.projectionroom.shared.cast.CastHub.selfId,
+                cmd = com.projectionroom.shared.cast.CastApi.Command(
+                    kind = "play",
+                    url = url,
+                    title = vod.name,
+                    position = 0,
+                    headers = castHeaders(),
+                    vod = vod.name,
+                    line = lineIndex,
+                    ep = epIndex,
+                    episode = vod.lines.getOrNull(lineIndex)?.episodes?.getOrNull(epIndex)?.name.orEmpty(),
+                ),
+            )
+            if (ok) {
+                castNas = t
+                castTarget = null
+                casting = true
+                exo.pause()
+                onCastStarted(lineIndex, epIndex, t, null)
+            } else {
+                hint = "投屏失败：电视没响应"
             }
         }
     }
@@ -702,22 +828,35 @@ fun PlayerScreen(
                 }
 
                 if (!locked) {
+                    // 投屏中换成电视的进度与播放态：手机这时候是个遥控器，
+                    // 显示自己的位置既没用，也会让暂停键看起来「按了没反应」
+                    val castingNas = castNas != null
                     PlayerBottomBar(
-                        position = position,
-                        duration = duration,
+                        position = if (castingNas) nasPos else position,
+                        duration = if (castingNas) nasDur else duration,
                         speed = speed,
                         live = live,
                         liveTitle = episode?.name.orEmpty(),
                         liveCounter = if (live) "${epIndex + 1} / ${line?.episodes?.size ?: 0} 台" else "",
                         hasPrev = epIndex > 0,
                         hasNext = epIndex + 1 < (line?.episodes?.size ?: 0),
-                        isPlaying = exo.isPlaying,
+                        isPlaying = if (castingNas) nasPlaying else exo.isPlaying,
                         modifier = Modifier.align(Alignment.BottomCenter),
                         onSeek = {
                             // 投屏中把进度也发给电视：本机在放的是同一路流，
                             // 只改本机会出现"手机跳了电视没动"的诡异状态
                             castTarget?.let { d ->
                                 castScope.launch { dlna.seek(d, it / 1000) }
+                            }
+                            castNas?.let { t ->
+                                castScope.launch {
+                                    CastHub.client?.send(
+                                        t.id, CastHub.selfId,
+                                        CastApi.Command(kind = "seek", position = it),
+                                    )
+                                }
+                                // 先按下的位置回填，不然要等下一轮轮询进度条才跟上
+                                nasPos = it
                             }
                             exo.seekTo(it)
                             position = it
@@ -730,12 +869,25 @@ fun PlayerScreen(
                             }
                         },
                         onTogglePlay = {
-                            val d = castTarget
-                            if (d != null) {
+                            val lan = castTarget
+                            val nas = castNas
+                            if (lan != null) {
                                 // 投屏中：手机变成遥控器，本机保持暂停
                                 val wasPlaying = casting
                                 castScope.launch {
-                                    if (wasPlaying) dlna.pause(d) else dlna.resume(d)
+                                    if (wasPlaying) dlna.pause(lan) else dlna.resume(lan)
+                                    casting = !wasPlaying
+                                }
+                            } else if (nas != null) {
+                                // 按钮画的是电视的播放态，指令就按它来，否则会出现
+                                // 「显示暂停图标、按下去却发 resume」
+                                val wasPlaying = nasPlaying
+                                castScope.launch {
+                                    CastHub.client?.send(
+                                        nas.id, CastHub.selfId,
+                                        CastApi.Command(kind = if (wasPlaying) "pause" else "resume"),
+                                    )
+                                    nasPlaying = !wasPlaying
                                     casting = !wasPlaying
                                 }
                             } else {
@@ -815,15 +967,23 @@ fun PlayerScreen(
         if (castOpen) {
             CastSheet(
                 devices = castDevices,
+                nasDevices = castNasDevices,
                 scanning = castScanning,
-                current = castTarget?.name.orEmpty(),
+                current = castTarget?.name ?: castNas?.name.orEmpty(),
                 casting = casting,
                 onRescan = { scanCast() },
                 onPick = { d -> doCast(d) },
+                onPickNas = { t -> doCastNas(t) },
                 onManual = { addr -> castManual(addr) },
                 onStop = {
                     castTarget?.let { d -> castScope.launch { dlna.stop(d) } }
+                    castNas?.let { t ->
+                        castScope.launch {
+                            CastHub.client?.send(t.id, CastHub.selfId, CastApi.Command(kind = "stop"))
+                        }
+                    }
                     castTarget = null
+                    castNas = null
                     casting = false
                     castOpen = false
                     hint = "已停止投屏"
@@ -1574,11 +1734,14 @@ private fun PanelRow(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun CastSheet(
     devices: List<com.projectionroom.shared.cast.CastDevice>,
+    /** 经 NAS 名录找到的电视，NAS 不在线时为空 */
+    nasDevices: List<CastApi.Target> = emptyList(),
     scanning: Boolean,
     current: String,
     casting: Boolean,
     onRescan: () -> Unit,
     onPick: (com.projectionroom.shared.cast.CastDevice) -> Unit,
+    onPickNas: (CastApi.Target) -> Unit = {},
     onManual: (String) -> Unit,
     onStop: () -> Unit,
     onClose: () -> Unit,
@@ -1634,9 +1797,10 @@ private fun CastSheet(
                         when {
                             // 投屏中先说「投到哪」，比继续说「正在搜索」有用
                             casting && current.isNotBlank() -> "已投屏到 $current"
-                            scanning -> "正在搜索同一网络下的电视…"
-                            devices.isEmpty() -> "没找到电视 · 确认手机和电视连的是同一个 Wi-Fi"
-                            else -> "找到 ${devices.size} 台设备"
+                            scanning -> "正在搜索电视…"
+                            devices.isEmpty() && nasDevices.isEmpty() ->
+                                "没找到电视 · 确认手机和电视连的是同一个 Wi-Fi"
+                            else -> "找到 ${devices.size + nasDevices.size} 台设备"
                         },
                         color = Color.White.copy(alpha = 0.45f),
                         fontSize = 11.sp,
@@ -1664,6 +1828,79 @@ private fun CastSheet(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("✕", color = Color.White.copy(alpha = 0.65f), fontSize = 15.sp)
+                }
+            }
+
+            // NAS 名录排在前面：它不受「手机和电视是否同一个 Wi-Fi」限制，
+            // 而且指令是电视自己来取的，后台也能拉起播放页，成功率比 DLNA 高
+            if (nasDevices.isNotEmpty()) {
+                Text(
+                    "NAS 在线 · 任意网络可投",
+                    color = Color.White.copy(alpha = 0.35f),
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+                )
+                LazyColumn(Modifier.heightIn(max = 210.dp)) {
+                    items(nasDevices) { t ->
+                        val active = casting && t.name == current
+                        val st = t.state
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (active) ProomColor.accentSoft else Color.White.copy(alpha = 0.06f)
+                                )
+                                .clickable { onPickNas(t) }
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                PlayerIcons.Cast,
+                                contentDescription = null,
+                                tint = if (active) ProomColor.accent else Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(
+                                    t.name,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                // 电视在播什么直接摊开：用户开口常是「刚才那集接着放」，
+                                // 让他先看见进度，比投过去再回手机上找位置省事
+                                val sub = when {
+                                    st == null || st.title.isBlank() -> "空闲"
+                                    else -> {
+                                        val m = st.position / 60_000
+                                        val s = (st.position / 1_000) % 60
+                                        val flag = if (st.playing) "正在播" else "暂停在"
+                                        val clock = "$m:" + if (s < 10) "0$s" else "$s"
+                                        "$flag · ${st.title} $clock"
+                                    }
+                                }
+                                Text(
+                                    sub,
+                                    color = Color.White.copy(alpha = 0.45f),
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            if (active || t.owner == com.projectionroom.shared.cast.CastHub.selfId) {
+                                // owner 是自己但 active 为假：退出播放页又进来，
+                                // castNas 还没恢复，电视其实仍在替自己播
+                                Text("投屏中", color = ProomColor.accent, fontSize = 11.sp)
+                            } else if (t.owner.isNotBlank()) {
+                                // 另一台手机正在控它：点上去会抢过来，先给个提示
+                                Text("被占用", color = Color.White.copy(alpha = 0.35f), fontSize = 10.sp)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1697,10 +1934,17 @@ private fun CastSheet(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                if (d.model.isNotBlank()) {
+                                // 自家电视排在前面且标明来路：它认 x-proom-* 请求头，
+                                // 源站要鉴权的片子也能投；别家电视只能碰运气
+                                val sub = when {
+                                    d.isOwn -> "放映室 · 支持直投"
+                                    else -> d.model
+                                }
+                                if (sub.isNotBlank()) {
                                     Text(
-                                        d.model,
-                                        color = Color.White.copy(alpha = 0.4f),
+                                        sub,
+                                        color = if (d.isOwn) ProomColor.accent.copy(alpha = 0.7f)
+                                        else Color.White.copy(alpha = 0.4f),
                                         fontSize = 11.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,

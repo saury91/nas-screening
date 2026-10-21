@@ -63,6 +63,12 @@ object PlayerIcons {
         roundRect(12.6f, 11.6f, 19f, 17.2f, 1.4f)
     }
 
+    /** 关闭：两根等长斜线，交点在正中 */
+    val Close: ImageVector = outline("close") {
+        moveTo(6.6f, 6.6f); lineTo(17.4f, 17.4f)
+        moveTo(17.4f, 6.6f); lineTo(6.6f, 17.4f)
+    }
+
     /** 投屏：屏幕 + 波纹 */
     val Cast: ImageVector = outline("cast") {
         roundRect(3f, 6.2f, 21f, 18.4f, 2.2f)
