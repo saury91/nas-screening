@@ -503,6 +503,8 @@ class Handler(BaseHTTPRequestHandler):
                 "sources": body["sources"],
                 "live": body["live"],
                 "music": body["music"],
+                # 连不上的封面图床：App 片库直连采集站时用它避开，避免整页空白
+                "badPicHosts": catalog.bad_pic_hosts(),
                 "ui": {"version": os.environ.get("UI_VERSION", "")},
             })
         if path == "/api/status":
