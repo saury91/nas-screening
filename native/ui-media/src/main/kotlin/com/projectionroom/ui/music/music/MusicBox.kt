@@ -163,15 +163,16 @@ object MusicBox {
         ticker = scope.launch {
             while (true) {
                 exo?.let {
-                    // 暂停时不刷 position：否则暂停界面还在每 400ms 重组一次
-                    if (it.isPlaying) {
-                        position = it.currentPosition
-                        if (it.duration > 0) duration = it.duration
-                        lyricAt = Lrc.indexAt(lyric, position)
-                    }
+                    // 暂停时也要读一次：暂停状态下拖进度条，歌词同样得跟到那一句。
+                    // 值没变时 mutableStateOf 不会触发重组，所以不算白跑
+                    val pos = it.currentPosition
+                    if (pos != position) position = pos
+                    if (it.duration > 0 && it.duration != duration) duration = it.duration
+                    val at = Lrc.indexAt(lyric, pos)
+                    if (at != lyricAt) lyricAt = at
                 }
-                // 1 秒够用：迷你条只有一条 1.5dp 的进度线，3 分钟的歌一秒才走 0.5%
-                delay(1_000)
+                // 250ms：歌词换行要跟得上，1 秒的粒度会把间隔短的句子直接跳过去
+                delay(250)
             }
         }
     }
@@ -242,7 +243,11 @@ object MusicBox {
         val fetch = resolveLyric ?: return
         lyricJob = scope.launch {
             val lines = runCatching { fetch(t.id) }.getOrNull().orEmpty()
-            if (current?.id == t.id) lyric = lines
+            if (current?.id == t.id) {
+                lyric = lines
+                // 歌词是异步到的：到货时按当前进度定位，别停在第一句
+                lyricAt = Lrc.indexAt(lines, position)
+            }
         }
     }
 
@@ -293,8 +298,12 @@ object MusicBox {
     }
 
     fun seek(ms: Long) {
-        exo?.seekTo(ms.coerceAtLeast(0L))
-        position = ms
+        val to = ms.coerceAtLeast(0L)
+        exo?.seekTo(to)
+        position = to
+        // 拖动后立刻重算当前句；等 ticker 的话暂停状态下会停在上一次的位置
+        val at = Lrc.indexAt(lyric, to)
+        if (at != lyricAt) lyricAt = at
     }
 
     fun cycleRepeat() {

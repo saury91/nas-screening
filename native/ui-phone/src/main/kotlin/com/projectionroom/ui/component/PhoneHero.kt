@@ -19,7 +19,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +60,16 @@ fun PhoneHero(
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val state = rememberPagerState(pageCount = { items.size })
+
+        // 自动轮播：手在滑的时候这一拍跳过（不打断拖动），滑完重新计时
+        LaunchedEffect(state.pageCount) {
+            if (state.pageCount < 2) return@LaunchedEffect
+            while (true) {
+                delay(6_000)
+                if (state.isScrollInProgress) continue
+                state.animateScrollToPage((state.currentPage + 1) % state.pageCount)
+            }
+        }
 
         // 高度按**当前页内容**给，不再是一个固定值。
         // 内容压在底部对齐，所以固定高度在「没有简介」的那几页会空出一大条 ——
