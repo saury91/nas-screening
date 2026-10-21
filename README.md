@@ -169,17 +169,13 @@ App 只有「我的」（收藏 + 记录 + 关于），直接访问管理页的�
 
 ## 电视 / 手机 App（Android）
 
-> **当前实现是 `native/`（Compose Multiplatform）**：一个 APK，`applicationId = com.projectionroom.app`，
-> 同一份代码用 `isTv` 分流布局与交互。下面 `android/` 那一节是**上一代 WebView 外壳**，
-> 只留给存量设备走升级链，新功能都做在 `native/`。
+> **实现是 `native/`（Compose Multiplatform）**：两个包，电视 `com.projectionroom.tv`、
+> 手机 `com.projectionroom.app`，共用一套 `core` 数据层与 `ui-kit` 组件。
 >
 > ```bash
 > cd native
-> JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-21.jdk/Contents/Home \
->   ./gradlew :app-android:assembleDebug          # 产物 app-android/build/outputs/apk/debug/
+> ./gradlew :app-tv:assembleDebug :app-phone:assembleDebug
 > ```
->
-> 注意 JDK 用 21：Gradle 8.10.2 配 JDK 27 会直接报错。
 
 ### 电视端交互约定（10-foot UI）
 
@@ -195,51 +191,19 @@ App 只有「我的」（收藏 + 记录 + 关于），直接访问管理页的�
   直接拿 270px 海报铺满 1080p 就是一块脏糊。统一走 `SoftBackdrop`（小尺寸解码 + GPU 放大），
   任何 API 上都是同一种软色雾
 
-### 上一代：WebView 外壳（`android/`）
+### 构建与安装
 
-**两个独立的安装包**：交互差别太大，与其让同一个包在运行时猜设备，不如编译期就分开。
+```bash
+cd native
+./gradlew :app-tv:assembleDebug      # 电视：native/app-tv/build/outputs/apk/debug/
+./gradlew :app-phone:assembleDebug   # 手机：native/app-phone/build/outputs/apk/debug/
+```
 
-| 安装包 | applicationId | 界面 | 会话 | 投屏 |
-|---|---|---|---|---|
-| `app-tv-release.apk` | `com.projectionroom.tv` | 横屏 · 遥控器 | 无登录 | 无（接收端） |
-| `app-phone-release.apk` | `com.projectionroom.phone` | 竖屏 · 触摸 | 30 天免登录 | 有（发送端） |
-
-两者共用同一套 Web 前端，只是外壳行为不同；UA 分别是 `ProomTV/` 与 `ProomPhone/`。
-
-![电视端](docs/screenshot-tv.png)
-
-Android TV 端已经能日常用了：一个全屏 WebView 装现有前端，播放交给原生 ExoPlayer。
-**电视上不需要任何初始化**——装好、自动发现 NAS、直接看片。
-
-![电视配对](docs/screenshot-tv-pair.png)
-
-- **侧载安装**：从 CI 产物或 Release 拿 APK，U 盘拷到电视，或用 `adb install`。不上任何应用商店
-- **地址不用手输**（三条路，按遥控器友好度排序）：
-  1. **自动发现**：电视广播一句、NAS 应答，同网段 1 秒内配好，全程不用按键
-  2. **手机扫码**：电视显示二维码，手机打开后填一次地址发过来
-  3. 手动输入（留给调试）
-- **打开就是内容**：无账户模式下电视端不需要任何登录
-- **菜单键**：播放时开/关「线路 · 选集」面板；不在播放时用来改 NAS 地址
-- **投屏**：手机播放页右上角点投屏，选一台在线电视就能把正在放的内容推过去。
-  电视端是**真正的 DLNA/DMR 接收端**（SSDP 应答 + AVTransport 控制），收到推送自己起播，
-  手机随之变成遥控器：暂停 / 继续 / 拖进度 / 停止，状态机在电视那侧维护
-- **NAS 不在也能投**：发现走局域网 SSDP（1900），控制直接打到电视的 49520，
-  全程不经过 NAS。电视保持打开就自动在线
-- **遥控器**：方向键移动焦点、OK 确认、BACK 键回上一页；页面上的返回只是一个不可聚焦的
-  面包屑提示，不占焦点位（原因见上面「电视端交互约定」）
-- **原生播放**：HLS 走 ExoPlayer 硬解，不在 WebView 里软解（老电视软解 4K 会卡死）
-- **内核自检**：WebView 低于 55 直接给出说明页，不会白屏
-
-最低 Android 5.0（API 21），编译目标 34。
-
-> 如果 NAS 开了防火墙，记得放行 **UDP 8897**（自动发现）和 **TCP 8898**（扫码配对），
-> 否则电视只能用第三条路手动填地址。投屏另需电视侧 **SSDP 1900** 与 **TCP 49520** 可达。
-
-手机端：竖屏、长会话，播放时自动横屏全屏，播放器右上角有投屏按钮。
+JDK 21（Gradle 8.10.2 配 JDK 27 会直接报错），compileSdk 35。装到设备用 `adb install -r`。
 
 ### 签名与内网自升级
 
-APK 用固定密钥签名（`android/keystore/proom.jks`，密码 `proom-release`），
+APK 用固定密钥签名（`native/keystore/proom.jks`，密码 `proom-release`），
 **签名必须一致才能覆盖安装**，所以这份密钥跟着仓库走，保证谁构建都是同一条升级链。
 
 > 它只保证升级不被"签名不一致"挡住，不提供安全强度：密钥是公开的。
@@ -248,21 +212,12 @@ APK 用固定密钥签名（`android/keystore/proom.jks`，密码 `proom-release
 发布新版本：
 
 ```bash
-cd android && gradle assembleTvRelease assemblePhoneRelease
-cd .. && ./tools/publish-apk.sh tv          # 拷到 data/apps/tv.apk
-cd .. && ./tools/publish-apk.sh phone       # 拷到 data/apps/phone.apk
+cd native && ./gradlew :app-tv:assembleRelease :app-phone:assembleRelease
+cd .. && ./tools/publish-apk.sh tv && ./tools/publish-apk.sh phone
 ```
 
 App 启动时会问一句 `GET /api/app/latest?kind=tv`，比本地 `versionCode` 新就弹窗，
 点「更新」从 NAS 下载并交给系统安装器。电视第一次装需要允许「安装未知应用」。
-
-本地构建（JDK 17 + Android SDK 34 + Gradle 8.7）：
-
-```bash
-cd android && gradle assembleDebug
-```
-
-推送到 `main` 会自动编译并上传 APK 产物；打 `tv-v*` 标签会自动发 Release。
 
 ---
 
@@ -288,8 +243,8 @@ App 自带升级：启动时向 NAS 查 `/api/app/latest`，版本号更高就�
 **发布一个新版本**（在 NAS 上）：
 
 ```bash
-cd android
-./gradlew assemblePhoneRelease assembleTvRelease   # 记得改 versionCode/versionName
+cd native
+./gradlew :app-tv:assembleRelease :app-phone:assembleRelease   # 记得改 versionCode/versionName
 cd .. && ./tools/publish-apk.sh phone && ./tools/publish-apk.sh tv
 ```
 
@@ -406,7 +361,7 @@ server/
 static/
   app/                  零构建前端：原生 ES Modules + 手写 CSS
   index.html            单页入口
-android/                Android TV 壳（Kotlin + ExoPlayer + ZXing）
+native/                 Compose Multiplatform 客户端（app-tv / app-phone / core / ui-*）
   keystore/             发布密钥（固定签名，见上文说明）
 tools/                  account.py 救急命令、publish-apk.sh 发版、cdp.js 截图自检
 tests/                  纯函数单测（不依赖网络与真实数据库）
@@ -417,7 +372,7 @@ docs/                   截图、配置包格式说明、审计记录
 
 ```bash
 python3 -m unittest discover -s tests -v     # 40 条纯函数单测
-cd android && gradle assembleRelease         # 编译即校验
+cd native && ./gradlew :app-tv:assembleDebug  # 编译即校验
 ```
 
 CI（`.github/workflows/ci.yml`）会跑 Python 编译 + 单测 + 前端 ESM 语法检查；

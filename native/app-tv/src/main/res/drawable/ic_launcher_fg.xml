@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!--
+      自适应图标前景 = 视频 + 音乐。
+
+      金色播放键（视频）打底，中间镂出音符（音乐）—— 一个形状同时表达两件事，
+      比并排放两个小图标更耐看，48dp 下也认得出来。
+      音符用底色挖空而不是缩成小图标，避免小尺寸下两条细线糊在一起。
+
+      外面那层 0.74 缩放是给 launcher 的圆形遮罩留余量：Android 的可视区只取
+      中间的圆（半径约 33），图形顶到 108 画布的角上会被切掉一角。
+    -->
+    <group android:pivotX="54" android:pivotY="54"
+        android:scaleX="0.74" android:scaleY="0.74">
+        <path
+            android:pathData="M37,25 L85,54 L37,83 Z"
+            android:fillColor="#FFCF7A"
+            android:strokeColor="#FFCF7A"
+            android:strokeWidth="9"
+            android:strokeLineJoin="round" />
+        <group android:translateX="41" android:translateY="39"
+            android:scaleX="1.2" android:scaleY="1.2">
+            <path
+                android:pathData="M12,3v10.55A4,4 0 1,0 14,17V7h4V3h-6z"
+                android:fillColor="#0E1015" />
+        </group>
+    </group>
+</vector>
