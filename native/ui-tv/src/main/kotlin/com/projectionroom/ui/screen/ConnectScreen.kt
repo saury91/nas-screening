@@ -91,14 +91,8 @@ fun ConnectScreen(
                 style = ProomType.headline,
                 color = ProomColor.text,
             )
-            if (current != null) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "当前 · ${current.removePrefix("http://").removePrefix("https://")}",
-                    style = ProomType.meta,
-                    color = ProomColor.muted,
-                )
-            }
+            // 原来这里还有一行「当前 · 10.0.2.2:8899」—— 和下面预填好的地址框
+            // 说的是同一件事。540dp 的画布上这一行正好把「先跳过」挤到屏幕外。
             Spacer(Modifier.height(ProomSpace.md))
 
             if (searching) {
@@ -157,14 +151,21 @@ fun ConnectScreen(
                 // 地址入口留在「我的 → 设置」，不需要每次启动都被拦在这里。
                 if (onSkip != null) {
                     Spacer(Modifier.height(ProomSpace.md))
+                    // 这一行是「进不了 NAS 也要能用」的出口，可聚焦却没有任何焦点态，
+                    // 遥控器停上来时和普通灰色说明文字一模一样
+                    var skipFocused by remember { mutableStateOf(false) }
+                    val skipShape = RoundedCornerShape(ProomShape.sm)
                     Text(
                         "先跳过，稍后在「设置」里填地址 ›",
                         style = ProomType.meta,
-                        color = ProomColor.muted,
+                        color = if (skipFocused) ProomColor.accent else ProomColor.muted,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(ProomShape.sm))
+                            .clip(skipShape)
+                            .then(if (skipFocused) Modifier.background(ProomColor.surface2) else Modifier)
+                            .then(if (skipFocused) Modifier.border(2.dp, ProomColor.accent, skipShape) else Modifier)
+                            .onFocusChanged { skipFocused = it.isFocused }
                             .clickable(onClick = onSkip)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
                     )
                 }
             }
@@ -237,11 +238,13 @@ private fun NumberPad(onKey: (String) -> Unit) {
         listOf("7", "8", "9"),
         listOf(".", "0", "\b"),
     )
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    // 键盘铺满整列宽度（等分三格），而不是固定 88dp 宽挤在左边 ——
+    // 输入框有 500 多 dp 宽，键盘只占一半看起来像没画完
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         rows.forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 row.forEach { key ->
-                    PadKey(if (key == "\b") "⌫" else key) { onKey(key) }
+                    PadKey(if (key == "\b") "⌫" else key, Modifier.weight(1f)) { onKey(key) }
                 }
             }
         }
@@ -249,13 +252,14 @@ private fun NumberPad(onKey: (String) -> Unit) {
 }
 
 @Composable
-private fun PadKey(label: String, onClick: () -> Unit) {
+private fun PadKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(ProomShape.sm)
     Box(
-        Modifier
-            .width(74.dp)
-            .height(36.dp)
+        modifier
+            // 74×36 的数字键对遥控器光标太小；48dp 高才够到可点目标下限，
+            // 再高（52dp）四行就会把底部的「先跳过」顶出画布
+            .height(48.dp)
             .clip(shape)
             .background(if (focused) ProomColor.accent else ProomColor.surface)
             .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)

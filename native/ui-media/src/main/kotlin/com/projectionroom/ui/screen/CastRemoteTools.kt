@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.ProomSp
 
 @Composable
 internal fun SecondaryControls(
@@ -99,8 +100,8 @@ internal fun SecondaryControls(
                     .fillMaxWidth()
                     .padding(top = 10.dp)
                     .clip(RoundedCornerShape(ProomShape.md))
-                    .background(ProomColor.surface)
-                    .border(1.dp, ProomColor.line, RoundedCornerShape(ProomShape.md))
+                    .background(Color.White.copy(alpha = 0.05f))
+                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(ProomShape.md))
                     .padding(horizontal = 14.dp, vertical = 13.dp),
             ) {
                 PanelLabel("播放速度")
@@ -116,10 +117,12 @@ internal fun SecondaryControls(
                                 .weight(1f)
                                 .height(38.dp)
                                 .clip(RoundedCornerShape(ProomShape.sm))
-                                .background(if (sel) ProomColor.accentSoft else ProomColor.card)
+                                .background(
+                                    if (sel) ProomColor.cast.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f)
+                                )
                                 .border(
                                     1.dp,
-                                    if (sel) ProomColor.accent.copy(alpha = 0.7f) else ProomColor.line,
+                                    if (sel) ProomColor.cast.copy(alpha = 0.7f) else ProomColor.line,
                                     RoundedCornerShape(ProomShape.sm),
                                 )
                                 .clickable { onRate(r) },
@@ -127,8 +130,8 @@ internal fun SecondaryControls(
                         ) {
                             Text(
                                 trimRate(r),
-                                color = if (sel) ProomColor.accent else ProomColor.dim,
-                                fontSize = 12.sp,
+                                color = if (sel) ProomColor.cast else ProomColor.dim,
+                                fontSize = ProomSp(12.sp),
                                 fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal,
                             )
                         }
@@ -147,8 +150,8 @@ internal fun SecondaryControls(
                     .fillMaxWidth()
                     .padding(top = 10.dp)
                     .clip(RoundedCornerShape(ProomShape.md))
-                    .background(ProomColor.surface)
-                    .border(1.dp, ProomColor.line, RoundedCornerShape(ProomShape.md))
+                    .background(Color.White.copy(alpha = 0.05f))
+                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(ProomShape.md))
                     .padding(horizontal = 14.dp, vertical = 13.dp),
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -156,8 +159,8 @@ internal fun SecondaryControls(
                     Spacer(Modifier.weight(1f))
                     Text(
                         "${(volume * 100).toInt()}%",
-                        color = ProomColor.accent,
-                        fontSize = 11.5.sp,
+                        color = ProomColor.cast,
+                        fontSize = ProomSp(11.5.sp),
                         fontFamily = clockFont,
                     )
                 }
@@ -182,40 +185,36 @@ private fun ToolPill(
     active: Boolean = false,
     onClick: () -> Unit,
 ) {
-    Box(
+    // 不画底色：四个方块并排时，底色会把「当前生效的那一个」也压平。
+    // 现在只有被选中的项亮起一根青色短线，其余是纯文字。
+    Column(
         modifier
-            .height(40.dp)
+            .height(42.dp)
             .clip(RoundedCornerShape(ProomShape.sm + 2.dp))
-            .background(
-                when {
-                    active && enabled -> ProomColor.accentSoft
-                    enabled -> ProomColor.surface
-                    else -> ProomColor.surface.copy(alpha = 0.45f)
-                },
-            )
-            .border(
-                1.dp,
-                when {
-                    active && enabled -> ProomColor.accent.copy(alpha = 0.65f)
-                    enabled -> ProomColor.line
-                    else -> ProomColor.line.copy(alpha = 0.45f)
-                },
-                RoundedCornerShape(ProomShape.sm + 2.dp),
-            )
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+            .clickable(onClick = onClick)
+            .padding(horizontal = 2.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text,
             color = when {
                 !enabled -> ProomColor.muted.copy(alpha = 0.4f)
-                active -> ProomColor.accent
+                active -> ProomColor.cast
                 else -> ProomColor.dim
             },
-            fontSize = 12.5.sp,
+            fontSize = ProomSp(12.5.sp),
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(5.dp))
+        Box(
+            Modifier
+                .width(16.dp)
+                .height(1.5.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(if (active && enabled) ProomColor.cast else Color.Transparent)
         )
     }
 }
@@ -225,7 +224,7 @@ private fun PanelLabel(text: String) {
     Text(
         text,
         color = ProomColor.muted,
-        fontSize = 10.5.sp,
+        fontSize = ProomSp(10.5.sp),
         fontWeight = FontWeight.Medium,
         letterSpacing = 1.6.sp,
     )
@@ -267,14 +266,14 @@ private fun LevelSlider(
             val filled = size.width * value.coerceIn(0f, 1f)
             if (filled > 0.5f) {
                 drawRoundRect(
-                    brush = Brush.horizontalGradient(listOf(ProomColor.accent2, ProomColor.accent)),
+                    brush = Brush.horizontalGradient(listOf(ProomColor.castSoft, ProomColor.cast)),
                     topLeft = Offset(0f, cy - r),
                     size = Size(filled, r * 2),
                     cornerRadius = CornerRadius(r),
                 )
             }
             drawCircle(
-                color = Color(0xFFFFF6E6),
+                color = ProomColor.castSoft,
                 radius = 4.5.dp.toPx(),
                 center = Offset(filled, cy),
             )
@@ -295,36 +294,44 @@ internal fun PanelRow(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Row(
-        modifier
-            .clip(RoundedCornerShape(ProomShape.md))
-            .background(ProomColor.surface)
-            .border(1.dp, ProomColor.line, RoundedCornerShape(ProomShape.md))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 15.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
+    // 去掉方块外框，改成两行行式 + 一根细线：一眼能读出「这是什么、里面有几种」，
+    // 而不是先看见两块和播放键同样重的灰色矩形。
+    Column(modifier) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 2.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    color = ProomColor.text,
+                    fontSize = ProomSp(14.sp),
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    subtitle,
+                    color = ProomColor.muted,
+                    fontSize = ProomSp(11.5.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
             Text(
-                title,
-                color = ProomColor.text,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                subtitle,
-                color = ProomColor.muted,
-                fontSize = 11.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                "›",
+                color = ProomColor.cast.copy(alpha = 0.7f),
+                fontSize = ProomSp(19.sp),
             )
         }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "›",
-            color = ProomColor.accent.copy(alpha = 0.6f),
-            fontSize = 19.sp,
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(ProomColor.line.copy(alpha = 0.55f))
         )
     }
 }

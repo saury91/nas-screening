@@ -16,6 +16,8 @@ import com.projectionroom.shared.cast.CastHub
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.widthIn
@@ -45,6 +47,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -56,6 +59,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.launch
@@ -66,11 +70,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,7 +105,11 @@ import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.BufferDots
 import com.projectionroom.ui.component.PlayerIcons
 import com.projectionroom.ui.component.TabIcons
+import com.projectionroom.ui.component.tvFocusRing
+import com.projectionroom.ui.theme.LocalProomTv
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.ProomSp
+import com.projectionroom.ui.theme.TvLayout
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -159,6 +180,15 @@ private fun applyVolume(context: Context, v: Float) {
     }
 }
 
+/**
+ * 进度读数。
+ *
+ * 时长还没探到时（刚起播 / 直播回看 / 源没给 duration）不要印 "/ 00:00"：
+ * 「24:39 / 00:00」看起来像这片只有零秒、或者进度条坏了，直接用 "--:--"。
+ */
+private fun progressText(position: Long, duration: Long): String =
+    "${formatTime(position)} / ${if (duration > 0) formatTime(duration) else "--:--"}"
+
 private fun formatTime(ms: Long): String {
     if (ms <= 0) return "00:00"
     val total = ms / 1000
@@ -220,10 +250,24 @@ fun PlayerScreen(
      * 壳收到后把页面换成遥控器页，同时本页整个销毁 —— 本地播放器跟着释放，
      * 缓冲和声音一起停掉。这正是「投上去以后手机不该继续放着」的意思。
      *
-     * 两个参数只会有一个非空：走 NAS 名录的电视给 Target，局域网 DLNA 给 CastDevice。
+     * 三个参数只会有一个非空：走 NAS 名录的电视给 Target，局域网 DLNA 给
+     * CastDevice，自定义协议（PROOM-CAST/1）给 LanCastTarget。
      */
-    onCastStarted: (line: Int, ep: Int, nas: CastApi.Target?, dlna: com.projectionroom.shared.cast.CastDevice?) -> Unit =
-        { _, _, _, _ -> },
+    onCastStarted: (
+        line: Int,
+        ep: Int,
+        nas: CastApi.Target?,
+        dlna: com.projectionroom.shared.cast.CastDevice?,
+        lan: com.projectionroom.shared.cast.LanCastTarget?,
+    ) -> Unit = { _, _, _, _, _ -> },
+    /**
+     * 投屏面板里点了「扫码连接电视」。
+     *
+     * 相机和路由都在壳里（ui-phone 依赖 ui-media，反过来拿不到），
+     * 所以这里只发出「用户想扫码」这个动作，扫到地址后由壳走
+     * [onCastStarted] 的 `lan` 分支把页面换掉。
+     */
+    onScanCast: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -236,9 +280,6 @@ fun PlayerScreen(
     DisposableEffect(rotateLandscape) {
         val act = context.findActivity()
         if (OrientationMemory.initial == null) OrientationMemory.initial = act?.requestedOrientation
-        if (rotateLandscape && act != null) {
-            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        }
         onDispose {
             // 手机上直接锁回竖屏：比"还原 UNSPECIFIED"确定得多——
             // 系统旋转被锁住时 UNSPECIFIED 不会自己转回来，界面就卡在横屏
@@ -250,6 +291,21 @@ fun PlayerScreen(
                 lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
                 w.attributes = lp
             }
+        }
+    }
+
+    // 转横屏本身还要兜一层。SENSOR_LANDSCAPE 语义是「请按传感器方向横过来」，
+    // 系统开着方向锁定、或厂商省电策略把它拽回竖屏时，这句请求会被无视——
+    // 表现就是播放页竖着打开、2.35:1 的片子缩成中间一条。
+    // 半秒后确认一次：没转成横屏就换成固定 LANDSCAPE（固定方向不吃传感器、也不吃旋转锁定）
+    LaunchedEffect(rotateLandscape, activity) {
+        if (!rotateLandscape) return@LaunchedEffect
+        val act = activity ?: return@LaunchedEffect
+        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        delay(500)
+        val r = runCatching { act.display?.rotation }.getOrNull() ?: return@LaunchedEffect
+        if (r == android.view.Surface.ROTATION_0 || r == android.view.Surface.ROTATION_180) {
+            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         }
     }
 
@@ -286,6 +342,29 @@ fun PlayerScreen(
     var speed by remember { mutableFloatStateOf(1f) }
     var hint by remember { mutableStateOf<String?>(null) }
 
+    // ── 遥控器 ──
+    // 电视上的一切都靠焦点：控制层出现时把焦点送到主按钮，
+    // 焦点在控制层里走动时重置自动收起的计时（否则正在选集，5 秒后整块消失）
+    val focusManager = LocalFocusManager.current
+    val playFocus = remember { FocusRequester() }
+    // 进度条进不了焦点树（横贯整屏的细条，方向导航找不到、TAB 跳过、
+    // requestFocus 不报错也不落焦），所以不搬焦点，改用状态：
+    // 播放键上键 → seekMode=true（进度条画成聚焦态），左右调进度，OK/上下退出。
+    var seekMode by remember { mutableStateOf(false) }
+    // 播放器本体也是个焦点目标：控制层收起后焦点停在这里，
+    // 遥控器按键才继续走 onPreviewKeyEvent（详见下面 clearFocus 那段的注释）
+    val rootFocus = remember { FocusRequester() }
+    var focusTick by remember { mutableIntStateOf(0) }
+
+    fun seekBy(deltaMs: Long) {
+        if (live) return
+        val max = exo.duration.coerceAtLeast(0L)
+        val target = (exo.currentPosition + deltaMs).coerceAtLeast(0L)
+        exo.seekTo(if (max > 0) target.coerceAtMost(max) else target)
+        position = exo.currentPosition
+        hint = if (deltaMs > 0) "${deltaMs / 1000} 秒 »" else "« ${-deltaMs / 1000} 秒"
+    }
+
     // ── 投屏（DLNA）──
     // 设备发现、SOAP 控制在 shared 的 DlnaClient 里；这里只管界面状态
     val dlna = remember { com.projectionroom.shared.cast.DlnaClient() }
@@ -299,32 +378,59 @@ fun PlayerScreen(
         mutableStateOf<List<com.projectionroom.shared.cast.CastApi.Target>>(emptyList())
     }
     var castNas by remember { mutableStateOf<com.projectionroom.shared.cast.CastApi.Target?>(null) }
+    // 第三条腿：自定义协议（PROOM-CAST/1）直连。不走 NAS、不依赖 DLNA，
+    // 倍速/音量/第几集/请求头都能带过去 —— 面板上「同网直连」那一组就是它
+    val lanCast = remember { com.projectionroom.shared.cast.LanCastClient() }
+    var castLanDevices by remember {
+        mutableStateOf<List<com.projectionroom.shared.cast.LanCastTarget>>(emptyList())
+    }
+    var castLan by remember { mutableStateOf<com.projectionroom.shared.cast.LanCastTarget?>(null) }
     // 电视那边当前是不是在播：手机当遥控器时要靠它决定发 pause 还是 play
     var casting by remember { mutableStateOf(false) }
     fun scanCast() {
         if (castScanning) return
         castScope.launch {
             castScanning = true
-            // 两条腿一起扫：NAS 名录覆盖跨网，SSDP 覆盖「NAS 关机但同 Wi-Fi」。
-            // NAS 不可达时 targets() 返回空，不影响局域网这一路。
-            val nasList = com.projectionroom.shared.cast.CastHub.client
-                ?.targets(com.projectionroom.shared.cast.CastHub.selfId)
-                .orEmpty()
-            castNasDevices = nasList.filter {
-                it.isTv && !com.projectionroom.shared.cast.CastHub.isMine(it)
-            }
-            // 退出播放页再进来：电视还在替自己播，但 castNas 是 remember，
-            // 页面一换就没了 —— 不接回来的话面板写着「正在播」，手机上按暂停
-            // 却只暂停了本机。owner 是自己才恢复，别人投的不碰。
-            if (castNas == null) {
-                castNas = nasList.firstOrNull {
-                    it.owner.isNotBlank() &&
-                        it.owner == com.projectionroom.shared.cast.CastHub.selfId &&
-                        it.state?.playing == true
+            // 三路一起跑，而且**谁回来谁上屏**。
+            // 早前是「先等 NAS 名录、再并发扫局域网、最后一起赋值」：NAS 不在
+            // 或信号差时，HTTP 要等好几秒超时，局域网那两路明明几十毫秒就有
+            // 结果，却被压在 NAS 后面 —— 这就是「发现要等半天」的真正原因。
+            val nasJob = launch {
+                // NAS 名录覆盖跨网，NAS 不可达时返回空，不影响局域网这一路
+                val nasList = runCatching {
+                    com.projectionroom.shared.cast.CastHub.client
+                        ?.targets(com.projectionroom.shared.cast.CastHub.selfId)
+                        .orEmpty()
+                }.getOrDefault(emptyList())
+                castNasDevices = nasList.filter {
+                    it.isTv && !com.projectionroom.shared.cast.CastHub.isMine(it)
+                }
+                // 退出播放页再进来：电视还在替自己播，但 castNas 是 remember，
+                // 页面一换就没了 —— 不接回来的话面板写着「正在播」，手机上按暂停
+                // 却只暂停了本机。owner 是自己才恢复，别人投的不碰。
+                if (castNas == null) {
+                    castNas = nasList.firstOrNull {
+                        it.owner.isNotBlank() &&
+                            it.owner == com.projectionroom.shared.cast.CastHub.selfId &&
+                            it.state?.playing == true
+                    }
                 }
             }
-            castDevices = runCatching { dlna.discover() }.getOrDefault(emptyList())
+            // 自定义协议只依赖一次 UDP 广播 + 一次应答，通常 100~200ms 就回来
+            val lanJob = launch {
+                castLanDevices = runCatching { lanCast.discover() }.getOrDefault(emptyList())
+            }
+            // SSDP 慢一档（多播、设备各自回包），单独一路，回来即上屏
+            val dlnaJob = launch {
+                castDevices = runCatching { dlna.discover() }.getOrDefault(emptyList())
+            }
+            // 只等局域网这两路：它们是「本机能不能直投」的答案，正常半秒内就有。
+            // NAS 那路可能是几秒起步的超时（NAS 关机 / 手机在外网），
+            // 让它自己回来补列表，不能拖着「还在搜…」一直转。
+            lanJob.join()
+            dlnaJob.join()
             castScanning = false
+            nasJob.join()
         }
     }
 
@@ -355,6 +461,38 @@ fun PlayerScreen(
                 break
             }
             kotlinx.coroutines.delay(2_000)
+        }
+    }
+
+    // 自定义协议：电视是我们自己的接收端，本地轮询一次一毫秒级，直接 1 秒一拉
+    LaunchedEffect(castLan?.base) {
+        val target = castLan ?: return@LaunchedEffect
+        var misses = 0
+        while (true) {
+            val s = lanCast.state(target.base)
+            when {
+                // 连续三次拿不到才判掉线：电视解码大码流时偶发一次超时很正常
+                s == null -> if (++misses >= 3) {
+                    castLan = null
+                    casting = false
+                    hint = "和电视的连接断了"
+                    break
+                }
+                // 电视那头自己退出了播放页
+                s.url.isBlank() -> {
+                    castLan = null
+                    casting = false
+                    hint = "电视已停止播放"
+                    break
+                }
+                else -> {
+                    misses = 0
+                    nasPos = s.position
+                    nasDur = s.duration
+                    nasPlaying = s.playing
+                }
+            }
+            delay(1_000)
         }
     }
 
@@ -396,9 +534,48 @@ fun PlayerScreen(
                 casting = true
                 // 本机暂停，声音只从电视出
                 exo.pause()
-                onCastStarted(lineIndex, epIndex, null, d)
+                onCastStarted(lineIndex, epIndex, null, d, null)
             } else {
                 hint = "投屏失败：${r.exceptionOrNull()?.message ?: "电视没响应"}"
+            }
+        }
+    }
+
+    /**
+     * 自定义协议直投（PROOM-CAST/1）。
+     *
+     * 和 DLNA 的差别不只是「不问 NAS」：`line/ep/episode` 和请求头是作为
+     * 指令字段发过去的，电视接收端原样塞进播放页，所以「第 8 集」这种
+     * 信息不会在电视上变成「投屏内容」。
+     */
+    fun doCastLan(t: com.projectionroom.shared.cast.LanCastTarget) {
+        castOpen = false
+        val url = playUrl.orEmpty()
+        if (url.isBlank()) { hint = "还没有可播的地址"; return }
+        castScope.launch {
+            val ok = lanCast.send(
+                t.base,
+                CastApi.Command(
+                    kind = "play",
+                    url = url,
+                    title = vod.name,
+                    position = 0,
+                    headers = castHeaders(),
+                    vod = vod.name,
+                    line = lineIndex,
+                    ep = epIndex,
+                    episode = vod.lines.getOrNull(lineIndex)?.episodes?.getOrNull(epIndex)?.name.orEmpty(),
+                ),
+            )
+            if (ok) {
+                castLan = t
+                castTarget = null
+                castNas = null
+                casting = true
+                exo.pause()
+                onCastStarted(lineIndex, epIndex, null, null, t)
+            } else {
+                hint = "投屏失败：电视没响应"
             }
         }
     }
@@ -439,7 +616,7 @@ fun PlayerScreen(
                 castTarget = null
                 casting = true
                 exo.pause()
-                onCastStarted(lineIndex, epIndex, t, null)
+                onCastStarted(lineIndex, epIndex, t, null, null)
             } else {
                 hint = "投屏失败：电视没响应"
             }
@@ -450,12 +627,19 @@ fun PlayerScreen(
      * 手动地址投屏。
      *
      * 电视不答 SSDP 的情况真实存在：路由开了 AP 隔离、电视和手机在
-     * 不同 VLAN、老电视的 SSDP 只回广播不回组播。这时候填一句
-     * `192.0.2.8:49520` 就能连上，比「找不到设备」干瞪眼强。
+     * 不同 VLAN、老电视的 SSDP 只回广播不回组播。这时候填一句地址就能连，
+     * 比「找不到设备」干瞪眼强。
+     *
+     * 先问 `/proom/info`：应答了就说明对面是我们自己的接收端，走自定义协议
+     * （能带倍速/音量/请求头）；不答再退回 DLNA 的 description.xml。
+     * 用户填 `192.0.2.8:49520`（DMR 端口）或 `*.xml` 时直接跳过探测，
+     * 省掉两秒白等。
      */
     fun castManual(raw: String) {
         val addr = raw.trim()
         if (addr.isBlank()) return
+        val base = com.projectionroom.shared.cast.LanCast.normalizeBase(addr)
+        val looksDlna = addr.endsWith(".xml") || base?.endsWith(":49520") == true
         val loc = when {
             addr.startsWith("http://") || addr.startsWith("https://") ->
                 if (addr.endsWith(".xml")) addr else addr.trimEnd('/') + "/description.xml"
@@ -463,6 +647,20 @@ fun PlayerScreen(
         }
         castScope.launch {
             castScanning = true
+            if (!looksDlna && base != null) {
+                val info = lanCast.info(base)
+                if (info != null) {
+                    castScanning = false
+                    doCastLan(
+                        com.projectionroom.shared.cast.LanCastTarget(
+                            base = base,
+                            name = info.name.ifBlank { "自定义协议电视" },
+                            id = info.id,
+                        ),
+                    )
+                    return@launch
+                }
+            }
             val d = dlna.describe(loc)
             castScanning = false
             when {
@@ -594,13 +792,48 @@ fun PlayerScreen(
         }
     }
 
-    // 4 秒无操作自动收起（锁定时只留锁图标）
-    // key 必须带上 sidePanel：否则打开抽屉时计时器还在跑，
-    // 4 秒后照样把整个控制层（含抽屉）一起收掉。
-    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen) {
+    // 无操作自动收起（锁定时只留锁图标）
+    // key 必须带上 sidePanel：否则打开抽屉时计时器还在跑，几秒后照样把整个控制层（含抽屉）一起收掉。
+    // 电视上再带上 focusTick：遥控器每动一下都重新计时，否则用户正在选集时整块会消失。
+    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen, focusTick) {
         if (controlsVisible && !locked && panel == Panel.None && !sidePanel && !castOpen) {
-            delay(5_000)
+            delay(if (isTv) 8_000 else 5_000)
             controlsVisible = false
+        }
+    }
+
+    // 控制层出现 → 焦点落到主按钮（按 OK 就是暂停）；收起 → 焦点还给播放器根节点，
+    // 否则方向键会被一层看不见的按钮吃掉，表现为「按了没反应」。
+    // 收回焦点必须用 requestFocus(rootFocus) 而不是 clearFocus()：后者让整棵树
+    // 都没有焦点，遥控器的按键就再也进不到 onPreviewKeyEvent 了。
+    LaunchedEffect(controlsVisible) {
+        if (!controlsVisible) {
+            // 控制层收起时一并退出调进度模式，否则左右键会继续被它接管
+            seekMode = false
+            if (isTv) {
+                runCatching { rootFocus.requestFocus() }
+            } else {
+                focusManager.clearFocus()
+            }
+        } else if (isTv) {
+            // 不能拿 requestFocus 没抛异常当成功：控制层刚组合时焦点树还没稳，
+            // 请求会"成功但没落地"。多按几次，最后一次一定落在已就绪的节点上。
+            repeat(4) {
+                delay(80)
+                runCatching { playFocus.requestFocus() }
+            }
+        }
+    }
+
+    // 抽屉关掉后焦点得有个主人：留在刚被移除的节点上，遥控器会静默几秒，
+    // 表现就是「按了没反应」。还回播放键，和唤出控制层时的落点一致。
+    LaunchedEffect(sidePanel) {
+        if (sidePanel || !controlsVisible || !isTv) return@LaunchedEffect
+        // 抽屉刚被移除时焦点树还在重建，这时 requestFocus 不会报错也不生效，
+        // 所以要等它重建完再多请求几次，否则遥控器按 OK 像没反应。
+        repeat(5) {
+            delay(90)
+            runCatching { playFocus.requestFocus() }
         }
     }
 
@@ -619,9 +852,86 @@ fun PlayerScreen(
         }
     }
 
-    BackHandler(enabled = !locked) { onBack() }
+    // 面板开着时，返回键先关面板 —— 否则遥控器上按返回直接把整页播掉了，
+    // 用户只是想退出「播放设置」
+    BackHandler(enabled = !locked) {
+        when {
+            sidePanel -> sidePanel = false
+            panel != Panel.None -> panel = Panel.None
+            castOpen -> castOpen = false
+            else -> onBack()
+        }
+    }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            // 根节点自己必须可聚焦，而且控制层收起时要把焦点收回来。
+            // 预览事件只沿「焦点路径」下发：一旦 clearFocus() 让整棵树都没有焦点，
+            // 下面这个 onPreviewKeyEvent 就永远不会被调用 —— 表现是播放页 8 秒后
+            // 控制层自动收起，遥控器怎么按都没反应（连 OK 都唤不回来）。
+            .focusRequester(rootFocus)
+            .focusable()
+            // 电视遥控器：控制层收起时方向键直接可用，不必先「唤出再找」
+            .onPreviewKeyEvent { e ->
+                if (!isTv || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // 调进度模式：焦点仍停在播放键上（进度条本身进不了焦点树），
+                // 按键在这里统一分发 —— 左右快进退、OK/上下退出，别让 OK 落成暂停
+                if (seekMode) {
+                    return@onPreviewKeyEvent when (e.key) {
+                        Key.DirectionLeft -> { seekBy(-10_000); true }
+                        Key.DirectionRight -> { seekBy(10_000); true }
+                        Key.DirectionCenter, Key.Enter,
+                        Key.DirectionUp, Key.DirectionDown,
+                        -> { seekMode = false; true }
+                        else -> false
+                    }
+                }
+                when (e.key) {
+                    // 返回键走预览事件：抽屉里点着格子时 BackHandler 收不到
+                    // （实测按 BACK 一次完全没反应，得按两次），在根节点先截住
+                    Key.Back -> when {
+                        sidePanel -> { sidePanel = false; true }
+                        panel != Panel.None -> { panel = Panel.None; true }
+                        castOpen -> { castOpen = false; true }
+                        else -> false
+                    }
+                    // 收起状态：左右 = 快退/快进 10 秒；上下/OK = 唤出控制层
+                    Key.DirectionLeft -> if (controlsVisible) false else { seekBy(-10_000); true }
+                    Key.DirectionRight -> if (controlsVisible) false else { seekBy(10_000); true }
+                    Key.DirectionUp, Key.DirectionDown ->
+                        if (controlsVisible) false else { controlsVisible = true; true }
+                    Key.DirectionCenter, Key.Enter ->
+                        if (controlsVisible) false else { controlsVisible = true; true }
+                    Key.MediaPlayPause -> {
+                        if (exo.isPlaying) exo.pause() else exo.play()
+                        true
+                    }
+                    Key.MediaNext -> {
+                        if (epIndex + 1 < (line?.episodes?.size ?: 0)) {
+                            epIndex += 1
+                            controlsVisible = true
+                        }
+                        true
+                    }
+                    Key.MediaPrevious -> {
+                        if (epIndex > 0) {
+                            epIndex -= 1
+                            controlsVisible = true
+                        }
+                        true
+                    }
+                    // 菜单键直达「选集与线路」
+                    Key.Menu -> {
+                        sidePanel = true
+                        controlsVisible = true
+                        true
+                    }
+                    else -> false
+                }
+            },
+    ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -726,7 +1036,7 @@ fun PlayerScreen(
                     .background(Color.Black.copy(alpha = 0.62f))
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                Text(hint ?: "", color = Color.White, fontSize = 13.sp)
+                Text(hint ?: "", color = Color.White, fontSize = ProomSp(13.sp))
             }
         }
 
@@ -738,7 +1048,11 @@ fun PlayerScreen(
             modifier = Modifier.align(Alignment.Center),
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                BufferDots()
+                // 电视上点径放大到 14dp：10dp 的波点在 3 米外看不出在动
+                BufferDots(
+                    dot = if (isTv) 14.dp else 10.dp,
+                    gap = if (isTv) 14.dp else 11.dp,
+                )
                 Text(
                     text = if (live) {
                         "正在连接" + (line?.site?.let { " · $it" } ?: "")
@@ -746,7 +1060,7 @@ fun PlayerScreen(
                         line?.let { "第 ${epIndex + 1} 集 · ${it.site}" } ?: ""
                     },
                     color = Color.White.copy(alpha = 0.55f),
-                    fontSize = 11.sp,
+                    fontSize = if (isTv) 16.sp else ProomSp(11.sp),
                     modifier = Modifier.padding(top = 10.dp),
                 )
             }
@@ -757,11 +1071,11 @@ fun PlayerScreen(
                 Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(msg, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+                Text(msg, color = Color.White.copy(alpha = 0.75f), fontSize = ProomSp(14.sp))
                 Text(
                     if (live) "换个台，或者点右下角换一条线路" else "点左上角返回，换一条线路",
                     color = Color.White.copy(alpha = 0.45f),
-                    fontSize = 12.sp,
+                    fontSize = ProomSp(12.sp),
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
@@ -772,8 +1086,16 @@ fun PlayerScreen(
         // 试过三种，横屏下顶栏那两个按钮的命中区域都会和绘制位置错开
         // （底栏能点、顶栏点不动）。直接条件渲染，位置和命中就是一致的。
         if (controlsVisible || locked) {
-            Box(Modifier.fillMaxSize()) {
-                if (!locked) {
+            // hasFocus：子树里有焦点就算（焦点在任意按钮上），用来给自动收起计时续命
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .onFocusChanged { if (it.hasFocus) focusTick++ },
+            ) {
+                // 面板展开时把上下两条栏收起来：右侧抽屉直接压在片名和进度按钮上，
+                // 「播放设置」和「狠狠骗我 · 第 1 集」叠字、暂停键被切一半
+                val overlayOpen = sidePanel || panel != Panel.None
+                if (!locked && !overlayOpen) {
                     PlayerTopBar(
                         // 直播时标题放到左下角：电视台的台标几乎都在左上角，
                         // 我们的标题压上去会和台标叠字（CCTV 那排尤其明显）
@@ -827,21 +1149,31 @@ fun PlayerScreen(
                     )
                 }
 
-                if (!locked) {
+                if (!locked && !overlayOpen) {
                     // 投屏中换成电视的进度与播放态：手机这时候是个遥控器，
                     // 显示自己的位置既没用，也会让暂停键看起来「按了没反应」
-                    val castingNas = castNas != null
+                    val castingRemote = castNas != null || castLan != null
                     PlayerBottomBar(
-                        position = if (castingNas) nasPos else position,
-                        duration = if (castingNas) nasDur else duration,
+                        position = if (castingRemote) nasPos else position,
+                        duration = if (castingRemote) nasDur else duration,
                         speed = speed,
                         live = live,
                         liveTitle = episode?.name.orEmpty(),
                         liveCounter = if (live) "${epIndex + 1} / ${line?.episodes?.size ?: 0} 台" else "",
+                        casting = castNas != null || castTarget != null || castLan != null,
+                        castTitle = vod.name,
+                        castSub = if (live) {
+                            episode?.name.orEmpty()
+                        } else {
+                            line?.let { "第 ${epIndex + 1} 集 · ${it.site}" }.orEmpty()
+                        },
                         hasPrev = epIndex > 0,
                         hasNext = epIndex + 1 < (line?.episodes?.size ?: 0),
-                        isPlaying = if (castingNas) nasPlaying else exo.isPlaying,
+                        isPlaying = if (castingRemote) nasPlaying else exo.isPlaying,
                         modifier = Modifier.align(Alignment.BottomCenter),
+                        playFocus = playFocus,
+                        seekFocused = seekMode,
+                        onSeekFocus = { seekMode = it },
                         onSeek = {
                             // 投屏中把进度也发给电视：本机在放的是同一路流，
                             // 只改本机会出现"手机跳了电视没动"的诡异状态
@@ -858,6 +1190,12 @@ fun PlayerScreen(
                                 // 先按下的位置回填，不然要等下一轮轮询进度条才跟上
                                 nasPos = it
                             }
+                            castLan?.let { t ->
+                                castScope.launch {
+                                    lanCast.send(t.base, CastApi.Command(kind = "seek", position = it))
+                                }
+                                nasPos = it
+                            }
                             exo.seekTo(it)
                             position = it
                         },
@@ -869,14 +1207,26 @@ fun PlayerScreen(
                             }
                         },
                         onTogglePlay = {
-                            val lan = castTarget
+                            val dlnaT = castTarget
                             val nas = castNas
-                            if (lan != null) {
+                            val lanT = castLan
+                            if (dlnaT != null) {
                                 // 投屏中：手机变成遥控器，本机保持暂停
                                 val wasPlaying = casting
                                 castScope.launch {
-                                    if (wasPlaying) dlna.pause(lan) else dlna.resume(lan)
+                                    if (wasPlaying) dlna.pause(dlnaT) else dlna.resume(dlnaT)
                                     casting = !wasPlaying
+                                }
+                            } else if (lanT != null) {
+                                // 按电视的真实播放态发指令：本地的 casting 只表示
+                                // 「有没有在投」，电视被电视遥控器暂停时它不会变
+                                val wasPlaying = nasPlaying
+                                castScope.launch {
+                                    lanCast.send(
+                                        lanT.base,
+                                        CastApi.Command(kind = if (wasPlaying) "pause" else "resume"),
+                                    )
+                                    nasPlaying = !wasPlaying
                                 }
                             } else if (nas != null) {
                                 // 按钮画的是电视的播放态，指令就按它来，否则会出现
@@ -911,8 +1261,12 @@ fun PlayerScreen(
                             // 直播：线路 = 当前这一台的几个备用源
                             sources.mapIndexed { i, _ -> "源 ${i + 1}" }
                         } else {
+                            // 抽屉里一格只有 230dp：`艾旦 | 蓝光 · 线路2` 正好差两个字被截成
+                            // 「…线路2…」，而线路号正是选它的理由。压掉分隔符两侧的空格，
+                            // 省出两个字刚好装下
                             vod.lines.map { l ->
-                                if (l.quality.isBlank()) l.site else "${l.site} · ${l.quality}"
+                                val q = if (l.quality.isBlank()) "" else "·${l.quality}"
+                                (l.site + q).replace(" · ", "·").replace(" | ", "|")
                             }
                         },
                         selectedLine = if (live) srcIndex else lineIndex,
@@ -968,13 +1322,16 @@ fun PlayerScreen(
             CastSheet(
                 devices = castDevices,
                 nasDevices = castNasDevices,
+                lanDevices = castLanDevices,
                 scanning = castScanning,
-                current = castTarget?.name ?: castNas?.name.orEmpty(),
+                current = castTarget?.name ?: castNas?.name ?: castLan?.name.orEmpty(),
                 casting = casting,
                 onRescan = { scanCast() },
                 onPick = { d -> doCast(d) },
                 onPickNas = { t -> doCastNas(t) },
+                onPickLan = { t -> doCastLan(t) },
                 onManual = { addr -> castManual(addr) },
+                onScan = onScanCast,
                 onStop = {
                     castTarget?.let { d -> castScope.launch { dlna.stop(d) } }
                     castNas?.let { t ->
@@ -982,8 +1339,14 @@ fun PlayerScreen(
                             CastHub.client?.send(t.id, CastHub.selfId, CastApi.Command(kind = "stop"))
                         }
                     }
+                    castLan?.let { t ->
+                        castScope.launch {
+                            lanCast.send(t.base, CastApi.Command(kind = "stop"))
+                        }
+                    }
                     castTarget = null
                     castNas = null
+                    castLan = null
                     casting = false
                     castOpen = false
                     hint = "已停止投屏"
@@ -993,6 +1356,18 @@ fun PlayerScreen(
         }
     }
 }
+
+/* ─────────────────────── 投屏遥控配色 ─────────────────────── */
+
+/**
+ * 投屏态的冷色强调，与接收端 CastPlayerScreen 用同一组值。
+ *
+ * 播放控制走青、内容（封面/评分/收藏）留在暖金：两套颜色各管一件事，
+ * 投屏时一眼就能分出「这块是遥控器，不是影片信息」。
+ */
+private val CastCyan = ProomColor.cast
+private val CastCyanLight = ProomColor.castSoft
+private val CastCyanInk = ProomColor.castInk
 
 /* ─────────────────────── 顶栏 ─────────────────────── */
 
@@ -1044,14 +1419,15 @@ private fun PlayerTopBar(
                 trailing = {
                     if (!liveChannel.isNullOrBlank()) {
                         Box(
-                            Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onToggleFav),
+                            Modifier.size(TvLayout.minTouch).clip(CircleShape).tvFocusRing(CircleShape)
+                                .clickable(onClick = onToggleFav),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 imageVector = if (favOn) TabIcons.HeartOn else TabIcons.Heart,
                                 contentDescription = if (favOn) "取消收藏这个台" else "收藏这个台",
                                 tint = if (favOn) ProomColor.accent else Color.White,
-                                modifier = Modifier.size(21.dp),
+                                modifier = Modifier.size(23.dp),
                             )
                         }
                     }
@@ -1086,7 +1462,7 @@ private fun PlayerTopBar(
                 Text(
                     title,
                     color = Color.White,
-                    fontSize = 15.sp,
+                    fontSize = ProomSp(15.sp),
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1095,7 +1471,7 @@ private fun PlayerTopBar(
                     Text(
                         subtitle,
                         color = Color.White.copy(alpha = 0.55f),
-                        fontSize = 11.sp,
+                        fontSize = ProomSp(11.sp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp),
@@ -1107,7 +1483,7 @@ private fun PlayerTopBar(
         // 和手势/内容层叠在一起，点起来很飘
         if (!liveChannel.isNullOrBlank()) {
             Box(
-                Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onToggleFav),
+                Modifier.size(40.dp).clip(CircleShape).tvFocusRing(CircleShape).clickable(onClick = onToggleFav),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -1142,10 +1518,18 @@ private fun PlayerBottomBar(
     /** 直播：台名与「第几台 / 共几台」 */
     liveTitle: String = "",
     liveCounter: String = "",
+    /** 投屏中：底栏换成玻璃遥控条，进度改青色，与电视端控制条同一套语言 */
+    casting: Boolean = false,
+    castTitle: String = "",
+    castSub: String = "",
     hasPrev: Boolean,
     hasNext: Boolean,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
+    playFocus: FocusRequester? = null,
+    /** 电视：进度条处于调节中（见 PlayerSeekBar 的 focused 注释） */
+    seekFocused: Boolean = false,
+    onSeekFocus: (Boolean) -> Unit = {},
     onSeek: (Long) -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
@@ -1156,34 +1540,43 @@ private fun PlayerBottomBar(
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
     val ratio = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+    // 电视端整条控制层按 10-foot UI 重排：左右让到 5% 安全区、按钮放大、进度条加粗
+    val tv = LocalProomTv.current
 
     Column(
         modifier
             .fillMaxWidth()
             .background(
                 // 三段式而不是两端直落：台名/时间贴着下沿，只给 0.72 的黑
-                // 在明亮的雪景、白墙镜头上会糊成一片看不清
+                // 在明亮的雪景、白墙镜头上会糊成一片看不清。
+                // 电视再压深一档 —— 新闻台、白墙镜头下 1× 和「…」几乎看不见
                 Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.42f to Color.Black.copy(alpha = 0.45f),
-                    1f to Color.Black.copy(alpha = 0.85f),
+                    0.42f to Color.Black.copy(alpha = if (tv) 0.62f else 0.45f),
+                    1f to Color.Black.copy(alpha = if (tv) 0.92f else 0.85f),
                 )
             )
             .navigationBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 10.dp),
+            .padding(
+                start = if (tv) TvLayout.insetX else 16.dp,
+                end = if (tv) TvLayout.insetX else 16.dp,
+                // 下沿留 27dp：电视过扫描会把贴边的进度条/时间切掉一截
+                top = if (tv) 28.dp else 24.dp,
+                bottom = if (tv) TvLayout.insetY else 10.dp,
+            ),
     ) {
         if (live) {
             Column(Modifier.padding(bottom = 10.dp)) {
                 Text(
                     liveTitle,
                     color = Color.White,
-                    fontSize = 14.sp,
+                    fontSize = if (tv) 22.sp else ProomSp(14.sp),
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Row(
-                    Modifier.padding(top = 3.dp).height(16.dp),
+                    Modifier.padding(top = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // 金色而不是红点：整套界面只有暖金一个强调色，
@@ -1194,7 +1587,7 @@ private fun PlayerBottomBar(
                     Text(
                         if (liveCounter.isBlank()) "直播中" else "直播中 · $liveCounter",
                         color = Color.White.copy(alpha = 0.62f),
-                        fontSize = 11.sp,
+                        fontSize = if (tv) 16.sp else ProomSp(11.sp),
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
@@ -1206,7 +1599,9 @@ private fun PlayerBottomBar(
             PlayerSeekBar(
                 position = position,
                 duration = duration,
+                accent = casting,
                 modifier = Modifier.fillMaxWidth(),
+                focused = seekFocused,
                 onProgress = {
                     dragging = true
                     dragValue = it
@@ -1218,62 +1613,143 @@ private fun PlayerBottomBar(
             )
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (!live) {
-                Text(
-                    text = "${formatTime(if (dragging) (dragValue * duration).toLong() else position)} / ${formatTime(duration)}",
-                    color = Color.White.copy(alpha = 0.72f),
-                    fontSize = 11.sp,
-                )
-            }
-
-            Spacer(Modifier.weight(1f))
-
+        if (casting) {
+            // 投屏时手机只是个遥控器：时间、片名、控制、选集全收进一条玻璃条，
+            // 不再让「左边时间、中间三个圆钮、右边两个圆钮」散在两端。
+            Spacer(Modifier.height(12.dp))
             Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.White.copy(alpha = 0.07f))
+                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                    .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(CastCyan))
+                Column(Modifier.weight(1f).padding(start = 8.dp, end = 8.dp)) {
+                    Text(
+                        castTitle.ifBlank { "投屏中" },
+                        color = Color.White,
+                        fontSize = ProomSp(13.sp),
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        listOf(castSub, progressText(position, duration))
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · "),
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = ProomSp(10.5.sp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
                 CircleIcon(
                     PlayerIcons.Prev, if (live) "上一台" else "上一集", onPrev,
                     enabled = hasPrev,
                 )
-                // 主按钮：白色实心圆，比两侧大一号
                 Box(
                     Modifier
-                        .size(44.dp)
+                        .size(52.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.92f))
+                        .background(Brush.linearGradient(listOf(CastCyanLight, CastCyan)))
                         .clickable(onClick = onTogglePlay),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = if (isPlaying) PlayerIcons.Pause else PlayerIcons.Play,
                         contentDescription = if (isPlaying) "暂停" else "播放",
-                        tint = Color.Black,
-                        modifier = Modifier.size(22.dp),
+                        tint = CastCyanInk,
+                        modifier = Modifier.size(24.dp),
                     )
                 }
                 CircleIcon(
                     PlayerIcons.Next, if (live) "下一台" else "下一集", onNext,
                     enabled = hasNext,
                 )
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+                Box(Modifier.width(1.dp).height(24.dp).background(Color.White.copy(alpha = 0.12f)))
                 // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
                 if (!live) {
-                    CircleTextChip(if (speed == 1f) "1×" else "${speed}×", onSpeed)
+                    CastTextButton(if (speed == 1f) "1×" else "${speed}×", onSpeed)
                 }
-                CircleIcon(
-                    PlayerIcons.More,
-                    if (live) "换源" else "选集与线路",
-                    onSettings,
-                )
+                CastTextButton(if (live) "换源" else "选集", onSettings)
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!live) {
+                    Text(
+                        text = progressText(
+                            if (dragging) (dragValue * duration).toLong() else position,
+                            duration,
+                        ),
+                        color = Color.White.copy(alpha = 0.72f),
+                        // 电视上时间码是唯一的「进度」读数，15sp 起步，别跟着手机缩
+                        fontSize = if (tv) 16.sp else ProomSp(11.sp),
+                    )
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(if (tv) 16.dp else 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircleIcon(
+                        PlayerIcons.Prev, if (live) "上一台" else "上一集", onPrev,
+                        enabled = hasPrev,
+                    )
+                    // 主按钮：白色实心圆，比两侧大一号；电视上它是默认焦点
+                    Box(
+                        Modifier
+                            .size(if (tv) 72.dp else 44.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.92f))
+                            .then(if (playFocus != null) Modifier.focusRequester(playFocus) else Modifier)
+                            // 上键进「调进度」模式：不搬焦点（进度条进不了焦点树），
+                            // 只切换一个状态，松手即回播放/暂停
+                            .onPreviewKeyEvent { e ->
+                                if (e.type != KeyEventType.KeyDown || e.key != Key.DirectionUp) {
+                                    return@onPreviewKeyEvent false
+                                }
+                                onSeekFocus(true)
+                                true
+                            }
+                            .tvFocusRing(CircleShape, color = ProomColor.accent)
+                            .clickable(onClick = onTogglePlay),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) PlayerIcons.Pause else PlayerIcons.Play,
+                            contentDescription = if (isPlaying) "暂停" else "播放",
+                            tint = Color.Black,
+                            modifier = Modifier.size(if (tv) 34.dp else 22.dp),
+                        )
+                    }
+                    CircleIcon(
+                        PlayerIcons.Next, if (live) "下一台" else "下一集", onNext,
+                        enabled = hasNext,
+                    )
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(if (tv) 20.dp else 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
+                    if (!live) {
+                        CircleTextChip(if (speed == 1f) "1×" else "${speed}×", onSpeed)
+                    }
+                    CircleIcon(
+                        PlayerIcons.More,
+                        if (live) "换源" else "选集与线路",
+                        onSettings,
+                    )
+                }
             }
         }
     }
@@ -1289,84 +1765,140 @@ private fun PlayerBottomBar(
 private fun PlayerSeekBar(
     position: Long,
     duration: Long,
+    /** 投屏态用青色，普通播放保持白色 */
+    accent: Boolean = false,
     modifier: Modifier = Modifier,
+    /**
+     * 电视：进度条是否处于「调节中」。
+     *
+     * 不靠焦点表示 —— 这条横贯整屏的细条在电视上根本进不了焦点树
+     * （clickable / focusable / focusTarget / focusRequester 全试过：
+     * requestFocus 不抛异常也不落焦，方向键和 TAB 都跳过它）。
+     * 所以由上层维护一个 seekMode，视觉上把它画成聚焦态，按键由播放器根节点分发。
+     */
+    focused: Boolean = false,
     onProgress: (Float) -> Unit,
     onSeek: (Long) -> Unit,
 ) {
     var ratio by remember { mutableFloatStateOf(-1f) }
     var dragging by remember { mutableStateOf(false) }
+    val barFocused = focused
     val base = ratio.takeIf { it >= 0f }
         ?: (if (duration > 0) (position.toFloat() / duration) else 0f).coerceIn(0f, 1f)
     val shown = if (dragging) ratio.coerceIn(0f, 1f) else base
+    val tv = LocalProomTv.current
+    // 聚焦反馈要成组出现才看得见：光晕 + 金环 + 手柄放大 + 轨道加粗，
+    // 而且是淡入不是硬切（上一版只有「轨道 28%→50% 白 + 手柄 5→7dp」，
+    // 坐着 3 米看过去就是没反应）
+    val halo by animateFloatAsState(if (barFocused) 1f else 0f, tween(160), label = "seek-halo")
+    val handle by animateFloatAsState(
+        when {
+            dragging || barFocused -> if (tv) 9f else 7f
+            else -> if (tv) 6f else 4.5f
+        },
+        tween(160), label = "seek-handle",
+    )
+    val trackWidth by animateFloatAsState(
+        if (barFocused) (if (tv) 5.5f else 3.5f) else (if (tv) 4f else 2.5f),
+        tween(160), label = "seek-track",
+    )
 
-    Canvas(
-        modifier
-            .height(24.dp)
-            .pointerInput(duration) {
-                detectTapGestures { off ->
-                    if (duration <= 0) return@detectTapGestures
-                    val r = (off.x / size.width).coerceIn(0f, 1f)
-                    ratio = r
-                    onSeek((r * duration).toLong())
-                    ratio = -1f
-                }
-            }
-            .pointerInput(duration) {
-                detectHorizontalDragGestures(
-                    onDragStart = { off ->
-                        dragging = true
-                        ratio = (off.x / size.width).coerceIn(0f, 1f)
-                        onProgress(ratio)
-                    },
-                    onDragEnd = {
-                        dragging = false
-                        if (duration > 0) onSeek((ratio * duration).toLong())
-                        ratio = -1f
-                    },
-                    onHorizontalDrag = { change, _ ->
-                        change.consume()
-                        ratio = (change.position.x / size.width).coerceIn(0f, 1f)
-                        onProgress(ratio)
-                    },
-                )
-            },
+    Box(
+        // 电视上轨道更粗、可聚焦区抬到 48dp；手机上保持 24dp 细条，免得挤掉按钮
+        modifier.height(if (tv) TvLayout.minTouch else 24.dp),
     ) {
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(duration) {
+                    detectTapGestures { off ->
+                        if (duration <= 0) return@detectTapGestures
+                        val r = (off.x / size.width).coerceIn(0f, 1f)
+                        ratio = r
+                        onSeek((r * duration).toLong())
+                        ratio = -1f
+                    }
+                }
+                .pointerInput(duration) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { off ->
+                            dragging = true
+                            ratio = (off.x / size.width).coerceIn(0f, 1f)
+                            onProgress(ratio)
+                        },
+                        onDragEnd = {
+                            dragging = false
+                            if (duration > 0) onSeek((ratio * duration).toLong())
+                            ratio = -1f
+                        },
+                        onHorizontalDrag = { change, _ ->
+                            change.consume()
+                            ratio = (change.position.x / size.width).coerceIn(0f, 1f)
+                            onProgress(ratio)
+                        },
+                    )
+                },
+        ) {
         val cy = size.height / 2f
-        val trackH = 2.5.dp.toPx()
+        val trackH = trackWidth.dp.toPx()
+        val center = androidx.compose.ui.geometry.Offset(size.width * shown, cy)
         drawLine(
-            color = Color.White.copy(alpha = 0.28f),
+            color = Color.White.copy(alpha = 0.28f + 0.24f * halo),
             start = androidx.compose.ui.geometry.Offset(0f, cy),
             end = androidx.compose.ui.geometry.Offset(size.width, cy),
             strokeWidth = trackH,
             cap = androidx.compose.ui.graphics.StrokeCap.Round,
         )
         drawLine(
-            color = Color.White,
+            color = if (accent) CastCyan else Color.White,
             start = androidx.compose.ui.geometry.Offset(0f, cy),
             end = androidx.compose.ui.geometry.Offset(size.width * shown, cy),
             strokeWidth = trackH,
             cap = androidx.compose.ui.graphics.StrokeCap.Round,
         )
+        // 和音乐播放器那条细线进度条同一套聚焦语言：光晕 + 一圈描边 + 手柄放大
+        if (halo > 0.01f) {
+            drawCircle(
+                color = ProomColor.accent.copy(alpha = 0.18f * halo),
+                radius = (handle + 11f).dp.toPx(),
+                center = center,
+            )
+            drawCircle(
+                color = ProomColor.accent.copy(alpha = 0.95f * halo),
+                radius = (handle + 3f).dp.toPx(),
+                center = center,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()),
+            )
+        }
         drawCircle(
-            color = Color.White,
-            radius = (if (dragging) 7f else 5f).dp.toPx(),
-            center = androidx.compose.ui.geometry.Offset(size.width * shown, cy),
+            color = if (accent) CastCyanLight else Color.White,
+            radius = handle.dp.toPx(),
+            center = center,
         )
+        }
+
     }
 }
 
-/** 倍速的小圆钮：文字塞进 48dp 圆形热区，比纯文字 chip 好点 */
+/** 倍速的小圆钮：文字塞进圆形热区，比纯文字 chip 好点 */
 @Composable
 private fun CircleTextChip(text: String, onClick: () -> Unit) {
+    val tv = LocalProomTv.current
     Box(
         Modifier
-            .size(44.dp)
+            .size(if (tv) 56.dp else 44.dp)
+            .tvFocusRing(CircleShape)
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.12f))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp, maxLines = 1)
+        Text(
+            text,
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = if (tv) 18.sp else ProomSp(12.sp),
+            maxLines = 1,
+        )
     }
 }
 
@@ -1413,7 +1945,7 @@ private fun SideGauge(
         Text(
             "${(value.coerceIn(0f, 1f) * 100).roundToInt()}",
             color = Color.White.copy(alpha = 0.75f),
-            fontSize = 11.sp,
+            fontSize = ProomSp(11.sp),
         )
     }
 }
@@ -1441,33 +1973,48 @@ private fun SideSettingsPanel(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tv = LocalProomTv.current
     Column(
         modifier
-            .width(322.dp)
+            // 电视上抽屉要更宽：322dp 里塞 4 列选集，每格只有 60dp，18sp 的集数放不下。
+            // 480dp 时扣掉左右内边距，两列线路每格只剩 196dp（约 8 个字），
+            // 「艾旦|蓝光·线路2」还是差最后一个字；504dp 刚好装下
+            .width(if (tv) 504.dp else 322.dp)
             .fillMaxHeight()
             .background(Color.Black.copy(alpha = 0.94f))
             // 横屏时状态栏还在顶上：不加这个，标题和 ✕ 会顶进状态栏里
             // （截图里 ✕ 和电池图标叠在一起）
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(start = 18.dp, end = 14.dp, top = 4.dp, bottom = 10.dp),
+            .padding(
+                start = if (tv) 28.dp else 18.dp,
+                // 右侧让到 5% 安全区：贴在屏幕边上会被电视过扫描切掉一半
+                end = if (tv) TvLayout.insetX else 14.dp,
+                top = if (tv) 20.dp else 4.dp,
+                bottom = if (tv) TvLayout.insetY else 10.dp,
+            ),
     ) {
         Row(
-            Modifier.fillMaxWidth().height(48.dp),
+            Modifier.fillMaxWidth().height(if (tv) 64.dp else 48.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 title,
                 color = Color.White,
-                fontSize = 15.sp,
+                fontSize = if (tv) 26.sp else ProomSp(15.sp),
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.weight(1f))
             Box(
-                Modifier.size(34.dp).clip(CircleShape).clickable(onClick = onClose),
+                Modifier.size(if (tv) TvLayout.minTouch else 34.dp).clip(CircleShape)
+                    .tvFocusRing(CircleShape).clickable(onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("✕", color = Color.White.copy(alpha = 0.65f), fontSize = 15.sp)
+                Text(
+                    "✕",
+                    color = Color.White.copy(alpha = 0.65f),
+                    fontSize = if (tv) 20.sp else ProomSp(15.sp),
+                )
             }
         }
 
@@ -1475,6 +2022,20 @@ private fun SideSettingsPanel(
         // 选集会被顶到很下面，每次换集都要滑半天。
         // 直播只有线路这一个维度，就直接铺线路，不摆一个单 tab。
         var tab by remember { mutableStateOf(0) }
+        val listState = rememberLazyListState()
+        val currentFocus = remember { FocusRequester() }
+        // 打开抽屉时焦点必须跟着进来。打开它的是控制条上的「⋯」，焦点留在那里的话，
+        // 上下左右还在「暂停 / 倍速 / 更多」之间打转，抽屉看起来就是个死面板 ——
+        // 选不了、也按不到关闭。落点选当前线路那一格：线路动辄二三十条，从头按太费劲。
+        LaunchedEffect(tab) {
+            val perRow = if (tab == 0) 2 else 4
+            val sel = (if (tab == 0) selectedLine else selectedEp).coerceAtLeast(0)
+            if (sel / perRow > 2) runCatching { listState.scrollToItem(sel / perRow) }
+            repeat(12) {
+                if (runCatching { currentFocus.requestFocus() }.isSuccess) return@LaunchedEffect
+                delay(24)
+            }
+        }
         if (episodes.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp),
@@ -1485,7 +2046,7 @@ private fun SideSettingsPanel(
             }
         }
 
-        LazyColumn(Modifier.weight(1f)) {
+        LazyColumn(Modifier.weight(1f), state = listState) {
             if (tab == 0) {
             itemsIndexed(lines.chunked(2)) { rowIdx, row ->
                 Row(
@@ -1494,7 +2055,16 @@ private fun SideSettingsPanel(
                 ) {
                     row.forEachIndexed { i, label ->
                         val idx = rowIdx * 2 + i
-                        SideChip(label, idx == selectedLine, Modifier.weight(1f)) {
+                        SideChip(
+                            label, idx == selectedLine,
+                            Modifier.weight(1f).then(
+                                if (idx == selectedLine.coerceAtLeast(0)) {
+                                    Modifier.focusRequester(currentFocus)
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                        ) {
                             onSelectLine(idx)
                         }
                     }
@@ -1510,7 +2080,16 @@ private fun SideSettingsPanel(
                 ) {
                     row.forEachIndexed { i, name ->
                         val idx = rowIdx * 4 + i
-                        SideChip(name, idx == selectedEp, Modifier.weight(1f)) {
+                        SideChip(
+                            name, idx == selectedEp,
+                            Modifier.weight(1f).then(
+                                if (idx == selectedEp.coerceAtLeast(0)) {
+                                    Modifier.focusRequester(currentFocus)
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                        ) {
                             onSelectEp(idx)
                         }
                     }
@@ -1524,18 +2103,20 @@ private fun SideSettingsPanel(
 
 @Composable
 private fun SideTab(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val tv = LocalProomTv.current
     Box(
         modifier
-            .height(34.dp)
+            .height(if (tv) 56.dp else 34.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(if (selected) Color.White.copy(alpha = 0.16f) else Color.Transparent)
+            .tvFocusRing(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
             color = if (selected) Color.White else Color.White.copy(alpha = 0.5f),
-            fontSize = 12.sp,
+            fontSize = if (tv) 18.sp else ProomSp(12.sp),
         )
     }
 }
@@ -1545,7 +2126,7 @@ private fun PanelSection(text: String) {
     Text(
         text,
         color = Color.White.copy(alpha = 0.45f),
-        fontSize = 11.sp,
+        fontSize = ProomSp(11.sp),
         modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
     )
 }
@@ -1558,9 +2139,10 @@ private fun SideChip(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(8.dp)
+    val tv = LocalProomTv.current
     Box(
         modifier
-            .height(34.dp)
+            .height(if (tv) 56.dp else 34.dp)
             .clip(shape)
             .background(
                 if (selected) ProomColor.accentSoft else Color.White.copy(alpha = 0.08f)
@@ -1568,6 +2150,7 @@ private fun SideChip(
             .then(
                 if (selected) Modifier.border(1.dp, ProomColor.accent, shape) else Modifier
             )
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)
             .clickable(onClick = onClick)
             .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
@@ -1575,7 +2158,7 @@ private fun SideChip(
         Text(
             text,
             color = if (selected) ProomColor.accent else Color.White.copy(alpha = 0.86f),
-            fontSize = 12.sp,
+            fontSize = if (tv) 18.sp else ProomSp(12.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -1584,6 +2167,21 @@ private fun SideChip(
 
 /* ─────────────────────── 小组件 ─────────────────────── */
 
+/** 玻璃条里的文字键：不画底色，只留 40dp 触摸高度，避免又长出一条灰胶囊 */
+@Composable
+private fun CastTextButton(text: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = Color.White.copy(alpha = 0.82f), fontSize = ProomSp(12.sp), maxLines = 1)
+    }
+}
+
 @Composable
 private fun CircleIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -1591,10 +2189,13 @@ private fun CircleIcon(
     onClick: () -> Unit,
     enabled: Boolean = true,
 ) {
+    // 电视上 40dp 的圆钮在 3 米外只有指甲盖大：抬到 56dp，图标同步放大
+    val tv = LocalProomTv.current
     Box(
         Modifier
-            .size(40.dp)
+            .size(if (tv) 56.dp else 40.dp)
             .clip(CircleShape)
+            .tvFocusRing(CircleShape)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -1602,7 +2203,7 @@ private fun CircleIcon(
             imageVector = icon,
             contentDescription = label,
             tint = Color.White.copy(alpha = if (enabled) 0.92f else 0.28f),
-            modifier = Modifier.size(21.dp),
+            modifier = Modifier.size(if (tv) 28.dp else 21.dp),
         )
     }
 }
@@ -1615,6 +2216,7 @@ private fun TextChip(text: String, onClick: () -> Unit) {
         Modifier
             .clip(RoundedCornerShape(8.dp))
             .background(Color.White.copy(alpha = 0.10f))
+            .tvFocusRing(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
@@ -1622,7 +2224,7 @@ private fun TextChip(text: String, onClick: () -> Unit) {
         Text(
             text = text,
             color = Color.White.copy(alpha = 0.9f),
-            fontSize = 12.sp,
+            fontSize = ProomSp(12.sp),
             maxLines = 1,
         )
     }
@@ -1666,7 +2268,13 @@ private fun PlayerPanel(
     onDismiss: () -> Unit,
 ) {
     val speeds = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
-    Box(modifier.fillMaxWidth().fillMaxHeight().clickable(onClick = onDismiss)) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .focusProperties { canFocus = false }
+            .clickable(onClick = onDismiss),
+    ) {
         Column(
             Modifier
                 .align(Alignment.BottomEnd)
@@ -1679,7 +2287,7 @@ private fun PlayerPanel(
             Text(
                 title,
                 color = Color.White.copy(alpha = 0.5f),
-                fontSize = 11.sp,
+                fontSize = ProomSp(11.sp),
                 modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
             )
             if (title == "倍速") {
@@ -1715,7 +2323,7 @@ private fun PanelRow(label: String, selected: Boolean, onClick: () -> Unit) {
         Text(
             label,
             color = if (selected) ProomColor.accent else Color.White.copy(alpha = 0.86f),
-            fontSize = 13.sp,
+            fontSize = ProomSp(13.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.width(150.dp),
@@ -1736,13 +2344,18 @@ private fun CastSheet(
     devices: List<com.projectionroom.shared.cast.CastDevice>,
     /** 经 NAS 名录找到的电视，NAS 不在线时为空 */
     nasDevices: List<CastApi.Target> = emptyList(),
+    /** 走自定义协议（PROOM-CAST/1）被 UDP 广播发现的电视，NAS 不在线也能列出来 */
+    lanDevices: List<com.projectionroom.shared.cast.LanCastTarget> = emptyList(),
     scanning: Boolean,
     current: String,
     casting: Boolean,
     onRescan: () -> Unit,
     onPick: (com.projectionroom.shared.cast.CastDevice) -> Unit,
     onPickNas: (CastApi.Target) -> Unit = {},
+    onPickLan: (com.projectionroom.shared.cast.LanCastTarget) -> Unit = {},
     onManual: (String) -> Unit,
+    /** 拿起相机扫电视上的码：路由器关了广播、手机和电视跨网段时，这是最省事的连接方式 */
+    onScan: () -> Unit = {},
     onStop: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -1785,25 +2398,31 @@ private fun CastSheet(
                 )
                 .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 14.dp),
         ) {
+            // 手填地址的输入行由头部的图标按钮唤起，状态得提到这一层
+            var showManual by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (casting) "正在投屏" else "投屏到电视",
                         color = Color.White,
-                        fontSize = 16.sp,
+                        fontSize = ProomSp(16.sp),
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         when {
                             // 投屏中先说「投到哪」，比继续说「正在搜索」有用
                             casting && current.isNotBlank() -> "已投屏到 $current"
-                            scanning -> "正在搜索电视…"
-                            devices.isEmpty() && nasDevices.isEmpty() ->
+                            // 三路是各自回来的：局域网那台已经到了就别再写「正在搜索」，
+                            // 让用户点得到，剩下的一路在后面补
+                            scanning && devices.isEmpty() && nasDevices.isEmpty() && lanDevices.isEmpty() ->
+                                "正在搜索电视…"
+                            scanning -> "找到 ${devices.size + nasDevices.size + lanDevices.size} 台 · 还在搜…"
+                            devices.isEmpty() && nasDevices.isEmpty() && lanDevices.isEmpty() ->
                                 "没找到电视 · 确认手机和电视连的是同一个 Wi-Fi"
-                            else -> "找到 ${devices.size + nasDevices.size} 台设备"
+                            else -> "找到 ${devices.size + nasDevices.size + lanDevices.size} 台设备"
                         },
                         color = Color.White.copy(alpha = 0.45f),
-                        fontSize = 11.sp,
+                        fontSize = ProomSp(11.sp),
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
@@ -1813,12 +2432,23 @@ private fun CastSheet(
                     Text(
                         "重新搜索",
                         color = ProomColor.accent,
-                        fontSize = 12.sp,
+                        fontSize = ProomSp(12.sp),
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable(onClick = onRescan)
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                     )
+                }
+                // 扫码 / 手填：广播搜不到时（路由关广播、双频分网段、访客网络）
+                // 这两条路照样能连上，所以常驻在「重新搜索」右边，不藏在文案里。
+                // 两个图标都走白色（跟「✕」同一档），主题色留给标题和「重新搜索」
+                CastIconButton(label = "扫码连接电视", onClick = onScan) { ScanGlyph(IconTint) }
+                CastIconButton(
+                    label = "输入电视地址",
+                    onClick = { showManual = !showManual },
+                ) {
+                    // 输入行展开时只提亮，不换色
+                    TypeGlyph(if (showManual) Color.White else IconTint)
                 }
                 Box(
                     Modifier
@@ -1827,7 +2457,7 @@ private fun CastSheet(
                         .clickable(onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("✕", color = Color.White.copy(alpha = 0.65f), fontSize = 15.sp)
+                    Text("✕", color = Color.White.copy(alpha = 0.65f), fontSize = ProomSp(15.sp))
                 }
             }
 
@@ -1837,7 +2467,7 @@ private fun CastSheet(
                 Text(
                     "NAS 在线 · 任意网络可投",
                     color = Color.White.copy(alpha = 0.35f),
-                    fontSize = 10.sp,
+                    fontSize = ProomSp(10.sp),
                     modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
                 )
                 LazyColumn(Modifier.heightIn(max = 210.dp)) {
@@ -1866,7 +2496,7 @@ private fun CastSheet(
                                 Text(
                                     t.name,
                                     color = Color.White,
-                                    fontSize = 14.sp,
+                                    fontSize = ProomSp(14.sp),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1885,7 +2515,7 @@ private fun CastSheet(
                                 Text(
                                     sub,
                                     color = Color.White.copy(alpha = 0.45f),
-                                    fontSize = 11.sp,
+                                    fontSize = ProomSp(11.sp),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(top = 2.dp),
@@ -1894,10 +2524,75 @@ private fun CastSheet(
                             if (active || t.owner == com.projectionroom.shared.cast.CastHub.selfId) {
                                 // owner 是自己但 active 为假：退出播放页又进来，
                                 // castNas 还没恢复，电视其实仍在替自己播
-                                Text("投屏中", color = ProomColor.accent, fontSize = 11.sp)
+                                Text("投屏中", color = ProomColor.accent, fontSize = ProomSp(11.sp))
                             } else if (t.owner.isNotBlank()) {
                                 // 另一台手机正在控它：点上去会抢过来，先给个提示
-                                Text("被占用", color = Color.White.copy(alpha = 0.35f), fontSize = 10.sp)
+                                Text("被占用", color = Color.White.copy(alpha = 0.35f), fontSize = ProomSp(10.sp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 同网直连（PROOM-CAST/1）：两端都是我们的 App，所以能遥控倍速/音量，
+            // 又不经过 NAS —— NAS 关机、只连着家里 Wi-Fi 时，这一组是唯一能全功能投的
+            if (lanDevices.isNotEmpty()) {
+                Text(
+                    "同网直连 · 支持倍速/音量遥控",
+                    color = Color.White.copy(alpha = 0.35f),
+                    fontSize = ProomSp(10.sp),
+                    modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+                )
+                LazyColumn(Modifier.heightIn(max = 200.dp)) {
+                    items(lanDevices) { d ->
+                        val active = casting && d.name == current
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (active) ProomColor.accentSoft else Color.White.copy(alpha = 0.06f)
+                                )
+                                .clickable { onPickLan(d) }
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                PlayerIcons.Cast,
+                                contentDescription = null,
+                                tint = if (active) ProomColor.accent else Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(
+                                    d.name,
+                                    color = Color.White,
+                                    fontSize = ProomSp(14.sp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                val sub = when {
+                                    d.title.isBlank() -> "空闲 · 自定义协议直连"
+                                    else -> {
+                                        val m = d.position / 60_000
+                                        val s = (d.position / 1_000) % 60
+                                        val flag = if (d.playing) "正在播" else "暂停在"
+                                        val clock = "$m:" + if (s < 10) "0$s" else "$s"
+                                        "$flag · ${d.title} $clock"
+                                    }
+                                }
+                                Text(
+                                    sub,
+                                    color = Color.White.copy(alpha = 0.45f),
+                                    fontSize = ProomSp(11.sp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            if (active) {
+                                Text("投屏中", color = ProomColor.accent, fontSize = ProomSp(11.sp))
                             }
                         }
                     }
@@ -1930,7 +2625,7 @@ private fun CastSheet(
                                 Text(
                                     d.name,
                                     color = Color.White,
-                                    fontSize = 14.sp,
+                                    fontSize = ProomSp(14.sp),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1945,7 +2640,7 @@ private fun CastSheet(
                                         sub,
                                         color = if (d.isOwn) ProomColor.accent.copy(alpha = 0.7f)
                                         else Color.White.copy(alpha = 0.4f),
-                                        fontSize = 11.sp,
+                                        fontSize = ProomSp(11.sp),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.padding(top = 2.dp),
@@ -1953,16 +2648,14 @@ private fun CastSheet(
                                 }
                             }
                             if (active) {
-                                Text("投屏中", color = ProomColor.accent, fontSize = 11.sp)
+                                Text("投屏中", color = ProomColor.accent, fontSize = ProomSp(11.sp))
                             }
                         }
                     }
                 }
             }
 
-            // 手动地址是**兜底**，不是正常路径：默认收起，只有搜不到才露出来。
-            // 正常用户不该知道 IP 是什么东西。
-            var showManual by remember { mutableStateOf(false) }
+            // 手动地址是**兜底**，不是正常路径：默认收起，由头部的输入图标唤起。
             var manual by remember { mutableStateOf("") }
             if (showManual) {
                 Row(
@@ -1980,16 +2673,16 @@ private fun CastSheet(
                         singleLine = true,
                         textStyle = androidx.compose.ui.text.TextStyle(
                             color = Color.White,
-                            fontSize = 13.sp,
+                            fontSize = ProomSp(13.sp),
                         ),
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(ProomColor.accent),
                         modifier = Modifier.weight(1f).padding(vertical = 12.dp),
                         decorationBox = { inner ->
                             if (manual.isEmpty()) {
                                 Text(
-                                    "电视地址，如 192.0.2.8:49520",
+                                    "电视地址，如 192.0.2.8 或 192.0.2.8:49520",
                                     color = Color.White.copy(alpha = 0.3f),
-                                    fontSize = 12.sp,
+                                    fontSize = ProomSp(12.sp),
                                 )
                             }
                             inner()
@@ -1998,31 +2691,20 @@ private fun CastSheet(
                     Text(
                         "连接",
                         color = ProomColor.accent,
-                        fontSize = 13.sp,
+                        fontSize = ProomSp(13.sp),
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { onManual(manual) }
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                     )
                 }
-            } else if (devices.isEmpty() && !scanning && current.isBlank()) {
-                Text(
-                    "电视不答搜索？手动填地址 ›",
-                    color = Color.White.copy(alpha = 0.4f),
-                    fontSize = 11.sp,
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { showManual = true }
-                        .padding(horizontal = 6.dp, vertical = 6.dp),
-                )
             }
 
             if (casting) {
                 Text(
                     "停止投屏",
                     color = Color(0xFFFF6B6B),
-                    fontSize = 13.sp,
+                    fontSize = ProomSp(13.sp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp)
@@ -2032,5 +2714,103 @@ private fun CastSheet(
                 )
             }
         }
+    }
+}
+
+/** 投屏面板头部图标的统一色：跟「✕」同一个亮度档，不抢主题色 */
+private val IconTint = Color.White.copy(alpha = 0.65f)
+
+/**
+ * 面板头部的小图标按钮：和「✕」一样的 32dp 点击区，没有底色，只有图标。
+ *
+ * 图标不带文字，所以必须给 [label]：读屏用户只靠它知道这是「扫码」还是「填地址」，
+ * 顺带也让自动化测试点得中（没有 text 的节点只能靠坐标猜）。
+ */
+@Composable
+private fun CastIconButton(
+    label: String,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .semantics { contentDescription = label }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { content() }
+}
+
+/**
+ * 扫码图标：四个取景角 + 右下角一个小方块。
+ *
+ * 项目里没有 material-icons-extended（那包有几 MB），为一个图标不值当，
+ * 二维码取景框又简单，直接画。
+ */
+@Composable
+private fun ScanGlyph(tint: Color, box: androidx.compose.ui.unit.Dp = 17.dp) {
+    Canvas(Modifier.size(box)) {
+        val w = size.width
+        val sw = w * 0.11f
+        val p = w * 0.07f
+        val len = w * 0.30f
+        fun seg(x1: Float, y1: Float, x2: Float, y2: Float) =
+            drawLine(
+                tint,
+                androidx.compose.ui.geometry.Offset(x1, y1),
+                androidx.compose.ui.geometry.Offset(x2, y2),
+                sw,
+                androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+        seg(p, p + len, p, p)
+        seg(p, p, p + len, p)
+        seg(w - p - len, p, w - p, p)
+        seg(w - p, p, w - p, p + len)
+        seg(p, w - p - len, p, w - p)
+        seg(p, w - p, p + len, w - p)
+        val q = len * 0.85f
+        drawRect(
+            tint,
+            topLeft = androidx.compose.ui.geometry.Offset(w - p - q, w - p - q),
+            size = androidx.compose.ui.geometry.Size(q, q),
+        )
+    }
+}
+
+/** 手填地址图标：一个输入框 + 一根光标 —— 比「铅笔」更贴「输入 IP」这件事 */
+@Composable
+private fun TypeGlyph(tint: Color, box: androidx.compose.ui.unit.Dp = 17.dp) {
+    Canvas(Modifier.size(box)) {
+        val w = size.width
+        val sw = w * 0.10f
+        drawRoundRect(
+            tint,
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.05f, w * 0.18f),
+            size = androidx.compose.ui.geometry.Size(w * 0.90f, w * 0.64f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.16f, w * 0.16f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(sw),
+        )
+        drawLine(
+            tint,
+            androidx.compose.ui.geometry.Offset(w * 0.28f, w * 0.34f),
+            androidx.compose.ui.geometry.Offset(w * 0.28f, w * 0.66f),
+            sw * 1.2f,
+            androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        drawLine(
+            tint,
+            androidx.compose.ui.geometry.Offset(w * 0.42f, w * 0.42f),
+            androidx.compose.ui.geometry.Offset(w * 0.72f, w * 0.42f),
+            sw * 0.9f,
+            androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        drawLine(
+            tint,
+            androidx.compose.ui.geometry.Offset(w * 0.42f, w * 0.58f),
+            androidx.compose.ui.geometry.Offset(w * 0.60f, w * 0.58f),
+            sw * 0.9f,
+            androidx.compose.ui.graphics.StrokeCap.Round,
+        )
     }
 }

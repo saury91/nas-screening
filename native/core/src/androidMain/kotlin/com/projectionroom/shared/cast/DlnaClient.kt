@@ -38,10 +38,15 @@ class DlnaClient {
     /**
      * 搜索局域网里的接收端。
      *
-     * 只等 [timeoutMs]，收齐就返回 —— 电视回包通常在 200ms 内，2.5 秒足够。
+     * 最多等 [timeoutMs]，但**收到第一台后只再等 [graceMs]** 就返回：
+     * 一台设备一条 M-SEARCH 应答，正常都在 100ms 内到齐，死等满 2.5 秒
+     * 只会让面板空转 —— 用户点开投屏要的是「立刻看到电视」。
      * 收包是**单播**回给我们的临时端口，所以不需要 MulticastLock（那个锁只影响组播接收）。
      */
-    suspend fun discover(timeoutMs: Long = 2_500): List<CastDevice> = withContext(Dispatchers.IO) {
+    suspend fun discover(
+        timeoutMs: Long = 2_500,
+        graceMs: Long = 400,
+    ): List<CastDevice> = withContext(Dispatchers.IO) {
         val locations = linkedSetOf<String>()
         val payload = Ssdp.mSearch().toByteArray()
         DatagramSocket().use { sock ->
@@ -52,9 +57,11 @@ class DlnaClient {
             )
             val deadline = System.currentTimeMillis() + timeoutMs
             var nextSend = 0L
+            var graceEnd = 0L
             val buf = ByteArray(2048)
             while (System.currentTimeMillis() < deadline) {
                 val now = System.currentTimeMillis()
+                if (graceEnd > 0 && now >= graceEnd) break
                 if (now >= nextSend) {
                     targets.forEach { addr ->
                         runCatching { sock.send(DatagramPacket(payload, payload.size, addr, Ssdp.PORT)) }
@@ -65,7 +72,10 @@ class DlnaClient {
                 val ok = runCatching { sock.receive(pkt) }.isSuccess
                 if (ok) {
                     val text = String(pkt.data, 0, pkt.length)
-                    Ssdp.locationOf(text)?.let { locations.add(it) }
+                    val loc = Ssdp.locationOf(text)
+                    if (loc != null && locations.add(loc) && graceEnd == 0L) {
+                        graceEnd = now + graceMs
+                    }
                 }
             }
         }

@@ -26,12 +26,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,15 +53,21 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.TvRow
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.util.metaLine
+import com.projectionroom.ui.util.plainText
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
+import com.projectionroom.ui.theme.TvType
 import com.projectionroom.ui.component.RemoteImage
 
 /**
@@ -149,48 +153,73 @@ fun DetailScreen(
         }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = ProomSpace.xxl)
-            .padding(bottom = ProomSpace.xl)
-    ) {
+    Column(Modifier.fillMaxSize()) {
         // 顶栏只留返回提示：收藏是「对这部片的动作」，跟立即播放放一起才对，
         // 挂到右上角会离它要作用的对象太远，读起来像个页面级的设置开关。
-        // 父级已经给了 40dp 左右内边距，所以 inset 传 0；顶部让开状态栏（原来 8dp 起步，
-        // 会把返回提示压在时钟那一行上）。
+        //
+        // 顶栏**不能**塞进下面的滚动列：跟着一起滚走之后，遥控器的返回键看不见了，
+        // 而且焦点请求会把整页顶上去（截图里标题被切掉一截、返回提示完全消失）。
         com.projectionroom.ui.component.TvPageHeader(
             onBack = onBack,
             topInset = topInset,
-            inset = 0.dp,
+            inset = TvLayout.insetX,
+            // 这一页顶栏压在模糊封面上：默认那层 9% 白在暖色亮图上会糊成一片，
+            // 返回胶囊像浮在半空；垫一层半透明黑，和播放器同一套
+            hintBackdrop = Color.Black.copy(alpha = 0.42f),
         )
+
+        // 正文可滚：960×540 的画布上「海报 + 简介 + 两行线路 + 选集」装不下，
+        // 之前用 weight(1f) 把选集网格挤在剩余高度里 —— 剩余高度是 0，选集会被整块裁掉
+        // （截图里「选集 · 13 集」只剩半个标题）。电视上的详情页本来就该是滚动的。
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = TvLayout.insetX)
+                .padding(bottom = ProomSpace.xl)
+        ) {
+        Spacer(Modifier.height(ProomSpace.sm))
 
         Row(Modifier.fillMaxWidth()) {
             Poster(vod, Modifier.width(posterW))
             Spacer(Modifier.width(ProomSpace.lg))
-            Column(Modifier.weight(1f)) {
-                Text(vod.name, style = ProomType.headline, color = ProomColor.text, maxLines = 2)
-                Spacer(Modifier.height(6.dp))
+            // 显式宽度，不用 weight(1f)：滚动容器里带权重的子项会被按
+            // 「剩余高度」重新测量，40sp 的片名量出来只有 11dp，上半截直接被切掉
+            BoxWithConstraints(Modifier.weight(1f)) {
+                Column(Modifier.width(maxWidth)) {
+                // 片名是这一页的唯一主角：40sp 才压得住下面的 26sp 区块标题。
+                // 都用 30sp 时，片名和「播放线路」看起来是同级的两行字。
+                // maxLines 必须是 1：在这个纵向滚动容器里，2 行的行高会被算成 11dp
+                // （片名只露出一条底边，像被裁掉了）。40sp 下 656dp 宽能放 16 个字，
+                // 够用；再接长就省略号，不要为了两行把标题切没。
+                Text(
+                    vod.name,
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ProomColor.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = buildString {
-                        append(
-                            listOf(vod.year, vod.type, vod.area, vod.lang)
-                                .filter { it.isNotBlank() }
-                                .joinToString(" · ")
-                        )
+                        append(metaLine(vod.year, vod.type, vod.area, vod.lang))
                         if (vod.lines.isNotEmpty()) append(" · ${vod.lines.size} 条线路")
                     },
                     style = ProomType.meta,
                     color = ProomColor.muted,
                 )
-                if (vod.desc.isNotBlank()) {
+                if (vod.desc.plainText().isNotBlank()) {
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        vod.desc,
-                        style = ProomType.meta,
+                        vod.desc.plainText(),
+                        // 简介是观众真正会读的一段字：用正文级 18sp，并限宽到 640dp
+                        // （960dp 画布铺满的话一行 50 多个字，眼睛要来回扫）
+                        style = ProomType.body,
                         color = ProomColor.dim,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 640.dp),
                     )
                 }
                 Spacer(Modifier.height(14.dp))
@@ -221,12 +250,13 @@ fun DetailScreen(
                         onClick = onToggleFavorite,
                     )
                 }
+                }
             }
         }
 
         Spacer(Modifier.height(ProomSpace.xl))
 
-        Text("播放线路", style = ProomType.cardTitle, color = ProomColor.dim)
+        Text("播放线路", style = ProomType.title, color = ProomColor.text)
         Spacer(Modifier.height(12.dp))
         if (vod.lines.isEmpty()) {
             // 线路是逐个源回来的：先给一句话，别让这里空着像「没有资源」
@@ -242,12 +272,15 @@ fun DetailScreen(
         // 之前是一整条横向滑轨：9 条线路在电视上只放得下 4 张半，
         // 第 5 张永远被屏幕右边缘切掉一半 —— 看着像没画完。现在常见条数一眼看全，
         // 既不用滑，也不会再出现「半张卡」。
+        // 每行 4 张、每张 200dp：164dp 时站名只剩 5 个字，
+        // 「极速资源 · 线路1」被截成「极速资源 · 线…」—— 而「线路1」正是
+        // 区分两条线唯一的字，截掉等于全叫「极速资源」。
         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            vod.lines.chunked(5).forEach { row ->
+            vod.lines.chunked(4).forEach { row ->
                 TvRow(
                     items = row,
-                    itemWidth = 164.dp,
-                    gap = 9.dp,
+                    itemWidth = 200.dp,
+                    gap = 10.dp,
                 ) { l, focused ->
                     val idx = vod.lines.indexOf(l)
                     LineChip(
@@ -267,21 +300,31 @@ fun DetailScreen(
 
         Text(
             text = line?.let { "选集 · ${it.count} 集 · ${cleanSiteName(it.site)}" } ?: "选集",
-            style = ProomType.cardTitle,
-            color = ProomColor.dim,
+            style = ProomType.title,
+            color = ProomColor.text,
         )
         Spacer(Modifier.height(8.dp))
         if (line != null) {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(80.dp),
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                itemsIndexed(line.episodes) { i, ep ->
-                    EpButton(ep.name) { onPlay(lineIndex, i) }
+            // 集号按钮最小 96dp：电视上一排十几个小方块根本瞄不准。
+            // 这里不用 LazyVerticalGrid —— 外层已经是 verticalScroll，
+            // 再套一个可滚动容器会抢方向键（进页后按↓不动，焦点在网格里自己滚）
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val cols = (maxWidth / 96.dp).toInt().coerceIn(4, 12)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    line.episodes.chunked(cols).forEachIndexed { row, eps ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            eps.forEachIndexed { i, ep ->
+                                EpButton(ep.name, Modifier.weight(1f)) {
+                                    onPlay(lineIndex, row * cols + i)
+                                }
+                            }
+                            repeat(cols - eps.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
                 }
             }
+            Spacer(Modifier.height(ProomSpace.lg))
+        }
         }
     }
     }
@@ -362,10 +405,18 @@ private fun LineChip(
             .fillMaxWidth()
             .height(54.dp)
             .clip(shape)
-            .background(if (selected) ProomColor.accentSoft else ProomColor.surface)
+            .background(
+                when {
+                    selected -> ProomColor.accentSoft
+                    focused -> ProomColor.surface2
+                    else -> ProomColor.surface
+                }
+            )
             .then(
                 when {
-                    focused -> Modifier.border(2.dp, ProomColor.accent, shape)
+                    // 「金色 = 选中，白色 = 焦点」全线统一：焦点一律白边，
+                    // 未选中的那颗原来用金边，和左边「已选中」的卡分不出来
+                    focused -> Modifier.border(if (selected) 3.dp else 2.dp, Color.White, shape)
                     // 选中的描边要看得见：1dp 半透明在电视上等于没有
                     selected -> Modifier.border(1.5.dp, ProomColor.accent.copy(alpha = 0.7f), shape)
                     else -> Modifier
@@ -385,7 +436,9 @@ private fun LineChip(
         Column(Modifier.weight(1f)) {
             Text(
                 cleanSiteName(site),
-                style = ProomType.cardTitle,
+                // 这是控件标签不是海报标题：20sp 的字阶让 200dp 只能放 7 个字，
+                // 降到正文级 18sp 正好多挤出一个字
+                style = ProomType.body,
                 color = if (selected) ProomColor.accent else ProomColor.text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -418,25 +471,31 @@ private fun cleanSiteName(raw: String): String {
         .trim()
     // 也有把名字写两遍的：`🍯PG线路 · 🍯PG线路 ·`
     val parts = flat.split(" · ").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-    return parts.joinToString(" · ").ifBlank { "线路" }
+    // 分隔符两侧的空格去掉：卡片只有 8 个字的宽度，`极速资源 · 线路1` 光空格
+    // 就吃掉两个位，压成 `极速资源·线路1` 才装得下「线路1」这个关键区分
+    return parts.joinToString("·")
+        .replace(Regex("\\s*[-–—]\\s*"), "·")
+        .ifBlank { "线路" }
 }
 
 @Composable
-private fun EpButton(name: String, onClick: () -> Unit) {
+private fun EpButton(name: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(ProomShape.sm)
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
             .clip(shape)
             .background(if (focused) ProomColor.surface2 else ProomColor.surface)
             .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
+            // 38dp 的集号方块在沙发上按十次有两次按空，52dp 才是遥控器友好尺寸
+            .heightIn(min = 52.dp)
             .padding(vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(name, style = ProomType.label, color = ProomColor.text, maxLines = 1)
+        Text(name, style = ProomType.meta, color = ProomColor.text, maxLines = 1)
     }
 }
 
@@ -456,7 +515,7 @@ private fun FocusIcon(
     active: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: androidx.compose.ui.unit.Dp = 44.dp,
+    size: androidx.compose.ui.unit.Dp = TvLayout.minTouch,
     /** 返回键不需要底色（压在模糊封面上会多一块圆斑），收藏需要 */
     background: Color = ProomColor.surface.copy(alpha = 0.55f),
 ) {
@@ -481,7 +540,7 @@ private fun FocusIcon(
             imageVector = icon,
             contentDescription = desc,
             tint = if (active) ProomColor.accent else ProomColor.text,
-            modifier = Modifier.size(21.dp),
+            modifier = Modifier.size(23.dp),
         )
     }
 }
@@ -499,9 +558,11 @@ private fun FocusBox(
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(ProomSpace.md)
-    // 金色按钮上再描金边等于没描边：焦点必须换色，并配一点放大才看得清
+    // 金底上描 2dp 白边在 540p 的电视机上基本看不出来 —— 描边面积太小，
+    // 又被金色本身的高亮度压住。改成聚焦时整块底色翻白（文字仍用深色），
+    // 一眼就能确认「现在按确认会播」，也跟全局「白色 = 焦点」对上。
     val scale by animateFloatAsState(
-        if (focused) 1.05f else 1f,
+        if (focused) 1.04f else 1f,
         tween(ProomMotion.short, easing = ProomMotion.ease),
         label = "button-scale",
     )
@@ -509,7 +570,7 @@ private fun FocusBox(
         modifier
             .scale(scale)
             .clip(shape)
-            .background(background)
+            .background(if (focused) Color.White else background)
             .then(if (focused) Modifier.border(2.dp, focusBorderColor, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)

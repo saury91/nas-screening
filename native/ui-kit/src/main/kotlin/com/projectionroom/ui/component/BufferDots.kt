@@ -29,12 +29,20 @@ import com.projectionroom.ui.theme.ProomColor
  * 不用系统自带的转圈 —— 转圈在电视上既看不清「在动」，也和这套 UI 的语言不搭。
  */
 @Composable
-fun BufferDots(modifier: Modifier = Modifier, color: androidx.compose.ui.graphics.Color = ProomColor.accent) {
+fun BufferDots(
+    modifier: Modifier = Modifier,
+    color: androidx.compose.ui.graphics.Color = ProomColor.accent,
+    /** 点径。电视上 10dp 在 3 米外只剩一个像素点在跳，播放页要放大到 14dp */
+    dot: androidx.compose.ui.unit.Dp = 10.dp,
+    gap: androidx.compose.ui.unit.Dp = 11.dp,
+) {
     val t = rememberInfiniteTransition(label = "buffer")
+    // 起跳高度按点径等比放：点变大、跳得还是 13dp 会显得只抖了一下
+    val lift = (dot.value * 1.3f)
 
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(11.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         repeat(3) { i ->
@@ -45,8 +53,8 @@ fun BufferDots(modifier: Modifier = Modifier, color: androidx.compose.ui.graphic
                     animation = keyframes {
                         durationMillis = 1050
                         0f at 0 using LinearEasing
-                        -13f at 290
-                        -4f at 470
+                        -lift at 290
+                        -lift * 0.3f at 470
                         0f at 620
                         0f at 1050
                     },
@@ -58,10 +66,13 @@ fun BufferDots(modifier: Modifier = Modifier, color: androidx.compose.ui.graphic
             Box(
                 Modifier
                     .offset(y = y.dp)
-                    .size(10.dp)
+                    .size(dot)
                     .clip(CircleShape)
                     .background(color)
-                    .graphicsLayer { alpha = 0.55f + (y / -26f).coerceIn(0f, 0.45f) }
+                    .graphicsLayer {
+                        // 跳得越高越亮：静止时 0.55，最高点接近满亮
+                        alpha = 0.55f + (y / (-lift * 2f)).coerceIn(0f, 0.45f)
+                    }
             )
         }
     }
