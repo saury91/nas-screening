@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -79,10 +80,16 @@ fun MusicScreen(
     /** 歌单（cat 为空 = 推荐），流式：先磁盘缓存，再源站 */
     loadPlaylists: (cat: String) -> Flow<List<NasApi.Playlist>>,
     onOpenPlaylist: (NasApi.Playlist) -> Unit,
+    /** 搜歌（和歌单同一个聚合接口）。顶栏那颗放大镜进来就是它 */
+    searchTracks: suspend (String) -> List<NasApi.Track> = { emptyList() },
+    /** 点搜索结果：整份结果当队列，从这一首开始放 */
+    onPlayTracks: (List<NasApi.Track>, Int) -> Unit = { _, _ -> },
     /** 返回。手机上从 tab 进来，电视上是遥控器 BACK 之外的兜底入口 */
     onBack: (() -> Unit)? = null,
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
+    // 搜索态：整页换成「输入框 + 结果」，退出搜索回到歌单网格
+    var searching by remember { mutableStateOf(false) }
     var cats by remember { mutableStateOf(MusicCache.cats()) }
     // 推荐区
     var rec by remember { mutableStateOf(MusicCache.lists(REC_KEY).orEmpty()) }
@@ -153,6 +160,18 @@ fun MusicScreen(
         // 推荐横滑卡比网格略大一点，用来区分「编辑推荐」和普通分类
         val recW = 122.dp
 
+        // 搜歌：放大镜进来后整页让给搜索（和影视搜索页同一套交互），
+        // 退出搜索时歌单网格还在，不用重新拉数据
+        if (searching) {
+            MusicSearchPage(
+                searchTracks = searchTracks,
+                onPlay = onPlayTracks,
+                onClose = { searching = false },
+                topInset = topInset,
+            )
+            return@BoxWithConstraints
+        }
+
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             modifier = Modifier.fillMaxSize(),
@@ -165,7 +184,11 @@ fun MusicScreen(
                     onBack?.let {
                             com.projectionroom.ui.component.PageBackBar(onBack = it)
                     }
-                    MusicHeader(recCount = rec.size, catCount = cats.size)
+                    MusicHeader(
+                        recCount = rec.size,
+                        catCount = cats.size,
+                        onSearch = { searching = true },
+                    )
                 }
             }
 
@@ -237,7 +260,7 @@ fun MusicScreen(
 /* ───────────────────── 顶栏与标题 ───────────────────── */
 
 @Composable
-private fun MusicHeader(recCount: Int, catCount: Int) {
+private fun MusicHeader(recCount: Int, catCount: Int, onSearch: () -> Unit = {}) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -246,13 +269,6 @@ private fun MusicHeader(recCount: Int, catCount: Int) {
     ) {
         Box(Modifier.size(6.dp).clip(CircleShape).background(ProomColor.accent))
         Spacer(Modifier.width(8.dp))
-        Text(
-            "音乐",
-            color = ProomColor.text,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
-        )
         val sub = buildString {
             if (recCount > 0) append("${recCount} 个推荐")
             if (catCount > 0) {
@@ -260,13 +276,48 @@ private fun MusicHeader(recCount: Int, catCount: Int) {
                 append("$catCount 类")
             }
         }
-        if (sub.isNotBlank()) {
+        // 标题 + 统计整体吃满剩余宽度（weight 不带 fill=false）：
+        // 这样放大镜才会被顶到行的最右边。之前统计文案自己带 weight(fill=false)，
+        // 它没占满的那份宽度留在原地，图标就被拽进去了 20 多 dp。
+        Row(
+            Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                sub,
-                style = ProomType.meta,
-                color = ProomColor.muted,
-                modifier = Modifier.padding(start = 10.dp),
-                maxLines = 1,
+                "音乐",
+                color = ProomColor.text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.2.sp,
+            )
+            if (sub.isNotBlank()) {
+                Text(
+                    sub,
+                    style = ProomType.meta,
+                    color = ProomColor.muted,
+                    modifier = Modifier.padding(start = 10.dp).weight(1f, fill = false),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // 搜索入口和影视页同一位置、同一尺寸（48dp 可点区 + 22dp 图标），
+        // 两个 tab 之间切换时眼睛不用重新找。
+        // 影视顶栏是「屏幕边缘 12dp」，音乐页这一行在网格的 20dp contentPadding 里，
+        // 所以按差额外移 8dp，让两页图标中心都落在离屏幕右边 36dp 的位置。
+        Box(
+            Modifier
+                .offset(x = 8.dp)
+                .size(48.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onSearch),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = TabIcons.Search,
+                contentDescription = "搜索",
+                tint = ProomColor.text,
+                modifier = Modifier.size(22.dp),
             )
         }
     }
