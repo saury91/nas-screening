@@ -92,6 +92,7 @@ fun BrowseScreen(
     var page by remember(slug) { mutableIntStateOf(cached?.page ?: 1) }
     var more by remember(slug) { mutableStateOf(cached?.more ?: false) }
     var err by remember(slug) { mutableStateOf<String?>(null) }
+    var sites by remember(slug) { mutableIntStateOf(0) }
 
     // 刚从缓存复原的那一下不允许触底加载：scrollToItem 会把可见范围推到末尾，
     // 不挡的话「返回上一页」会立刻再翻一页
@@ -114,6 +115,7 @@ fun BrowseScreen(
                 // 缓存或第一个源到了就撤掉骨架；后面继续到来的快照直接替换
                 items = p.items
                 more = p.more
+                sites = p.sites
                 loading = false
             }
         }.onFailure { err = it.message }
@@ -242,7 +244,12 @@ fun BrowseScreen(
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                             Text(
-                                text = err?.let { "读取失败：$it" } ?: "这个筛选下没有片子",
+                                text = err?.let { "读取失败：$it" }
+                                    ?: if (sites == 0) {
+                                        "还没有片源：在设置里导入配置包，或连上 NAS 同步一次"
+                                    } else {
+                                        "这个筛选下没有片子"
+                                    },
                                 style = ProomType.meta,
                                 color = ProomColor.muted,
                             )

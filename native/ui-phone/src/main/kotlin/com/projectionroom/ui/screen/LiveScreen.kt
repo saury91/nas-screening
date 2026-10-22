@@ -216,10 +216,20 @@ fun LiveScreen(
                     }
 
                     shown.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                        // all 为空是「一个频道都没有」，不是筛选筛空了，别让人去改关键词
+                        val noFeeds = all.isEmpty()
                         LiveMessage(
-                            title = if (q.isNotBlank()) "没有匹配「$q」的频道" else "这个分组还没有频道",
-                            desc = "换个关键词，或者看全部 ${all.size} 个频道",
-                            action = "清除筛选",
+                            title = when {
+                                noFeeds -> "还没有片源"
+                                q.isNotBlank() -> "没有匹配「$q」的频道"
+                                else -> "这个分组还没有频道"
+                            },
+                            desc = when {
+                                noFeeds -> "在设置里导入直播源，或连上 NAS 同步一次。"
+                                q.isNotBlank() -> "换个关键词，或者看全部 ${all.size} 个频道"
+                                else -> "换个分组，或者看全部 ${all.size} 个频道"
+                            },
+                            action = if (noFeeds) "" else "清除筛选",
                             onAction = {
                                 query = ""
                                 group = ""
@@ -506,15 +516,17 @@ private fun LiveMessage(title: String, desc: String, action: String, onAction: (
                 modifier = Modifier.padding(horizontal = 32.dp),
             )
         }
-        Spacer(Modifier.height(16.dp))
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(50))
-                .background(ProomColor.surface)
-                .clickable(onClick = onAction)
-                .padding(horizontal = 18.dp, vertical = 9.dp),
-        ) {
-            Text(action, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = ProomColor.text)
+        if (action.isNotBlank()) {
+            Spacer(Modifier.height(16.dp))
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(ProomColor.surface)
+                    .clickable(onClick = onAction)
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
+            ) {
+                Text(action, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = ProomColor.text)
+            }
         }
     }
 }

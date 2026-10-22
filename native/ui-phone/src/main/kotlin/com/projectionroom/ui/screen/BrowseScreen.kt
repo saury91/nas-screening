@@ -207,7 +207,27 @@ fun BrowseScreen(
             if (!loading && items.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
-                        Text("这个筛选下没有片子", style = ProomType.meta, color = ProomColor.muted)
+                        // sites = 0：这一类没有参与聚合的片源，不是筛选没命中
+                        val noSources = err == null && sites == 0
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                when {
+                                    err != null -> "读取失败：$err"
+                                    noSources -> "还没有片源"
+                                    else -> "这个筛选下没有片子"
+                                },
+                                style = ProomType.meta,
+                                color = ProomColor.muted,
+                            )
+                            if (noSources) {
+                                Text(
+                                    "在设置里导入配置包，或连上 NAS 同步一次。",
+                                    style = ProomType.label,
+                                    color = ProomColor.muted,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
