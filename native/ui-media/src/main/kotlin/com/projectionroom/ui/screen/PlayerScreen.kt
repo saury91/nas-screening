@@ -107,6 +107,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.projectionroom.shared.model.Vod
+import com.projectionroom.ui.playback.MediaStats
+import com.projectionroom.ui.playback.MediaStatsTracker
+import com.projectionroom.ui.playback.PlaybackEngine
 import com.projectionroom.ui.component.BufferDots
 import com.projectionroom.ui.component.PlayerIcons
 import com.projectionroom.ui.component.TabIcons
@@ -116,6 +119,7 @@ import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.TvLayout
 import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
@@ -354,7 +358,12 @@ fun PlayerScreen(
     }
     var srcIndex by remember(epIndex) { mutableStateOf(0) }
     val playUrl = if (live) sources.getOrNull(srcIndex) ?: episode?.url else episode?.url
-    val exo = remember { ExoPlayer.Builder(context).build() }
+    // 解码方式只能在构造时定型（RenderersFactory / MediaCodecSelector 都是构造参数），
+    // 所以切档位 = 换一台播放器。续播点用数组而不是 state：effect 里读写它不该触发重组
+    val resumeAt = remember { LongArray(1) }
+    val decoderMode = PlaybackPrefs.decoder
+    val exo = remember(decoderMode) { PlaybackEngine.build(context, decoderMode) }
+    var stats by remember { mutableStateOf(MediaStats()) }
     var buffering by remember { mutableStateOf(true) }
     var playbackError by remember(playUrl) { mutableStateOf<String?>(null) }
     var failedLines by remember { mutableStateOf(0) }
@@ -375,6 +384,8 @@ fun PlayerScreen(
     // 右侧设置抽屉：线路 + 选集都放这儿，播放器上不再挂一排按钮
     var sidePanel by remember { mutableStateOf(false) }
     var sleepOpen by remember { mutableStateOf(false) }
+    // 「播放信息」：分辨率/码率/速度/解码器，排查卡顿用
+    var infoOpen by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var speed by remember { mutableFloatStateOf(1f) }
@@ -718,12 +729,14 @@ fun PlayerScreen(
     val volume = remember { mutableFloatStateOf(currentVolume(context)) }
 
     // 换集/换线路：重新准备，有进度就从上次位置续播
-    DisposableEffect(playUrl) {
+    DisposableEffect(playUrl, decoderMode) {
         val url = playUrl
         if (!url.isNullOrBlank()) {
             // 直播不读续播点：上次记的「位置」对直播流没有意义，
             // seek 到那儿只会得到一个黑屏或者直接跳回直播边缘。
-            val saved = if (live) 0L else prefs.getLong(url, 0L)
+            // 换解码器重建播放器时，位置从 resumeAt 带过来（读完即消费，别留到下一次换集）
+            val carried = resumeAt[0].also { resumeAt[0] = 0L }
+            val saved = if (live) 0L else if (carried > 0L) carried else prefs.getLong(url, 0L)
             // 走代理后路径是 /api/proxy?u=…，没有 .m3u8 后缀，
             // ExoPlayer 只能靠 MIME 判断是 HLS —— 不显式指定会当普通文件解析，永远起不来。
             val isHls = url.contains(".m3u8", ignoreCase = true)
@@ -822,6 +835,22 @@ fun PlayerScreen(
         }
     }
 
+    // ── 播放信息采样 ──
+    //
+    // 排查卡顿只看「转圈」是没用的：得知道此刻用的是哪颗解码器、码流多大、
+    // 下载速度够不够。事件型的数由 AnalyticsListener 推，时变型的每秒采一次。
+    val tracker = remember(exo) { MediaStatsTracker { stats = it } }
+    DisposableEffect(tracker) {
+        exo.addAnalyticsListener(tracker)
+        onDispose { runCatching { exo.removeAnalyticsListener(tracker) } }
+    }
+    LaunchedEffect(tracker) {
+        while (true) {
+            delay(1_000)
+            runCatching { tracker.tick(exo) }
+        }
+    }
+
     // 视频/直播一开声，音乐必须让路。
     //
     // 之前没有这行：从歌单页点进电影，电影对白和背景音乐一起响，
@@ -880,8 +909,8 @@ fun PlayerScreen(
     // 无操作自动收起（锁定时只留锁图标）
     // key 必须带上 sidePanel：否则打开抽屉时计时器还在跑，几秒后照样把整个控制层（含抽屉）一起收掉。
     // 电视上再带上 focusTick：遥控器每动一下都重新计时，否则用户正在选集时整块会消失。
-    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen, focusTick, sleepOpen) {
-        if (controlsVisible && !locked && panel == Panel.None && !sidePanel && !castOpen && !sleepOpen) {
+    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen, focusTick, sleepOpen, infoOpen) {
+        if (controlsVisible && !locked && panel == Panel.None && !sidePanel && !castOpen && !sleepOpen && !infoOpen) {
             delay(if (isTv) 8_000 else 5_000)
             controlsVisible = false
         }
@@ -967,6 +996,7 @@ fun PlayerScreen(
     // 用户只是想退出「播放设置」
     BackHandler(enabled = !locked) {
         when {
+            infoOpen -> infoOpen = false
             sidePanel -> sidePanel = false
             panel != Panel.None -> panel = Panel.None
             castOpen -> castOpen = false
@@ -1003,6 +1033,7 @@ fun PlayerScreen(
                     // 返回键走预览事件：抽屉里点着格子时 BackHandler 收不到
                     // （实测按 BACK 一次完全没反应，得按两次），在根节点先截住
                     Key.Back -> when {
+                        infoOpen -> { infoOpen = false; true }
                         sidePanel -> { sidePanel = false; true }
                         panel != Panel.None -> { panel = Panel.None; true }
                         castOpen -> { castOpen = false; true }
@@ -1054,6 +1085,8 @@ fun PlayerScreen(
                     keepScreenOn = true
                 }
             },
+            // factory 只跑一次：换解码器会造出新的 exo，不在这里重绑画面就永远停在旧实例上
+            update = { it.player = exo },
         )
 
         // ── 上下滑：亮度（左半屏）/ 音量（右半屏）──
@@ -1194,6 +1227,18 @@ fun PlayerScreen(
                     color = Color.White.copy(alpha = 0.55f),
                     fontSize = if (isTv) 16.sp else ProomSp(11.sp),
                     modifier = Modifier.padding(top = 10.dp),
+                )
+                // 转圈时最想知道的是「到底有没有在下载」：0 KB/s 和 8 MB/s
+                // 在只看到一个转圈的界面上完全一样，但一个是源挂了、一个是快好了
+                Text(
+                    text = when {
+                        stats.speedBps > 0 -> "下载 ${speedText(stats.speedBps)}"
+                        stats.loadedBytes > 0 -> "等待数据…"
+                        else -> "连接中…"
+                    },
+                    color = Color.White.copy(alpha = 0.34f),
+                    fontSize = if (isTv) 14.sp else ProomSp(10.sp),
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
         }
@@ -1379,6 +1424,7 @@ fun PlayerScreen(
                         onSpeed = { panel = Panel.Speed },
                         onSettings = { sidePanel = true },
                         onSleep = { sleepOpen = true },
+                        onInfo = { infoOpen = true },
                     )
                 }
 
@@ -1453,6 +1499,25 @@ fun PlayerScreen(
                         modifier = Modifier.align(Alignment.Center),
                         live = live,
                         onClose = { sleepOpen = false },
+                    )
+                }
+
+                // 播放信息：排查卡顿用，解码方式也放这儿 —— 看着画面切档位才方便对比
+                if (infoOpen) {
+                    PlayerInfoSheet(
+                        stats = stats,
+                        site = line?.site.orEmpty(),
+                        quality = line?.quality.orEmpty(),
+                        decoder = decoderMode,
+                        onPickDecoder = { m ->
+                            if (m != decoderMode) {
+                                // 位置先存下来：新播放器 prepare 时从这里起播
+                                resumeAt[0] = exo.currentPosition
+                                PlaybackPrefs.setDecoder(context, m)
+                            }
+                        },
+                        onClose = { infoOpen = false },
+                        modifier = Modifier.align(Alignment.Center),
                     )
                 }
             }
@@ -1679,6 +1744,7 @@ private fun PlayerBottomBar(
     onSpeed: () -> Unit,
     onSettings: () -> Unit,
     onSleep: () -> Unit = {},
+    onInfo: () -> Unit = {},
 ) {
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
@@ -1895,6 +1961,8 @@ private fun PlayerBottomBar(
                             tint = if (sleepOn) ProomColor.accent else null,
                         )
                     }
+                    // 直播也留这个入口：IPTV 卡不卡、码流多大，同样要能看见
+                    CircleIcon(PlayerIcons.Info, "播放信息", onInfo)
                     CircleIcon(
                         PlayerIcons.More,
                         if (live) "换源" else "选集与线路",
@@ -2526,6 +2594,178 @@ private fun PlayerSleepSheet(
         }
     }
 }
+
+/**
+ * 「播放信息」：一屏数字 + 解码方式。
+ *
+ * 卡顿究竟卡在哪，只看画面是分不出来的：硬解掉帧、码率超过带宽、
+ * 源站只吐 20 KB/s，表现都是转圈。这里把三件事摆在一起，
+ * 顺便给了硬解/软解的强制开关 —— 切档位时位置不变，正好做 A/B 对比。
+ */
+@Composable
+private fun PlayerInfoSheet(
+    stats: MediaStats,
+    site: String,
+    quality: String,
+    decoder: DecoderMode,
+    onPickDecoder: (DecoderMode) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tv = LocalProomTv.current
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        modifier
+            .width(if (tv) 540.dp else 384.dp)
+            .clip(shape)
+            .background(Color.Black.copy(alpha = 0.93f))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
+            .padding(
+                horizontal = if (tv) 24.dp else 18.dp,
+                vertical = if (tv) 20.dp else 12.dp,
+            ),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "播放信息",
+                color = Color.White,
+                fontSize = if (tv) 22.sp else ProomSp(14.sp),
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier.size(if (tv) TvLayout.minTouch else 30.dp)
+                    .clip(CircleShape)
+                    .tvFocusRing(CircleShape)
+                    .clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    PlayerIcons.Close,
+                    "关闭",
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.size(if (tv) 20.dp else 16.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(if (tv) 10.dp else 6.dp))
+
+        // 横屏只有 390dp 高，一列排八行会顶出屏幕：左右各四行
+        Row(horizontalArrangement = Arrangement.spacedBy(if (tv) 28.dp else 14.dp)) {
+            Column(Modifier.weight(1f)) {
+                InfoLine("分辨率", resolutionText(stats) +
+                    if (stats.fps > 0) " · %.0f fps".format(Locale.US, stats.fps) else "")
+                InfoLine("码率", bitrateText(stats.bitrate.toLong()))
+                InfoLine("缓冲速度", speedText(stats.speedBps))
+                InfoLine(
+                    "已缓冲",
+                    if (stats.bufferMs > 0) {
+                        "${durationText(stats.bufferMs)} · ${bytesText(stats.loadedBytes)}"
+                    } else {
+                        bytesText(stats.loadedBytes)
+                    },
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                InfoLine("带宽估计", bitrateText(stats.bandwidthBps))
+                InfoLine(
+                    "丢帧",
+                    if (stats.rendered + stats.dropped > 0) {
+                        "${stats.dropped} / ${stats.rendered + stats.dropped}"
+                    } else {
+                        "—"
+                    },
+                )
+                if (site.isNotBlank()) {
+                    InfoLine("线路", listOf(site, quality).filter { it.isNotBlank() }.joinToString(" · "))
+                }
+            }
+        }
+        // 解码器名最长（c2.qti.hevc.decoder），单独占一整行，别被省略号吃掉
+        InfoLine(
+            "解码器",
+            listOfNotNull(
+                stats.decoderName.takeIf { it.isNotBlank() },
+                stats.hardware?.let { if (it) "硬解" else "软解" },
+                stats.codecs.takeIf { it.isNotBlank() },
+            ).joinToString(" · ").ifBlank { "—" },
+        )
+
+        Spacer(Modifier.height(if (tv) 14.dp else 11.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.1f)))
+        Spacer(Modifier.height(if (tv) 13.dp else 10.dp))
+
+        Text(
+            "解码方式",
+            color = Color.White.copy(alpha = 0.5f),
+            fontSize = if (tv) 16.sp else ProomSp(11.sp),
+        )
+        Spacer(Modifier.height(if (tv) 10.dp else 8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(if (tv) 12.dp else 8.dp)) {
+            DecoderMode.values().forEach { m ->
+                SideChip(m.label, m == decoder, Modifier.weight(1f)) { onPickDecoder(m) }
+            }
+        }
+        Spacer(Modifier.height(if (tv) 10.dp else 7.dp))
+        Text(
+            "${decoder.desc}；切换后从当前位置续播",
+            color = Color.White.copy(alpha = 0.34f),
+            fontSize = if (tv) 14.sp else ProomSp(10.sp),
+        )
+    }
+}
+
+@Composable
+private fun InfoLine(label: String, value: String) {
+    val tv = LocalProomTv.current
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = if (tv) 5.dp else 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = Color.White.copy(alpha = 0.45f),
+            fontSize = if (tv) 16.sp else ProomSp(10.5.sp),
+            modifier = Modifier.width(if (tv) 96.dp else 56.dp),
+        )
+        Text(
+            value,
+            color = Color.White.copy(alpha = 0.92f),
+            fontSize = if (tv) 17.sp else ProomSp(10.5.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun resolutionText(s: MediaStats): String = when {
+    s.width <= 0 || s.height <= 0 -> "—"
+    s.height >= 2160 -> "${s.width} × ${s.height} · 4K"
+    s.height >= 1080 -> "${s.width} × ${s.height} · 1080P"
+    else -> "${s.width} × ${s.height}"
+}
+
+private fun speedText(bps: Long): String = when {
+    bps <= 0 -> "—"
+    bps >= 1024L * 1024L -> "%.2f MB/s".format(Locale.US, bps / 1048576.0)
+    else -> "%d KB/s".format(Locale.US, bps / 1024L)
+}
+
+private fun bitrateText(bps: Long): String = when {
+    bps <= 0 -> "—"
+    bps >= 1_000_000L -> "%.2f Mbps".format(Locale.US, bps / 1_000_000.0)
+    else -> "%d kbps".format(Locale.US, bps / 1000L)
+}
+
+private fun bytesText(b: Long): String = when {
+    b <= 0 -> "—"
+    b >= 1024L * 1024L * 1024L -> "%.2f GB".format(Locale.US, b / 1073741824.0)
+    b >= 1024L * 1024L -> "%.1f MB".format(Locale.US, b / 1048576.0)
+    else -> "%d KB".format(Locale.US, b / 1024L)
+}
+
+private fun durationText(ms: Long): String =
+    if (ms <= 0) "—" else "%.1f 秒".format(Locale.US, ms / 1000.0)
 
 @Composable
 private fun PanelRow(label: String, selected: Boolean, onClick: () -> Unit) {
