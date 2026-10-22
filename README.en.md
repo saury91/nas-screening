@@ -137,7 +137,8 @@ A 10-foot UI where the remote is the only input. The rules deliberately differ f
 - **The ambient backdrop never uses `Modifier.blur`.** That is a no-op below API 31, and most TV boxes run 28–30, so every screen goes through `SoftBackdrop` (decode small, upscale on the GPU) and looks the same everywhere.
 
 <p>
-<img src="docs/screenshot-app-tv.png" width="560" alt="TV home">
+<img src="docs/screenshot-app-tv.png" width="380" alt="TV home">
+<img src="docs/screenshot-app-tv-detail.png" width="380" alt="TV detail">
 </p>
 
 ---
