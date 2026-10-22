@@ -321,7 +321,7 @@ private fun PhoneStage(
                 .navigationBarsPadding()
                 .padding(horizontal = 22.dp),
         ) {
-            StageHeader(isTv = false, onBack, onFx, "正在播放", onSleep = onSleep) { NowPlayingBadge() }
+            StageHeader(isTv = false, onBack, onFx, "正在播放", onSleep = onSleep)
             Spacer(Modifier.weight(1f))
             Column(
                 Modifier
@@ -407,21 +407,6 @@ private fun StageCard(
     }
 }
 
-/** 「● 正在播放」小标 */
-@Composable
-private fun NowPlayingBadge() {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Canvas(Modifier.size(5.dp)) { drawCircle(ProomColor.accent) }
-        Text(
-            "正在播放",
-            color = ProomColor.muted,
-            fontSize = ProomSp(11.sp),
-            letterSpacing = 2.sp,
-            modifier = Modifier.padding(start = 7.dp),
-        )
-    }
-}
-
 /** 只在出错时出现一行，正常播放不占位置 */
 @Composable
 private fun StageErrorLine() {
@@ -446,7 +431,6 @@ private fun StageHeader(
     // 电视：页面还没拿到焦点时先不让这几个图标可聚焦，避免它们抢走遥控器的第一下
     trailingFocusable: Boolean = true,
     onSleep: () -> Unit = {},
-    center: @Composable () -> Unit,
 ) {
     if (isTv) {
         TvPageHeader(
@@ -469,7 +453,8 @@ private fun StageHeader(
         ) {
             Icon(TabIcons.Back, "返回", tint = ProomColor.text, modifier = Modifier.size(24.dp))
         }
-        Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) { center() }
+        // 中间不再放「● 正在播放」：它居中、图标靠右，屏幕一窄文字就压到收藏键上。
+        // 播放状态本来就有唱片转动和传输条的暂停键两个信号，这行字是多余的。
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
             FavBtn(40.dp)
             SleepBtn(40.dp, onSleep)
@@ -573,12 +558,7 @@ private fun ColumnScope.VinylStage(
     tv: Boolean = false,
     onSleep: () -> Unit = {},
 ) {
-    StageHeader(isTv = false, onBack, onFx, "正在播放", onSleep = onSleep) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Canvas(Modifier.size(5.dp)) { drawCircle(ProomColor.accent) }
-            Text("正在播放", color = ProomColor.muted, fontSize = ProomSp(11.sp), letterSpacing = 2.sp, modifier = Modifier.padding(start = 7.dp))
-        }
-    }
+    StageHeader(isTv = false, onBack, onFx, "正在播放", onSleep = onSleep)
 
     if (wide) {
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
@@ -718,9 +698,7 @@ private fun ColumnScope.EditorialStage(
     playFocus: FocusRequester? = null,
     onSleep: () -> Unit = {},
 ) {
-    StageHeader(isTv = true, onBack, onFx, "正在播放", trailingFocusable = pageFocused, onSleep = onSleep) {
-        Text("正在播放", color = ProomColor.muted, style = ProomType.eyebrow)
-    }
+    StageHeader(isTv = true, onBack, onFx, "正在播放", trailingFocusable = pageFocused, onSleep = onSleep)
 
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
         // 唱片最多占屏高 72%：原来 0.9 倍高时唱片接近 300dp，在 55 寸以上会显得「只有一张大图」，
