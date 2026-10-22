@@ -532,25 +532,26 @@ class MainActivity : ComponentActivity() {
                     remember(allSources) {
                         { kw ->
                             val srcs = allSources
-                            val local = if (srcs.isNotEmpty()) {
-                                runCatching {
-                                    // 必须切到 Default：解析 JSON、合并去重都是 CPU 活，
-                                    // 留在 Main 上会把主线程压住（实测详情页能压出 ANR）
-                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                                        com.projectionroom.shared.catalog.Catalog(
-                                            sourceHttp,
-                                            (bundle?.badPicHosts.orEmpty() + com.projectionroom.ui.component.BadPicHosts.all()),
-                                        )
-                                            // 71 个源一起查，9 秒常在最后一批上截断，
-                                            // 结果就是「明明有却搜不到」。给到 12 秒。
-                                            .search(kw, srcs, deadlineMs = 12_000)
-                                    }
-                                }.getOrDefault(emptyList())
-                            } else emptyList()
-                            // 兜底问 NAS。NAS 永久离线时靠 NasGate 熔断，不会每次都白等
-                            local.ifEmpty {
-                                NasGate.tryCall { runCatching { api.search(kw) }.getOrNull() }
-                                    ?: emptyList()
+                            // 本地源一个都没回应时，别把异常咽成空列表 —— 搜索页要据此
+                            // 说「片源没响应」，否则用户会以为自己片名打错了。
+                            // 咽掉之后就只剩「没找到」这一种说法了。
+                            // 搜索只走本地直连 —— 它属于「资源加载」，不该依赖 NAS。
+                            // NAS 只承担同步 / 投射 / 更新 / 配置四件事；原先这里挂了两层
+                            // NAS 兜底，NAS 一挂就白等 2.5 秒 ×2，还把「源都没响应」拖成十几秒。
+                            if (srcs.isEmpty()) {
+                                emptyList()
+                            } else {
+                                // 必须切到 Default：解析 JSON、合并去重都是 CPU 活，
+                                // 留在 Main 上会把主线程压住（实测详情页能压出 ANR）
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                    com.projectionroom.shared.catalog.Catalog(
+                                        sourceHttp,
+                                        (bundle?.badPicHosts.orEmpty() + com.projectionroom.ui.component.BadPicHosts.all()),
+                                    )
+                                        // 71 个源一起查，9 秒常在最后一批上截断，
+                                        // 结果就是「明明有却搜不到」。给到 12 秒。
+                                        .search(kw, srcs, deadlineMs = 12_000)
+                                }
                             }
                         }
                     }
@@ -573,7 +574,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }.getOrNull()
                             } else null
-                            local ?: NasGate.tryCall { runCatching { api.detail(name, year) }.getOrNull() }
+                            // 详情是资源加载，不问 NAS
+                            local
                         }
                     }
 
@@ -596,10 +598,7 @@ class MainActivity : ComponentActivity() {
                                         .detailStream(name, year, srcs.take(30), deadlineMs = 8_000)
                                         .flowOn(kotlinx.coroutines.Dispatchers.Default)
                                 }
-                            local.onEmpty {
-                                NasGate.tryCall { runCatching { api.detail(name, year) }.getOrNull() }
-                                    ?.let { emit(it) }
-                            }
+                            local
                         }
                     }
 
@@ -631,11 +630,6 @@ class MainActivity : ComponentActivity() {
                             return@flow
                         }
                         val fresh = runCatching { musicApi.categories() }.getOrDefault(emptyList())
-                            .ifEmpty {
-                                NasGate.tryCall {
-                                    runCatching { api.musicCats() }.getOrNull()
-                                } ?: emptyList()
-                            }
                         if (fresh.isNotEmpty()) {
                             emit(fresh)
                             withContext(Dispatchers.IO) {
@@ -660,10 +654,7 @@ class MainActivity : ComponentActivity() {
                         val local = runCatching {
                             if (cat.isBlank()) musicApi.recommend(14) else musicApi.categoryPlaylists(cat)
                         }.getOrDefault(emptyList())
-                        val fresh = local.ifEmpty {
-                            NasGate.tryCall { runCatching { api.musicPlaylists(cat) }.getOrNull() }
-                                ?: emptyList()
-                        }
+                        val fresh = local
                         if (fresh.isNotEmpty()) {
                             emit(fresh)
                             withContext(Dispatchers.IO) {
@@ -675,12 +666,10 @@ class MainActivity : ComponentActivity() {
                 val doMusicPlaylist: suspend (String) -> NasApi.PlaylistDetail = { id ->
                     runCatching { musicApi.playlist(id) }.getOrNull()
                         ?.takeIf { it.tracks.isNotEmpty() }
-                        ?: NasGate.tryCall { runCatching { api.musicPlaylist(id) }.getOrNull() }
                         ?: NasApi.PlaylistDetail()
                 }
                 val doTrackUrl: suspend (String) -> String = { id ->
                     runCatching { musicApi.trackUrl(id) }.getOrDefault("")
-                        .ifEmpty { NasGate.tryCall { runCatching { api.musicTrackUrl(id) }.getOrNull() } ?: "" }
                 }
 
                 // 音乐播放器是进程内单例：把「取播放地址」的能力注入一次，
@@ -718,6 +707,8 @@ class MainActivity : ComponentActivity() {
                                 return@flow
                             }
                             val base = runCatching {
+                                // 频道表属于「配置」：配置包里有就直接用，
+                                // 只有配置里没有时才向 NAS 要一次（这是允许的配置类请求）
                                 bundle?.live?.takeIf { it.channels.isNotEmpty() } ?: api.live()
                             }.getOrNull() ?: return@flow
                             // 订阅来的频道并进来（同名台合并线路，不重复列两次）
@@ -801,11 +792,6 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                if (latest.isEmpty() && cached == null) {
-                                    NasGate.tryCall(timeoutMs = 3_000) {
-                                        runCatching { api.browse(cat, pg, y, a) }.getOrNull()
-                                    }?.let { emit(it) }
-                                }
                             }
                         }
                     }
@@ -939,8 +925,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // 首页：**本地拼**，NAS 只做兜底。
-                // 片源地址存在本地 bundle 里，所以 NAS 一年不开机，首页照样能出新内容。
+                // 首页：**本地拼**。片源地址存在本地 bundle 里，NAS 一年不开机也照样出新内容。
+                // 首页是资源加载，不向 NAS 要数据（NAS 只管同步/投射/更新/配置）。
                 var snapshot by remember { mutableStateOf<HomeSnapshot?>(null) }
                 var loading by remember { mutableStateOf(true) }
                 LaunchedEffect(bundle, extra, api) {
@@ -950,22 +936,13 @@ class MainActivity : ComponentActivity() {
                             HomeCache.read(this@MainActivity)
                         }
                     }
-                    // 本地配置包还没读出来时先别急着问 NAS。
-                    // 冷启动这一瞬间 bundle 还在 IO 线程上解析，allSources 是空的，
-                    // 直接往下走必然是「本地拼不出来 → 问 NAS」，NAS 不在就白等一次超时。
-                    // 等 2 秒还不来才说明确实没有本地配置（新装 / 没导过订阅），这时才走 NAS。
+                    // 冷启动这一瞬间 bundle 还在 IO 线程上解析，allSources 是空的。
+                    // 等 2 秒还不来才说明确实没有本地配置（新装 / 没导过订阅），
+                    // 这时首页就空着 —— 不去问 NAS。
                     if (bundle == null && extra.sources.isEmpty()) {
                         delay(2_000)
-                        if (bundle == null && extra.sources.isEmpty()) {
-                            runCatching { api.home() }.onSuccess { f ->
-                                snapshot = HomeSnapshot(
-                                    at = System.currentTimeMillis(),
-                                    latest = f.latest,
-                                    cats = f.cats,
-                                )
-                            }
-                            loading = false
-                        }
+                        // 没有本地片源配置就直接空着：首页是资源加载，不问 NAS
+                        loading = false
                         return@LaunchedEffect
                     }
                     val srcs = allSources
@@ -997,16 +974,6 @@ class MainActivity : ComponentActivity() {
                                 HomeCache.save(this@MainActivity, local)
                                 HomeCache.read(this@MainActivity)
                             } ?: snapshot
-                        }
-                    }
-                    // 本地一条都没拼出来（没片源/全超时）才问 NAS
-                    if (snapshot == null) {
-                        runCatching { api.home() }.onSuccess { f ->
-                            snapshot = HomeSnapshot(
-                                at = System.currentTimeMillis(),
-                                latest = f.latest,
-                                cats = f.cats,
-                            )
                         }
                     }
                     loading = false

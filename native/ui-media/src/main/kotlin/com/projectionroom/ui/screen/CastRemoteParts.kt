@@ -97,10 +97,10 @@ internal fun RemoteTopRow(
 
         // 退出是破坏性动作：图形比文字弱一档，靠一圈弱描边和 danger 色表明性质，
         // 不用写「退出」两个字占掉标题的宽度。
-        // 外圈 44dp 只为撑住点击热区，视觉上仍是 34dp 的小圆
+        // 外圈 48dp 只为撑住点击热区，视觉上仍是 34dp 的小圆
         Box(
             Modifier
-                .size(44.dp)
+                .size(48.dp)
                 .clip(CircleShape)
                 .clickable(onClick = onExit),
             contentAlignment = Alignment.Center,

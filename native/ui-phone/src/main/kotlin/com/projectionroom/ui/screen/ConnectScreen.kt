@@ -258,7 +258,8 @@ private fun PadKey(label: String, onClick: () -> Unit) {
     Box(
         Modifier
             .width(74.dp)
-            .height(36.dp)
+            // 36dp 的数字键在手机上一排四个，手指压不准就串到隔壁数字
+            .height(48.dp)
             .clip(shape)
             .background(if (focused) ProomColor.accent else ProomColor.surface)
             .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)
