@@ -1421,7 +1421,16 @@ fun PlayerScreen(
                                 if (exo.isPlaying) exo.pause() else exo.play()
                             }
                         },
-                        onSpeed = { panel = Panel.Speed },
+                        // 倍速就地循环 1× → 2× → 3× → 1×：数字自己变，不用再弹面板
+                        onSpeed = {
+                            val next = when {
+                                speed < 1.5f -> 2f
+                                speed < 2.5f -> 3f
+                                else -> 1f
+                            }
+                            speed = next
+                            runCatching { exo.setPlaybackSpeed(next) }
+                        },
                         onSettings = { sidePanel = true },
                         onSleep = { sleepOpen = true },
                         onInfo = { infoOpen = true },
@@ -1882,7 +1891,7 @@ private fun PlayerBottomBar(
                 Box(Modifier.width(1.dp).height(24.dp).background(Color.White.copy(alpha = 0.12f)))
                 // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
                 if (!live) {
-                    CastTextButton(if (speed == 1f) "1×" else "${speed}×", onSpeed)
+                    CastTextButton(speedLabel(speed), onSpeed)
                 }
                 CastTextButton(if (live) "换源" else "选集", onSettings)
             }
@@ -1951,7 +1960,7 @@ private fun PlayerBottomBar(
                 ) {
                     // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
                     if (!live) {
-                        CircleTextChip(if (speed == 1f) "1×" else "${speed}×", onSpeed)
+                        CircleTextChip(speedLabel(speed), onSpeed)
                         // 定时开着时图标变金：不然「有没有设过」完全看不出来
                         val sleepOn = SleepTimer.mode != SleepTimer.Mode.Off
                         CircleIcon(
@@ -2099,22 +2108,22 @@ private fun PlayerSeekBar(
     }
 }
 
-/** 倍速的小圆钮：文字塞进圆形热区，比纯文字 chip 好点 */
+/** 倍速的小圆钮：尺寸/底色与 CircleIcon 完全一致，只有中间放的是文字 */
 @Composable
 private fun CircleTextChip(text: String, onClick: () -> Unit) {
     val tv = LocalProomTv.current
     Box(
         Modifier
-            .size(if (tv) 56.dp else 44.dp)
+            .size(if (tv) 56.dp else 48.dp)
             .tvFocusRing(CircleShape)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.12f))
+            .background(Color.Black.copy(alpha = 0.32f))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
-            color = Color.White.copy(alpha = 0.9f),
+            color = Color.White.copy(alpha = 0.92f),
             fontSize = if (tv) 18.sp else ProomSp(12.sp),
             maxLines = 1,
         )
@@ -2744,6 +2753,10 @@ private fun resolutionText(s: MediaStats): String = when {
     s.height >= 1080 -> "${s.width} × ${s.height} · 1080P"
     else -> "${s.width} × ${s.height}"
 }
+
+/** 倍速标签：2f 要显示成「2×」而不是「2.0×」 */
+private fun speedLabel(speed: Float): String =
+    if (speed == speed.toInt().toFloat()) "${speed.toInt()}×" else "${speed}×"
 
 private fun speedText(bps: Long): String = when {
     bps <= 0 -> "—"
