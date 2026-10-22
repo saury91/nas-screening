@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,12 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
 
 /**
  * 统一的「返回」条：左上角一个 chevron，手机点、遥控器也能聚焦。
@@ -99,28 +98,27 @@ fun PageBackBar(
  * 甚至两个页面完全没有返回入口。
  */
 object TvPageHeaderSpec {
-    /** 内容左边缘，和首页 rail、分类页、详情页同一个数 */
-    val inset = 40.dp
-    /** 顶栏高度（不含状态栏）：返回提示与标题垂直居中 */
+    /** 内容左边缘 = 安全区 48dp（960dp 画布下的 5%），和首页 rail、分类页、详情页同一个数 */
+    val inset = TvLayout.insetX
+    /** 顶栏高度（不含状态栏）：返回提示与标题垂直居中；48dp 的返回热区塞得下 */
     val height = 64.dp
     /** 返回提示与标题之间的水平间距 */
     val gap = 20.dp
 }
 
 /**
- * 电视端页面顶栏：`‹ 返回` 提示 + 页面标题 + 右侧动作，规格固定。
+ * 电视端页面顶栏：`‹ 返回` 按钮 + 页面标题 + 右侧动作，规格固定。
  *
- * 返回在电视上**不是按钮**（这是上一版做错的地方）：
- *  1. 遥控器只有一个输入货币：焦点。焦点环里每一项都应该是「按 OK 会发生什么」
- *     的候选。返回不在这套语言里，它本来就是遥控器上的一个硬键。
- *  2. 把返回做成可聚焦项，等于在用户从内容往左上移动的路上埋一个「一按就退出」
- *     的坑；还抢初始焦点 —— 进页面第一下 OK 直接退回去。
- *  3. 圆形悬浮按钮是手机 FAB 的语言。10-foot UI 里没有「热区」这个概念，
- *     只有排版层级。
+ * 返回**进焦点环**，和右侧动作一样是「按 OK 会发生什么」的候选项。
  *
- * 所以是**面包屑式弱提示**：小字 + 小 chevron，和标题同一条水平线、
- * 同一条左边距，读起来是「你在哪一层」。鼠标 / 触摸电视盒仍然能点
- * （`canFocus = false` 只影响 D-pad 焦点环）。
+ * 曾经两次走偏，都记在这里：
+ *  1. 做成裸的灰字面包屑（小字 + 小 chevron）——读起来像标题的注脚，
+ *     3 米外看不见，遥控器也选不中；
+ *  2. 做成胶囊却 `canFocus = false` —— 长得像按钮、聚焦时毫无反应，
+ *     用户会以为坏了。
+ *
+ * 可聚焦的代价是它抢初始焦点（进页面第一下 OK 直接退回去），
+ * 所以在 [TvBackHint] 里首帧让位、页面自己的首项再 `requestFocus`。
  *
  * @param title 页面标题；传 null 表示这一屏不需要标题（搜索 / 详情 / 错误页）
  * @param titleAlpha 标题透明度，歌单页滚动时淡入用
@@ -135,8 +133,8 @@ fun TvPageHeader(
     titleAlpha: Float = 1f,
     /** 左边距。父容器已经给了 40dp 内边距时传 0，避免叠成 80 */
     inset: Dp = TvPageHeaderSpec.inset,
-    /** 返回提示的文字/箭头颜色：压在视频画面上时传亮色 */
-    hintColor: Color = ProomColor.muted,
+    /** 返回胶囊的文字/箭头颜色：压在视频画面上时传亮色 */
+    hintColor: Color = ProomColor.text,
     /** 返回提示的半透明底：视频左上角常有台标，光靠颜色救不回来 */
     hintBackdrop: Color? = null,
     trailing: (@Composable androidx.compose.foundation.layout.RowScope.() -> Unit)? = null,
@@ -180,12 +178,15 @@ fun TvPillButton(text: String, onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
     Box(
         Modifier
+            // 可点目标下限 48dp（TvLayout.minTouch），比原来的 8dp 内边距撑出来的 30dp 高一档
+            .heightIn(min = TvLayout.minTouch)
             .clip(shape)
             .background(if (focused) ProomColor.accentSoft else ProomColor.surface)
             .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
@@ -196,7 +197,20 @@ fun TvPillButton(text: String, onClick: () -> Unit) {
 }
 
 /**
- * 电视端的返回「提示」——**不是按钮**。
+ * 电视端的返回按钮。
+ *
+ * 之前是一串裸的灰字：12sp `muted`、没有容器、紧贴在 40sp 的标题左边，
+ * 3 米外既看不见，读起来也像标题的注脚而不是「可以退回去」。
+ * 现在给它和顶栏右侧动作（[TvPillButton]）同一套材质：surface 胶囊底 + 白字 +
+ * 20dp 箭头，页头左右两端才是同一种语言。
+ *
+ * 它**进焦点环**：长得像按钮却选不中，遥控器往上一推光标就跳过去，
+ * 用户会以为这里坏了。聚焦沿用全局规则——整块翻白 + 深色字，
+ * 和首页 / 详情页 / 歌单页的主按钮是同一种反馈。
+ *
+ * 只剩一个例外要处理：它是顶栏里第一颗，若一进页面就能聚焦，
+ * 没有显式 `requestFocus` 的页面（比如空态的「我的」）会把初始焦点给它，
+ * 遥控器按 OK 就直接退出去。所以首帧先不给焦点资格，过一帧再开放。
  *
  * 不再单独调用：一律通过 [TvPageHeader] 出现，否则又会各写一套位置和字号。
  */
@@ -206,49 +220,68 @@ fun TvBackHint(
     modifier: Modifier = Modifier,
     label: String = "返回",
     /** 文字/箭头颜色：压在视频画面上时传亮色 */
-    color: Color = ProomColor.muted,
-    /** 半透明底。用 drawBehind 画、不占布局，所以「返回」两个字的位置和其它页仍然对齐 */
+    color: Color = ProomColor.text,
+    /** 胶囊底色：压在视频画面上时传半透明黑，默认和右侧胶囊动作同一档 surface */
     backdrop: Color? = null,
 ) {
     if (onBack == null) return
+    var focused by remember { mutableStateOf(false) }
+    var focusable by remember { mutableStateOf(false) }
+    // 页面切换时焦点是被「搬」过来的，不是重新分配：只要这一刻它可聚焦，
+    // 就会顺理成章地落到它身上。所以让位不能只让一帧，得让过整段切换动画
+    // （350ms），等页面自己的首项把焦点接稳了再开放。
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(350)
+        focusable = true
+    }
+    val scale by animateFloatAsState(
+        if (focused) 1.05f else 1f,
+        tween(ProomMotion.short, easing = ProomMotion.ease),
+        label = "back-scale",
+    )
+    val shape = RoundedCornerShape(50)
+    // 聚焦时底色是白的，字必须跟着翻深，否则白底白字
+    val ink = if (focused) Color(0xFF1B1206) else color
     Row(
         modifier
-            .height(28.dp)
-            // 必须在 clickable 之前：只关掉焦点，不关掉点击
-            .focusProperties { canFocus = false }
-            // 底色必须画在 clip 之前，否则外扩的那一圈会被自己裁掉
-            .then(
-                if (backdrop != null) {
-                    Modifier.drawBehind {
-                        val padX = 8.dp.toPx()
-                        val padY = 4.dp.toPx()
-                        drawRoundRect(
-                            color = backdrop,
-                            topLeft = Offset(-padX, -padY),
-                            size = Size(size.width + padX * 2, size.height + padY * 2),
-                            cornerRadius = CornerRadius((size.height + padY * 2) / 2),
-                        )
-                    }
-                } else {
-                    Modifier
+            .scale(scale)
+            // 可聚焦目标下限 48dp：40dp 的胶囊按不准，焦点环也贴边
+            .heightIn(min = TvLayout.minTouch)
+            .focusProperties { canFocus = focusable }
+            .clip(shape)
+            .background(
+                when {
+                    focused -> Color.White
+                    // 压在视频/封面上时用调用方给的那层半透明黑
+                    backdrop != null -> backdrop
+                    // 不可聚焦的上一版靠这层提亮撑存在感；现在有聚焦态，
+                    // 静态只要够看清轮廓，别和焦点态抢
+                    else -> ProomColor.surface2
                 }
             )
-            .clip(RoundedCornerShape(6.dp))
+            .then(
+                when {
+                    focused -> Modifier.border(2.dp, ProomColor.accent, shape)
+                    backdrop == null -> Modifier.border(1.dp, ProomColor.line, shape)
+                    else -> Modifier
+                }
+            )
+            .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onBack)
-            .padding(end = 8.dp),
+            .padding(start = 14.dp, top = 10.dp, end = 18.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = TabIcons.Back,
             contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(14.dp),
+            tint = ink,
+            modifier = Modifier.size(20.dp),
         )
         Text(
             text = label,
             style = ProomType.meta,
-            color = color,
-            modifier = Modifier.padding(start = 4.dp),
+            color = ink,
+            modifier = Modifier.padding(start = 6.dp),
         )
     }
 }

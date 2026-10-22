@@ -231,18 +231,21 @@ class MainActivity : ComponentActivity() {
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 联调入口：`am start … -e nas http://10.0.2.2:8899` 直接指定 NAS。
+        // 必须在下面的 CastService.start 之前落盘 —— 投屏服务启动时才去读地址，
+        // 放到 readRoute 里就晚了一步，服务已经按旧值（或空）起来了。
+        intent?.getStringExtra("nas")?.takeIf { it.isNotBlank() }?.let {
+            com.projectionroom.app.NasStore.save(this, it)
+        }
+
         // DLNA 接收端只在电视端开启。交给前台服务而不是 Activity：
         // 用户按 Home 回到桌面后，这台电视仍然要能被手机搜到
         com.projectionroom.app.cast.CastService.start(this)
 
-        // Android 13+ 不给通知权限，投屏时「后台拉不起播放页」的兜底通知就发不出来，
-        // 表现为手机显示已投屏、电视毫无反应
-        if (android.os.Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
-        }
+        // 通知权限交给 Compose 层的说明卡去要（见下面的 askNotif）：
+        // 这个权限确实关键 —— Android 13+ 没有它，投屏时「后台拉起播放页」的兜底通知
+        // 发不出来，表现为手机显示已投屏、电视毫无反应 —— 但一开机就甩个系统框，
+        // 用户既不知道它干什么，也没得选
 
         registerCastDebugHook()
 
@@ -265,16 +268,6 @@ class MainActivity : ComponentActivity() {
         // 音乐通知栏：起一个 MediaSessionService，播放时自动转前台并出通知。
         // 在 onCreate 里启动属于「前台场景」，不会触发后台服务限制。
         runCatching { startService(android.content.Intent(this, MusicService::class.java)) }
-        // Android 13+ 没有这个权限，通知直接被系统丢掉
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            val need = checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (need) {
-                runCatching {
-                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 9101)
-                }
-            }
-        }
 
         // 预热所有 SharedPreferences：首次 getString 会在主线程解析整个 XML。
         // 放后台线程做，连目录 stat 都不占主线程（StrictMode 里这几次都是 warmUp 自己）。
@@ -359,6 +352,51 @@ class MainActivity : ComponentActivity() {
                         baseUrl = found
                     } else {
                         findErr = "没有在局域网里找到放映室，确认 NAS 开机后可以手动填地址"
+                    }
+                }
+
+                // 通知权限：不在开机时用系统框糊脸。先给自己的卡片讲清用途
+                //（这条通知负责投屏时拉起播放页、后台播放控制），用户可以「暂不开启」
+                var askNotif by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    if (android.os.Build.VERSION.SDK_INT < 33) return@LaunchedEffect
+                    if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        return@LaunchedEffect
+                    }
+                    if (getSharedPreferences("proom_perm", MODE_PRIVATE)
+                            .getBoolean("notif_asked", false)
+                    ) {
+                        return@LaunchedEffect
+                    }
+                    askNotif = true
+                }
+                if (askNotif) {
+                    androidx.compose.ui.window.Dialog(onDismissRequest = { askNotif = false }) {
+                        com.projectionroom.ui.component.PermissionCard(
+                            title = "开个通知，投屏才叫得醒电视",
+                            message = "手机往这台电视投屏时，靠它把播放页拉起来。不发广告，也不打扰。",
+                            icon = { tint -> com.projectionroom.ui.component.BellGlyph(tint, 26.dp) },
+                            primary = "开启通知",
+                            onPrimary = {
+                                askNotif = false
+                                getSharedPreferences("proom_perm", MODE_PRIVATE).edit()
+                                    .putBoolean("notif_asked", true).apply()
+                                runCatching {
+                                    requestPermissions(
+                                        arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                                        1001,
+                                    )
+                                }
+                            },
+                            secondary = "暂不开启",
+                            onSecondary = {
+                                askNotif = false
+                                getSharedPreferences("proom_perm", MODE_PRIVATE).edit()
+                                    .putBoolean("notif_asked", true).apply()
+                            },
+                        )
                     }
                 }
 
@@ -1145,6 +1183,8 @@ class MainActivity : ComponentActivity() {
                                     .playAll(this@MainActivity, q, index, shuffle)
                             },
                             onBack = { screen = s.from },
+                            // 迷你条在遥控器上要按到列表底才够得着，顶栏这颗胶囊才是入口
+                            onOpenPlayer = { screen = Screen.MusicPlayer(s) },
                             footer = {
                                 Box(Modifier.navigationBarsPadding()) {
                                     MiniPlayerOrEmpty { screen = Screen.MusicPlayer(s) }

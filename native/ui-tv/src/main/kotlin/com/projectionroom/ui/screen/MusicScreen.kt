@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -57,10 +58,16 @@ import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.ui.component.SkeletonBlock
 import com.projectionroom.ui.component.TabIcons
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.scale
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
+import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.ProomMotion
+import com.projectionroom.ui.theme.TvLayout
 import kotlin.time.Duration.Companion.minutes
 import com.projectionroom.ui.component.RemoteImage
 
@@ -182,8 +189,10 @@ fun MusicScreen(
         // 和影视页同一档：手机 3 列（每张约 111dp）、横距 10dp。
         // 之前 2 列每张 170dp，一屏只看到 4 个歌单，信息密度太低
         val cols = (maxWidth / 150.dp).toInt().coerceIn(4, 8)
-        // 推荐横滑卡比网格略大一点，用来区分「编辑推荐」和普通分类
-        val recW = 152.dp
+        // 卡片宽度从列数反算：写死 152dp 时 6 列会溢出 48dp，最右边那张永远被切一半
+        // 可用宽度要扣掉左右两个安全区，否则最后一列会顶出屏幕（之前就是这么被切的）
+        val recGap = 12.dp
+        val recW = (maxWidth - TvLayout.insetX * 2 - recGap * (cols - 1)) / cols
 
         Column(Modifier.fillMaxSize()) {
         when {
@@ -246,9 +255,12 @@ fun MusicScreen(
             contentPadding = PaddingValues(
                 start = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
                 end = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
+                // 顶栏是布局元素不是浮层：网格紧贴导航时，首屏的区块标题像贴在
+                // 导航底边上，滚动后还会留半截卡片悬在文字下面。留 12dp 呼吸。
+                top = 12.dp,
                 bottom = ProomSpace.xxl,
             ),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(recGap),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
 
@@ -260,9 +272,9 @@ fun MusicScreen(
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     // 横滑要通栏：网格给了 20dp 内边距，这里抵消掉
                     LazyRow(
-                        contentPadding = PaddingValues(horizontal = 40.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.bleed(40.dp),
+                        contentPadding = PaddingValues(horizontal = TvLayout.insetX),
+                        horizontalArrangement = Arrangement.spacedBy(recGap),
+                        modifier = Modifier.bleed(TvLayout.insetX),
                     ) {
                         items(rec) { p -> RecCard(p, recW) { onOpenPlaylist(p) } }
                     }
@@ -359,23 +371,38 @@ private fun SectionHead(title: String, sub: String, top: Dp = 0.dp) {
 @Composable
 private fun GroupTabs(names: List<String>, current: Int, onSelect: (Int) -> Unit) {
     LazyRow(
-        modifier = Modifier.bleed(40.dp).height(44.dp),
-        contentPadding = PaddingValues(horizontal = 40.dp),
+        modifier = Modifier.bleed(TvLayout.insetX).height(TvLayout.minTouch),
+        contentPadding = PaddingValues(horizontal = TvLayout.insetX),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         itemsIndexed(names) { i, name ->
             val on = i == current
+            var focused by remember { mutableStateOf(false) }
             Column(
                 Modifier
+                    .onFocusChanged { focused = it.isFocused }
                     .clickable { onSelect(i) }
+                    .clip(RoundedCornerShape(ProomShape.sm))
+                    // 底下那条金线只表示「选中」，焦点得另有说法：
+                    // 否则光标停在这一行时，五个 tab 看起来和没焦点完全一样。
+                    // 只加 surface2 底色还是太安静（深底上只差一档灰），补一圈白边。
+                    .background(if (focused) ProomColor.surface2 else Color.Transparent)
+                    .then(
+                        if (focused) {
+                            Modifier.border(2.dp, Color.White, RoundedCornerShape(ProomShape.sm))
+                        } else Modifier
+                    )
+                    // 只有文字那么高的话，遥控器聚焦时看不出这一格的范围
+                    .height(TvLayout.minTouch)
                     .padding(horizontal = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
                 Text(
                     name,
                     color = if (on) ProomColor.text else ProomColor.muted,
-                    fontSize = 15.sp,
+                    fontSize = ProomSp(15.sp),
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                     maxLines = 1,
                 )
@@ -395,22 +422,32 @@ private fun GroupTabs(names: List<String>, current: Int, onSelect: (Int) -> Unit
 @Composable
 private fun SubChips(names: List<String>, current: Int, onSelect: (Int) -> Unit) {
     LazyRow(
-        modifier = Modifier.bleed(40.dp).height(44.dp),
-        contentPadding = PaddingValues(horizontal = 40.dp),
+        modifier = Modifier.bleed(TvLayout.insetX).height(TvLayout.minTouch),
+        contentPadding = PaddingValues(horizontal = TvLayout.insetX),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         itemsIndexed(names) { i, name ->
             val on = i == current
             val shape = RoundedCornerShape(50)
+            var focused by remember { mutableStateOf(false) }
             Box(
                 Modifier
-                    .height(32.dp)
+                    .height(TvLayout.minTouch)
+                    .onFocusChanged { focused = it.isFocused }
                     .clip(shape)
                     .background(if (on) ProomColor.accentSoft else ProomColor.surface)
                     .then(
-                        if (on) Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.55f), shape)
-                        else Modifier
+                        when {
+                            // 选中是半透明金边，焦点必须是白的，不然两者混在一起
+                            focused -> Modifier.border(
+                                if (on) 3.dp else 2.dp,
+                                Color.White,
+                                shape,
+                            )
+                            on -> Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.55f), shape)
+                            else -> Modifier
+                        }
                     )
                     .clickable { onSelect(i) }
                     .padding(horizontal = 14.dp),
@@ -418,7 +455,7 @@ private fun SubChips(names: List<String>, current: Int, onSelect: (Int) -> Unit)
             ) {
                 Text(
                     name,
-                    fontSize = 13.sp,
+                    fontSize = ProomSp(13.sp),
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
                     color = if (on) ProomColor.accent else ProomColor.dim,
                     maxLines = 1,
@@ -431,18 +468,48 @@ private fun SubChips(names: List<String>, current: Int, onSelect: (Int) -> Unit)
 
 /* ───────────────────── 卡片 ───────────────────── */
 
+/**
+ * 两行标题的占位高度。
+ *
+ * 电视字阶的 cardTitle 是 17sp/23dp 行高，两行 46dp —— 原来写死 40dp，
+ * 第二行被裁掉半截（歌单名长一点就只剩上半截字）。
+ */
+@Composable
+private fun cardTitleHeight(): Dp =
+    with(LocalDensity.current) { ProomType.cardTitle.lineHeight.toDp() * 2 }
+
 /** 推荐卡：横滑用，封面大一些 */
 @Composable
 private fun RecCard(p: NasApi.Playlist, width: Dp, onClick: () -> Unit) {
-    Column(Modifier.width(width).clickable(onClick = onClick)) {
-        CoverBox(p, width)
+    // 横滑卡原来完全没有焦点态：遥控器走到哪张封面都看不出，只能靠右边标题
+    // 被滚动的方向猜。和 PlCard / PosterCard 一样：放大 + 金边
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(ProomShape.md)
+    val scale by animateFloatAsState(
+        if (focused) ProomMotion.focusScaleTv else 1f,
+        tween(ProomMotion.short),
+        label = "rec-card",
+    )
+    Column(
+        Modifier
+            .width(width)
+            .scale(scale)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick),
+    ) {
+        Box {
+            CoverBox(p, width)
+            if (focused) {
+                Box(Modifier.matchParentSize().clip(shape).border(3.dp, ProomColor.accent, shape))
+            }
+        }
         Text(
             p.name,
             style = ProomType.cardTitle,
             color = ProomColor.text,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 7.dp).height(40.dp),
+            modifier = Modifier.padding(top = 7.dp).height(cardTitleHeight()),
         )
         Text(
             metaOf(p),
@@ -476,7 +543,7 @@ private fun PlCard(p: NasApi.Playlist, onClick: () -> Unit) {
             color = ProomColor.text,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 7.dp).height(40.dp),
+            modifier = Modifier.padding(top = 7.dp).height(cardTitleHeight()),
         )
         Text(
             metaOf(p),
@@ -525,7 +592,7 @@ private fun CoverBox(p: NasApi.Playlist, width: Dp?) {
         Text(
             "${p.count} 首",
             color = Color.White.copy(alpha = 0.92f),
-            fontSize = 10.sp,
+            fontSize = ProomSp(10.sp),
             fontWeight = FontWeight.Medium,
             // 放右上角：歌单封面几乎都是模板图、文字压在中间偏下，
             // 角标放左下会直接糊在人家的标题上
@@ -544,9 +611,9 @@ private fun CoverBox(p: NasApi.Playlist, width: Dp?) {
 @Composable
 private fun RecSkeleton(width: Dp) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 40.dp),
+        contentPadding = PaddingValues(horizontal = TvLayout.insetX),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth().bleed(40.dp),
+        modifier = Modifier.fillMaxWidth().bleed(TvLayout.insetX),
     ) {
         items(count = 4) {
             Column(Modifier.width(width)) {
@@ -720,9 +787,12 @@ private fun HitRow(
             color = ProomColor.text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
+            // 歌名占满左侧，歌手钉在行尾：原来两个都是「包内容」宽，
+            // 12dp 间距在电视上根本分不开，「Something's Going On A」
+            // 读起来像歌名本身带了个尾巴
+            modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(24.dp))
         Text(
             t.artist.ifBlank { "未知歌手" },
             style = ProomType.meta,

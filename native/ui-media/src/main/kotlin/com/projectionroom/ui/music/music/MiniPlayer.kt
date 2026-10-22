@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -38,6 +40,8 @@ import com.projectionroom.ui.component.PlayerIcons
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.LocalProomTv
+import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.component.RemoteImage
 
@@ -55,6 +59,11 @@ fun MiniPlayerBar(
     modifier: Modifier = Modifier,
 ) {
     val track = MusicBox.current ?: return
+    // 电视上 56dp/40dp/13sp 的迷你条只有屏幕高度 1/10，字小到要凑近看：
+    // 整体放大一档（72dp 高、56dp 封面、52dp 按钮）
+    val tv = LocalProomTv.current
+    val barH = if (tv) 72.dp else 56.dp
+    val cover = if (tv) 56.dp else 40.dp
 
     Column(
         modifier
@@ -65,17 +74,31 @@ fun MiniPlayerBar(
         // 单独抽成 composable：进度每秒变一次，只让这一条重组，
         // 不要把封面/标题/按钮跟着重画一遍（静置时那是白烧的帧）
         ProgressLine()
+        // 整条是「打开播放页」的热区：电视上它同样会被焦点选中，但原来毫无反馈
+        var rowFocused by remember { mutableStateOf(false) }
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(barH)
+                .then(
+                    if (tv && rowFocused) {
+                        Modifier.border(
+                            2.dp,
+                            ProomColor.accent,
+                            RoundedCornerShape(ProomShape.sm),
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
+                .onFocusChanged { rowFocused = it.isFocused }
                 .clickable(onClick = onOpen)
-                .padding(start = 10.dp, end = 6.dp),
+                .padding(start = if (tv) 18.dp else 10.dp, end = if (tv) 10.dp else 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 Modifier
-                    .size(40.dp)
+                    .size(cover)
                     .clip(RoundedCornerShape(ProomShape.sm))
                     .background(ProomColor.card),
             ) {
@@ -84,16 +107,16 @@ fun MiniPlayerBar(
                         model = track.cover,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(ProomShape.sm)),
+                        modifier = Modifier.size(cover).clip(RoundedCornerShape(ProomShape.sm)),
                     )
                 }
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(if (tv) 14.dp else 10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     track.title,
                     color = ProomColor.text,
-                    fontSize = 13.sp,
+                    fontSize = ProomSp(13.sp),
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -114,7 +137,7 @@ fun MiniPlayerBar(
                     } else {
                         ProomColor.muted
                     },
-                    fontSize = 11.sp,
+                    fontSize = ProomSp(11.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -192,15 +215,27 @@ private fun MiniBtn(
     desc: String,
     onClick: () -> Unit,
 ) {
+    // 38dp/18dp 的图标在电视上既难点也难认，48dp/22dp 才够
+    val tv = LocalProomTv.current
+    // 电视上这几个圆钮原来完全没有焦点态：遥控器停在哪一颗上只能靠按下去听声音。
+    var focused by remember { mutableStateOf(false) }
+    val shape = CircleShape
     Box(
-        Modifier.size(38.dp).clip(CircleShape).clickable(onClick = onClick),
+        Modifier
+            .size(if (tv) 48.dp else 38.dp)
+            .clip(shape)
+            // 手机上这些按钮是纯触摸目标，套焦点环只会显脏
+            .then(if (tv && focused) Modifier.background(ProomColor.surface2) else Modifier)
+            .then(if (tv && focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = desc,
-            tint = Color.White.copy(alpha = 0.88f),
-            modifier = Modifier.size(18.dp),
+            tint = if (tv && focused) ProomColor.accent else Color.White.copy(alpha = 0.88f),
+            modifier = Modifier.size(if (tv) 22.dp else 18.dp),
         )
     }
 }
@@ -211,15 +246,16 @@ private fun CircleBtn(
     desc: String,
     onClick: () -> Unit,
 ) {
+    val tv = LocalProomTv.current
     Box(
-        Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onClick),
+        Modifier.size(if (tv) 48.dp else 40.dp).clip(CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = desc,
             tint = Color.White.copy(alpha = 0.9f),
-            modifier = Modifier.size(19.dp),
+            modifier = Modifier.size(if (tv) 22.dp else 19.dp),
         )
     }
 }

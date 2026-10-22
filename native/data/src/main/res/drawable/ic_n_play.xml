@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  播放键。和上一首/下一首/暂停保持同一套"纯填充、无描边"的字重。
+  之前这里多加了 1.1 的描边，同一排按钮里它明显比另外三个粗，视觉不齐。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M7.8,4.9 L18.9,12 L7.8,19.1 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

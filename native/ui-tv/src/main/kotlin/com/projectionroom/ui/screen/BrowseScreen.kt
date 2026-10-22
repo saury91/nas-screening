@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -42,9 +43,11 @@ import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.PosterCard
 import com.projectionroom.ui.component.PosterSkeleton
+import com.projectionroom.ui.util.metaLine
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
 
 private val YEARS = listOf("", "2026", "2025", "2024", "2023", "2022", "2021", "2020")
 private val AREAS = listOf("", "内地", "中国香港", "中国台湾", "美国", "日本", "韩国", "英国")
@@ -173,8 +176,13 @@ fun BrowseScreen(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(ProomColor.bg)) {
-        val cardW = (maxWidth * 0.115f).coerceIn(110.dp, 200.dp)
-        val columns = (maxWidth / (cardW + 14.dp)).toInt().coerceIn(3, 8)
+        // 列数从**可用宽度**反算，而不是拿整屏宽度乘个系数：
+        // 后者把左右安全区也算进了卡片里，最后一列还会贴着屏幕边缘、和顶栏对不齐；
+        // 屏越宽误差越大（4K 盒子上一行能差出 20 多 dp）。
+        // 960dp 画布上得到 6 列、每张约 132dp —— 沙发距离下 7~8 列已经看不清片名。
+        val gap = 14.dp
+        val avail = maxWidth - TvLayout.insetX * 2
+        val columns = (avail / 130.dp).toInt().coerceIn(3, 8)
 
         Column(Modifier.fillMaxSize()) {
             // 一级导航：片库不是一个「页面」，是 tab 的内容区 —— 所以这里没有返回，
@@ -187,8 +195,8 @@ fun BrowseScreen(
                 state = gridState,
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 columns = GridCells.Fixed(columns),
-                contentPadding = PaddingValues(start = ProomSpace.xxl, end = ProomSpace.xxl, bottom = ProomSpace.xxl),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, bottom = ProomSpace.xxl),
+                horizontalArrangement = Arrangement.spacedBy(gap),
                 verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
             ) {
                 // 这一页已经在「电影 / 剧集 / 动漫…」这个 tab 下面了，再写一遍「片库 + 分类名」
@@ -218,7 +226,8 @@ fun BrowseScreen(
                 ) { v ->
                     PosterCard(
                         title = v.name,
-                        meta = listOf(v.year, v.type).filter { it.isNotBlank() }.joinToString(" · "),
+                        // 源里没年份时是 "0"/"0.0"，直接拼出来就是「0 · 电影片」，很难看
+                        meta = metaLine(v.year, v.type),
                         poster = v.pic,
                         onClick = { onOpen(v) },
                     )
@@ -247,8 +256,8 @@ fun BrowseScreen(
 
 @Composable
 private fun ChipRow(label: String, values: List<String>, selected: String, onSelect: (String) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, style = ProomType.label, color = ProomColor.muted, modifier = Modifier.padding(end = 6.dp))
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = ProomType.label, color = ProomColor.muted, modifier = Modifier.padding(end = 8.dp))
         values.forEach { v ->
             FilterChip(
                 text = v.ifBlank { "全部" },
@@ -269,18 +278,27 @@ private fun FilterChip(text: String, on: Boolean, onClick: () -> Unit) {
             .background(if (on) ProomColor.accentSoft else ProomColor.surface)
             .then(
                 when {
-                    focused -> Modifier.border(2.dp, ProomColor.accent, shape)
+                    // 金色只表示「选中」，白色只表示「焦点」：两者都用金边时，
+                    // 焦点落在已选中的 chip 上就完全看不出来（电视上最常见的一幕）
+                    focused -> Modifier.border(
+                        if (on) 3.dp else 2.dp,
+                        if (on) Color.White else ProomColor.accent,
+                        shape,
+                    )
                     on -> Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.6f), shape)
                     else -> Modifier
                 }
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 6.dp),
+            // 13/6 的胶囊只有 26dp 高：电视上是个很难瞄准的细条，统一到 48dp 可点目标
+            .heightIn(min = TvLayout.minTouch)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            style = ProomType.label,
+            style = ProomType.meta,
             color = if (on) ProomColor.accent else ProomColor.text,
         )
     }

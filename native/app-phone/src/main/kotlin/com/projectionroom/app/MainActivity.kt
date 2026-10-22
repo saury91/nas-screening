@@ -105,8 +105,13 @@ private sealed interface Screen {
     data class Settings(val from: Screen = Home) : Screen
     /** 电视端：显示配对二维码，等手机把配置推过来 */
     data class Pair(val from: Screen = Home) : Screen
-    /** 手机端：扫电视上的二维码 */
-    data class ScanPair(val from: Screen = Home) : Screen
+    /**
+     * 手机端：扫电视上的二维码。
+     *
+     * [castPlay] 非空表示这次不是「导入配置」，而是「从播放页扫码投屏」——
+     * 扫到地址后回到 [CastRemote] 遥控器页，顺手把这一集推给电视。
+     */
+    data class ScanPair(val from: Screen = Home, val castPlay: Play? = null) : Screen
 
     /**
      * 投屏遥控器页。
@@ -129,6 +134,16 @@ private sealed interface Screen {
         /** DLNA 设备描述地址与名字，nasId 为空时有效 */
         val dlnaLocation: String = "",
         val dlnaName: String = "",
+        /** 自定义协议（PROOM-CAST/1）基址：`http://ip:port`，非空即走局域网直连 */
+        val lanBase: String = "",
+        val lanName: String = "",
+        /**
+         * 进页面就把当前这一集推给电视。
+         *
+         * 扫码进来时页面上一次都没发过 play（没经过播放页的 doCastLan），
+         * 不补这一下，电视会停在首页、遥控器却显示「正在播放」。
+         */
+        val autoPlay: Boolean = false,
         val from: Screen = Home,
     ) : Screen
 }
@@ -217,6 +232,51 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }, filter, android.content.Context.RECEIVER_EXPORTED)
+
+        // NAS 桥接的对照入口：走 CastHub（NAS 名录）而不是局域网 SSDP。
+        //   adb shell am broadcast -a com.projectionroom.app.DEBUG_CAST_NAS \
+        //     --es url http://10.0.2.2:8765/sample.mp4 -p com.projectionroom.app
+        val nasFilter = android.content.IntentFilter("com.projectionroom.app.DEBUG_CAST_NAS")
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context, intent: android.content.Intent) {
+                val url = intent.getStringExtra("url") ?: return
+                val pick = intent.getStringExtra("device")
+                kotlinx.coroutines.MainScope().launch {
+                    val client = com.projectionroom.shared.cast.CastHub.client
+                    if (client == null) {
+                        android.util.Log.i("CASTDBG", "nas 未初始化（还没有 NAS 地址）")
+                        return@launch
+                    }
+                    val self = com.projectionroom.shared.cast.CastHub.selfId
+                    val list = client.targets(self)
+                    android.util.Log.i(
+                        "CASTDBG",
+                        "nas scan -> " + list.joinToString { "${it.id}|${it.name}|${it.kind}|${it.state?.playing}" },
+                    )
+                    val t = list.firstOrNull {
+                        it.isTv && !com.projectionroom.shared.cast.CastHub.isMine(it) &&
+                            (pick == null || it.name.contains(pick))
+                    }
+                    if (t == null) {
+                        android.util.Log.i("CASTDBG", "nas 没有可用电视")
+                        return@launch
+                    }
+                    val ok = client.send(
+                        t.id,
+                        self,
+                        com.projectionroom.shared.cast.CastApi.Command(
+                            kind = "play",
+                            url = url,
+                            title = "NAS 投屏联调",
+                        ),
+                    )
+                    android.util.Log.i("CASTDBG", "nas play target=${t.name} ok=$ok")
+                    delay(2500)
+                    val st = client.targets(self).firstOrNull { it.id == t.id }?.state
+                    android.util.Log.i("CASTDBG", "nas state -> $st")
+                }
+            }
+        }, nasFilter, android.content.Context.RECEIVER_EXPORTED)
     }
 
 
@@ -228,6 +288,12 @@ class MainActivity : ComponentActivity() {
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 联调入口：`am start … -e nas http://10.0.2.2:8899` 直接指定 NAS。
+        // 模拟器里访问宿主机就是 10.0.2.2，不用先走扫码配对
+        intent?.getStringExtra("nas")?.takeIf { it.isNotBlank() }?.let {
+            com.projectionroom.app.NasStore.save(this, it)
+        }
+
         registerCastDebugHook()
 
         super.onCreate(savedInstanceState)
@@ -249,16 +315,8 @@ class MainActivity : ComponentActivity() {
         // 音乐通知栏：起一个 MediaSessionService，播放时自动转前台并出通知。
         // 在 onCreate 里启动属于「前台场景」，不会触发后台服务限制。
         runCatching { startService(android.content.Intent(this, MusicService::class.java)) }
-        // Android 13+ 没有这个权限，通知直接被系统丢掉
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            val need = checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (need) {
-                runCatching {
-                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 9101)
-                }
-            }
-        }
+        // 通知权限不在冷启动要：用户还没看到任何内容，先弹一个系统框没道理。
+        // 改到真正开始播放时用自己的卡片说明再申请（见 play 页里的 NotifPermissionDialog）
 
         // 预热所有 SharedPreferences：首次 getString 会在主线程解析整个 XML。
         // 放后台线程做，连目录 stat 都不占主线程（StrictMode 里这几次都是 warmUp 自己）。
@@ -773,6 +831,46 @@ class MainActivity : ComponentActivity() {
                 }
                 LaunchedEffect(AppRoute.scanRequest) {
                     if (AppRoute.scanRequest > 0) screen = Screen.ScanPair(from = Screen.Home)
+                }
+                // 通知权限延到「真的要看/要听」的时候再问：这时它有用（后台播放控制条、
+                // 投屏时叫醒电视），用户才知道为什么要给。弹之前先过一遍自己的卡片，
+                // 系统那个框改不了样式，能改的是时机和前置说明
+                var askNotif by remember { mutableStateOf(false) }
+                LaunchedEffect(screen) {
+                    if (screen !is Screen.Play && screen !is Screen.MusicPlayer) return@LaunchedEffect
+                    if (android.os.Build.VERSION.SDK_INT < 33) return@LaunchedEffect
+                    if (getSharedPreferences("proom_perm", MODE_PRIVATE)
+                            .getBoolean("notif_asked", false)
+                    ) {
+                        return@LaunchedEffect
+                    }
+                    if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        return@LaunchedEffect
+                    }
+                    askNotif = true
+                }
+                if (askNotif) {
+                    NotifPermissionDialog(
+                        onAllow = {
+                            askNotif = false
+                            // 只问一次：拒了就不再骚扰，用户想开自己去设置
+                            getSharedPreferences("proom_perm", MODE_PRIVATE).edit()
+                                .putBoolean("notif_asked", true).apply()
+                            runCatching {
+                                requestPermissions(
+                                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                                    9101,
+                                )
+                            }
+                        },
+                        onDismiss = {
+                            askNotif = false
+                            getSharedPreferences("proom_perm", MODE_PRIVATE).edit()
+                                .putBoolean("notif_asked", true).apply()
+                        },
+                    )
                 }
                 // 联调：一条假片子，只有一集，地址由 intent 给（见 AppRoute.castDemoUrl）
                 LaunchedEffect(AppRoute.castDemoUrl) {
@@ -1525,22 +1623,84 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        is Screen.ScanPair -> ScanPairScreen(
-                            onScanned = { raw ->
-                                val target = PairTarget.parse(raw)
-                                if (target == null) {
-                                    AppRoute.settingsMessage = "这不是放映室的配对码"
-                                    screen = Screen.Settings(from = s.from)
+                        is Screen.ScanPair -> {
+                            // 扫码只是「拿到电视地址」的手段，扫完落到哪由入口决定：
+                            // 设置进来的是导入配置，播放页投屏面板进来的是投屏。
+                            val castPlay = s.castPlay
+                            val toRemote: (String, String) -> Unit = { base, name ->
+                                val play = castPlay
+                                if (play != null) {
+                                    val live = play.liveUrls.isNotEmpty() ||
+                                        play.vod.lines.firstOrNull()?.site == "直播"
+                                    screen = Screen.CastRemote(
+                                        vod = play.vod,
+                                        lineIndex = play.lineIndex,
+                                        epIndex = play.epIndex,
+                                        live = live,
+                                        liveUrls = play.liveUrls,
+                                        lanBase = base,
+                                        lanName = name.ifBlank { "电视" },
+                                        autoPlay = true,
+                                        from = play.from,
+                                    )
+                                }
+                            }
+                            // 码里只有地址，设备名要问一次 /proom/info（配对码里没名字）
+                            val connectLan: (com.projectionroom.shared.cast.CastCode) -> Unit = { code ->
+                                if (castPlay == null) {
+                                    AppRoute.settingsMessage = "这个码只能用来投屏，请从设置里导入配置"
+                                    screen = s.from
                                 } else {
                                     scopeTop.launch {
-                                        val text = ShareConfig.encode(bundle, extra)
-                                        val r = runCatching { PairClient.push(target, text) }
-                                            .getOrElse { it.message ?: "发送失败" }
-                                        AppRoute.settingsMessage = r
-                                        screen = Screen.Settings(from = s.from)
+                                        val info = runCatching {
+                                            com.projectionroom.shared.cast.LanCastClient().info(code.base)
+                                        }.getOrNull()
+                                        if (info == null) {
+                                            AppRoute.settingsMessage =
+                                                "连不上 ${code.base.removePrefix("http://")}，确认电视没休眠、两台风同一网络"
+                                            screen = castPlay
+                                        } else {
+                                            toRemote(code.base, code.name.ifBlank { info.name })
+                                        }
                                     }
                                 }
-                            },
+                            }
+                            ScanPairScreen(
+                                castMode = castPlay != null,
+                                onScanned = { raw ->
+                                    if (castPlay != null) {
+                                        val code = com.projectionroom.shared.cast.LanCast.codeOf(raw)
+                                        if (code == null) {
+                                            AppRoute.settingsMessage = "这个码里没有电视地址"
+                                            screen = castPlay
+                                        } else {
+                                            connectLan(code)
+                                        }
+                                    } else {
+                                        val target = PairTarget.parse(raw)
+                                        if (target == null) {
+                                            AppRoute.settingsMessage = "这不是放映室的配对码"
+                                            screen = Screen.Settings(from = s.from)
+                                        } else {
+                                            scopeTop.launch {
+                                                val text = ShareConfig.encode(bundle, extra)
+                                                val r = runCatching { PairClient.push(target, text) }
+                                                    .getOrElse { it.message ?: "发送失败" }
+                                                AppRoute.settingsMessage = r
+                                                screen = Screen.Settings(from = s.from)
+                                            }
+                                        }
+                                    }
+                                },
+                                onManualCast = { addr ->
+                                    val base = com.projectionroom.shared.cast.LanCast.normalizeBase(addr)
+                                    if (base == null) {
+                                        AppRoute.settingsMessage = "地址格式不对，示例：192.168.1.20:49521"
+                                        screen = castPlay ?: s.from
+                                    } else {
+                                        connectLan(com.projectionroom.shared.cast.CastCode(base))
+                                    }
+                                },
                             onManual = { addr, code ->
                                 val host = addr.substringBefore(':').trim()
                                 val p = addr.substringAfter(':', "").trim().toIntOrNull()
@@ -1559,8 +1719,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             },
-                            onBack = { screen = s.from },
-                        )
+                                onBack = { screen = s.from },
+                            )
+                        }
 
                         is Screen.Search -> SearchScreen(
                             search = doSearch,
@@ -1727,7 +1888,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 // 投上去就把这一页换掉：PlayerScreen 一销毁，本地播放器
                                 // 跟着 release，缓冲和声音都停，手机彻底变成遥控器
-                                onCastStarted = { line, ep, nas, dlna ->
+                                onCastStarted = { line, ep, nas, dlna, lan ->
                                     screen = Screen.CastRemote(
                                         vod = s.vod,
                                         lineIndex = line,
@@ -1738,8 +1899,15 @@ class MainActivity : ComponentActivity() {
                                         nasName = nas?.name.orEmpty(),
                                         dlnaLocation = dlna?.location.orEmpty(),
                                         dlnaName = dlna?.name.orEmpty(),
+                                        lanBase = lan?.base.orEmpty(),
+                                        lanName = lan?.name.orEmpty(),
                                         from = s.from,
                                     )
+                                },
+                                // 搜不到电视（路由器关了广播、双频不在一个网段）时的出路：
+                                // 去扫电视上的码，扫到直接走上面的 lan 分支
+                                onScanCast = {
+                                    screen = Screen.ScanPair(from = s.from, castPlay = s)
                                 },
                                 onBack = { screen = s.from },
                             )
@@ -1764,6 +1932,9 @@ class MainActivity : ComponentActivity() {
                                 nasId = s.nasId,
                                 nasName = s.nasName,
                                 dlnaTarget = dlna,
+                                lanBase = s.lanBase,
+                                lanName = s.lanName,
+                                autoPlay = s.autoPlay,
                                 // 退出后回上一个页面（投屏已在页内 stop 掉）
                                 onExitCast = { screen = s.from },
                             )
@@ -1968,5 +2139,28 @@ private fun CenterHint(
 private fun MiniPlayerOrEmpty(onOpen: () -> Unit) {
     if (com.projectionroom.ui.music.MusicBox.hasQueue) {
         com.projectionroom.ui.music.MiniPlayerBar(onOpen = onOpen)
+    }
+}
+
+/**
+ * 通知权限说明框。
+ *
+ * 系统那个「允许放映室向您发送通知吗」只能由系统画，改不了；这里能做的是
+ * 在它前面把用途说清楚，并且只在用户真的要播放时才问。
+ */
+@Composable
+private fun NotifPermissionDialog(onAllow: () -> Unit, onDismiss: () -> Unit) {
+    // 不再用 usePlatformDefaultWidth=false + fillMaxSize：横屏播放页里那样拿到的
+    // 窗口高度是竖屏的，卡片会被顶到屏幕外面去。用平台默认宽度，窗口紧贴内容，遮罩照旧全屏
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        com.projectionroom.ui.component.PermissionCard(
+            title = "开个通知，播放才有控制条",
+            message = "音乐在后台继续放、手机上把电视叫醒，都靠这条通知。不发广告，也不打扰。",
+            icon = { tint -> com.projectionroom.ui.component.BellGlyph(tint, 26.dp) },
+            primary = "开启通知",
+            onPrimary = onAllow,
+            secondary = "暂不开启",
+            onSecondary = onDismiss,
+        )
     }
 }

@@ -46,6 +46,7 @@ import com.projectionroom.shared.cast.CastHub
 import com.projectionroom.shared.cast.DlnaClient
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.ProomSp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -59,8 +60,10 @@ internal enum class CastSheet { None, Episodes, Lines }
  * 播放器该停掉（声音只从电视出），界面也就不该再留进度手势、亮度、锁定这些
  * 「看片」的东西，剩下的是一件遥控器该有的按键。
  *
- * 两条通道能力不同，按键按能力置灰：
+ * 三条通道能力不同，按键按能力置灰：
  *  - NAS：电视端是自家 App，收得到倍速/音量，也会把真实进度回报上来
+ *  - 自定义协议（PROOM-CAST/1）：同样全功能，但不经过 NAS —— 家里只开 Wi-Fi、
+ *    NAS 关着的时候走这条
  *  - DLNA：协议只有 SetAVTransportURI/Play/Pause/Seek/Stop，没有倍速和音量，
  *    也问不到电视播到第几秒 —— 这些键只能灰掉，点了给提示
  */
@@ -81,15 +84,25 @@ fun CastRemoteScreen(
     nasName: String,
     /** 局域网 DLNA 设备；nasId 为空时用它 */
     dlnaTarget: CastDevice?,
+    /** 自定义协议直连的基址（`http://ip:port`）；非空即走 PROOM-CAST/1 */
+    lanBase: String = "",
+    /** 自定义协议电视的名字，仅用于首屏显示 */
+    lanName: String = "",
+    /** 扫码进来的：这一集还没送到电视，进页先补一脚 play */
+    autoPlay: Boolean = false,
     onExitCast: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val dlna = remember { DlnaClient() }
+    val lanClient = remember { com.projectionroom.shared.cast.LanCastClient() }
 
     val viaNas = nasId.isNotBlank()
+    val viaLan = lanBase.isNotBlank()
     /** 首次拉到之前先用播放页记下的名字，界面不会先空一下 */
     var nasTarget by remember { mutableStateOf<CastApi.Target?>(null) }
-    val deviceName = nasTarget?.name ?: nasName.ifBlank { dlnaTarget?.name ?: "电视" }
+    val deviceName = nasTarget?.name ?: nasName.ifBlank {
+        if (viaLan) lanName.ifBlank { "电视" } else dlnaTarget?.name ?: "电视"
+    }
 
     var lineIndex by remember {
         mutableIntStateOf(startLine.coerceIn(0, (vod.lines.size - 1).coerceAtLeast(0)))
@@ -124,8 +137,8 @@ fun CastRemoteScreen(
 
     val canSeek = !live
     // 直播没有倍速这回事；DLNA 通道则根本没有这个指令
-    val canRate = viaNas && !live
-    val canVolume = viaNas
+    val canRate = (viaNas || viaLan) && !live
+    val canVolume = viaNas || viaLan
 
     fun urlOf(l: Int, e: Int): String {
         val ep = vod.lines.getOrNull(l)?.episodes?.getOrNull(e) ?: return ""
@@ -142,11 +155,82 @@ fun CastRemoteScreen(
         if (origin.isNotBlank()) put("Referer", origin)
     }
 
-    fun sendNas(cmd: CastApi.Command) {
-        if (!viaNas) return
-        scope.launch {
-            val ok = CastHub.client?.send(nasId, CastHub.selfId, cmd) ?: false
-            if (!ok) hint = "指令没送到电视"
+    fun send(cmd: CastApi.Command) {
+        when {
+            viaNas -> scope.launch {
+                val ok = CastHub.client?.send(nasId, CastHub.selfId, cmd) ?: false
+                if (!ok) hint = "指令没送到电视"
+            }
+            viaLan -> scope.launch {
+                if (!lanClient.send(lanBase, cmd)) hint = "指令没送到电视"
+            }
+        }
+    }
+
+    // 扫码直接进来时没人发过 play：播放页那条路是 doCastLan 发的，
+    // 而这一页是从扫描结果直接切过来的。不补这一下，电视停在首页、
+    // 遥控器却已经显示「正在播放」，用户会以为投屏坏了。
+    // 只跑一次（key 固定），之后换集走 switchTo。
+    LaunchedEffect(lanBase, autoPlay) {
+        if (!autoPlay || lanBase.isBlank()) return@LaunchedEffect
+        val url = urlOf(lineIndex, epIndex)
+        if (url.isBlank()) {
+            hint = "这一集没有可用地址"
+            return@LaunchedEffect
+        }
+        val ok = lanClient.send(
+            lanBase,
+            CastApi.Command(
+                kind = "play",
+                url = url,
+                title = vod.name,
+                position = 0,
+                headers = headersFor(url),
+                vod = vod.name,
+                line = lineIndex,
+                ep = epIndex,
+                episode = vod.lines.getOrNull(lineIndex)?.episodes?.getOrNull(epIndex)?.name.orEmpty(),
+            ),
+        )
+        if (!ok) hint = "电视没响应，地址可能变了"
+    }
+
+    // 「电视回报」的应用逻辑只写一份：NAS 和直连两条轮询都调它，
+    // 否则 stall 计数、换源清零这些细节迟早一边改了一边没改
+    // 电视那头解不出片源时上报的进度永远是 0：界面上照样写「电视正在播放」、
+    // 时间停在 00:00，看着像遥控器卡死，实际是电视在放错误页。数够几次再提示
+    var stalledCount by remember { mutableIntStateOf(0) }
+    var warned by remember { mutableStateOf(false) }
+    // 换了片源就重新开始计数：不然换到下一个源时上一次的结论还挂着
+    var lastUrl by remember { mutableStateOf("") }
+    fun applyRemoteState(s: CastApi.State) {
+        if (s.url != lastUrl) {
+            lastUrl = s.url
+            stalledCount = 0
+            warned = false
+            stuck = false
+        }
+        position = s.position
+        duration = s.duration
+        playing = s.playing
+        if (s.rate > 0f) rate = s.rate
+        if (s.volume >= 0f) volume = s.volume
+        if (!live && s.duration <= 0L && s.position <= 0L && s.playing) {
+            stalledCount++
+            if (stalledCount >= 5) {
+                stuck = true
+                if (!warned) {
+                    warned = true
+                    hint = "电视上放不出来，换个源试试"
+                }
+            }
+        } else {
+            stalledCount = 0
+            // 播起来了就把话收回去，下次再坏还要能提示
+            if (s.duration > 0L) {
+                warned = false
+                stuck = false
+            }
         }
     }
 
@@ -155,12 +239,6 @@ fun CastRemoteScreen(
     LaunchedEffect(nasId) {
         if (nasId.isBlank()) return@LaunchedEffect
         var misses = 0
-        // 电视那头解不出片源时上报的进度永远是 0：界面上照样写「电视正在播放」、
-        // 时间停在 00:00，看着像遥控器卡死，实际是电视在放错误页。数够几次再提示
-        var stalled = 0
-        var warned = false
-        // 换了片源就重新开始计数：不然换到下一个源时上一次的结论还挂着
-        var lastUrl = ""
         while (true) {
             val d = CastHub.client?.targets(CastHub.selfId)?.firstOrNull { it.id == nasId }
             if (d == null) {
@@ -174,36 +252,7 @@ fun CastRemoteScreen(
                 misses = 0
                 online = true
                 nasTarget = d
-                d.state?.let { s ->
-                    if (s.url != lastUrl) {
-                        lastUrl = s.url
-                        stalled = 0
-                        warned = false
-                        stuck = false
-                    }
-                    position = s.position
-                    duration = s.duration
-                    playing = s.playing
-                    if (s.rate > 0f) rate = s.rate
-                    if (s.volume >= 0f) volume = s.volume
-                    if (!live && s.duration <= 0L && s.position <= 0L && s.playing) {
-                        stalled++
-                        if (stalled >= 5) {
-                            stuck = true
-                            if (!warned) {
-                                warned = true
-                                hint = "电视上放不出来，换个源试试"
-                            }
-                        }
-                    } else {
-                        stalled = 0
-                        // 播起来了就把话收回去，下次再坏还要能提示
-                        if (s.duration > 0L) {
-                            warned = false
-                            stuck = false
-                        }
-                    }
-                }
+                d.state?.let { applyRemoteState(it) }
                 if (d.owner.isNotBlank() && d.owner != CastHub.selfId) {
                     hint = "控制权被另一台手机接管了"
                 }
@@ -212,9 +261,39 @@ fun CastRemoteScreen(
         }
     }
 
+    // 自定义协议：直连电视，拿状态不用绕 NAS，1 秒一拉就够顺滑
+    LaunchedEffect(lanBase) {
+        if (lanBase.isBlank()) return@LaunchedEffect
+        var misses = 0
+        while (true) {
+            val s = lanClient.state(lanBase)
+            when {
+                s == null -> {
+                    misses++
+                    if (misses >= 3 && online) {
+                        online = false
+                        hint = "电视好像掉线了"
+                    }
+                }
+                s.url.isBlank() -> {
+                    // 电视那头自己退出了播放页：再按也没东西可遥控
+                    online = false
+                    stuck = false
+                    hint = "电视上已经停止了"
+                }
+                else -> {
+                    misses = 0
+                    online = true
+                    applyRemoteState(s)
+                }
+            }
+            delay(1_000)
+        }
+    }
+
     // DLNA 问不到进度：本地按秒补，至少让时间在走；暂停就停住
-    LaunchedEffect(viaNas, playing) {
-        if (viaNas || !playing) return@LaunchedEffect
+    LaunchedEffect(viaNas, viaLan, playing) {
+        if (viaNas || viaLan || !playing) return@LaunchedEffect
         while (true) {
             delay(1_000)
             position += 1_000
@@ -240,8 +319,8 @@ fun CastRemoteScreen(
         position = 0L
         duration = 0L
         playing = true
-        if (viaNas) {
-            sendNas(
+        if (viaNas || viaLan) {
+            send(
                 CastApi.Command(
                     kind = "play",
                     url = url,
@@ -265,9 +344,9 @@ fun CastRemoteScreen(
     fun togglePlay() {
         val want = !playing
         playing = want
-        if (viaNas) {
+        if (viaNas || viaLan) {
             // 乐观更新：电视回报有 2 秒延迟，等回报再翻转按钮会让人以为没按到
-            sendNas(CastApi.Command(kind = if (want) "resume" else "pause"))
+            send(CastApi.Command(kind = if (want) "resume" else "pause"))
         } else {
             val d = dlnaTarget ?: return
             scope.launch {
@@ -280,8 +359,8 @@ fun CastRemoteScreen(
     fun seekTo(ms: Long) {
         val target = ms.coerceIn(0L, if (duration > 0) duration else Long.MAX_VALUE)
         position = target
-        if (viaNas) {
-            sendNas(CastApi.Command(kind = "seek", position = target))
+        if (viaNas || viaLan) {
+            send(CastApi.Command(kind = "seek", position = target))
         } else {
             val d = dlnaTarget ?: return
             scope.launch { runCatching { dlna.seek(d, target / 1000) } }
@@ -294,7 +373,7 @@ fun CastRemoteScreen(
             return
         }
         rate = r
-        sendNas(CastApi.Command(kind = "rate", rate = r))
+        send(CastApi.Command(kind = "rate", rate = r))
     }
 
     fun applyVolume(v: Float) {
@@ -303,15 +382,19 @@ fun CastRemoteScreen(
             return
         }
         volume = v
-        sendNas(CastApi.Command(kind = "volume", volume = v))
+        send(CastApi.Command(kind = "volume", volume = v))
     }
 
     /** 退出投屏：先叫电视停，再离开。设备离线也照样能走 —— 不能把人困在这一页 */
     fun stopAndLeave(then: () -> Unit) {
-        if (viaNas) {
+        if (viaNas || viaLan) {
             scope.launch {
                 runCatching {
-                    CastHub.client?.send(nasId, CastHub.selfId, CastApi.Command(kind = "stop"))
+                    if (viaNas) {
+                        CastHub.client?.send(nasId, CastHub.selfId, CastApi.Command(kind = "stop"))
+                    } else {
+                        lanClient.send(lanBase, CastApi.Command(kind = "stop"))
+                    }
                 }
             }
         } else {
@@ -338,7 +421,7 @@ fun CastRemoteScreen(
                 .height(240.dp)
                 .background(
                     Brush.verticalGradient(
-                        listOf(ProomColor.accent.copy(alpha = 0.07f), Color.Transparent),
+                        listOf(ProomColor.cast.copy(alpha = 0.10f), Color.Transparent),
                     ),
                 ),
         )
@@ -352,7 +435,7 @@ fun CastRemoteScreen(
         ) {
             RemoteTopRow(
                 deviceName = deviceName,
-                fullFeature = viaNas,
+                fullFeature = viaNas || viaLan,
                 online = online,
                 onExit = { stopAndLeave(onExitCast) },
                 failed = stuck,
@@ -366,53 +449,65 @@ fun CastRemoteScreen(
                     .weight(1f)
                     .verticalScroll(rememberScrollState()),
             ) {
-                Spacer(Modifier.height(20.dp))
-
-                NowPlayingCard(
-                    vod = vod,
-                    site = line?.site.orEmpty(),
-                    episodeName = episodes.getOrNull(epIndex)?.name.orEmpty(),
-                    epIndex = epIndex,
-                    live = live,
-                    playing = playing,
-                    online = online,
-                    failed = stuck,
-                )
-
-                Spacer(Modifier.height(20.dp))
-                RemoteProgress(
-                    live = live,
-                    enabled = canSeek && online,
-                    position = position,
-                    duration = duration,
-                    onSeek = ::seekTo,
-                )
-
                 Spacer(Modifier.height(18.dp))
-                MainControls(
-                    enabled = online,
-                    playing = playing,
-                    hasPrev = epIndex > 0,
-                    hasNext = epIndex < episodes.size - 1,
-                    onPrev = { switchTo(lineIndex, epIndex - 1) },
-                    onNext = { switchTo(lineIndex, epIndex + 1) },
-                    onToggle = ::togglePlay,
-                )
 
-                Spacer(Modifier.height(26.dp))
-                SecondaryControls(
-                    enabled = online,
-                    rate = rate,
-                    volume = volume,
-                    canRate = canRate,
-                    canVolume = canVolume,
-                    canSeek = canSeek && online,
-                    onSeekBy = { delta -> seekTo(position + delta) },
-                    onRate = ::applyRate,
-                    onVolume = ::applyVolume,
-                )
+                // 信息、进度、主控、微调收进同一块玻璃面板。
+                // 它们本来就是「一架遥控器」，拆成四个区块时视线要上下几层来回找；
+                // 收进来之后，拇指只在一个区域内移动。
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(Color.White.copy(alpha = 0.055f))
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(22.dp))
+                        .padding(horizontal = 18.dp, vertical = 18.dp),
+                ) {
+                    NowPlayingCard(
+                        vod = vod,
+                        site = line?.site.orEmpty(),
+                        episodeName = episodes.getOrNull(epIndex)?.name.orEmpty(),
+                        epIndex = epIndex,
+                        live = live,
+                        playing = playing,
+                        online = online,
+                        failed = stuck,
+                    )
 
-                Spacer(Modifier.height(26.dp))
+                    Spacer(Modifier.height(18.dp))
+                    RemoteProgress(
+                        live = live,
+                        enabled = canSeek && online,
+                        position = position,
+                        duration = duration,
+                        onSeek = ::seekTo,
+                    )
+
+                    Spacer(Modifier.height(18.dp))
+                    MainControls(
+                        enabled = online,
+                        playing = playing,
+                        hasPrev = epIndex > 0,
+                        hasNext = epIndex < episodes.size - 1,
+                        onPrev = { switchTo(lineIndex, epIndex - 1) },
+                        onNext = { switchTo(lineIndex, epIndex + 1) },
+                        onToggle = ::togglePlay,
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+                    SecondaryControls(
+                        enabled = online,
+                        rate = rate,
+                        volume = volume,
+                        canRate = canRate,
+                        canVolume = canVolume,
+                        canSeek = canSeek && online,
+                        onSeekBy = { delta -> seekTo(position + delta) },
+                        onRate = ::applyRate,
+                        onVolume = ::applyVolume,
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
 
                 PanelRow(
                     title = "选集",
@@ -420,7 +515,6 @@ fun CastRemoteScreen(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { sheet = CastSheet.Episodes },
                 )
-                Spacer(Modifier.height(9.dp))
                 PanelRow(
                     title = "换源",
                     subtitle = line?.site.orEmpty().ifBlank { "—" },
@@ -449,7 +543,7 @@ fun CastRemoteScreen(
                     .border(1.dp, ProomColor.lineStrong, RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
-                Text(hint.orEmpty(), color = ProomColor.text, fontSize = 13.sp)
+                Text(hint.orEmpty(), color = ProomColor.text, fontSize = ProomSp(13.sp))
             }
         }
 

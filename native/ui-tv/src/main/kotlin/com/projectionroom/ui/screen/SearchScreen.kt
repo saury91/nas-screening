@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -38,16 +40,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.PosterCard
+import com.projectionroom.ui.util.metaLine
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomSpace
+import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
 import kotlinx.coroutines.delay
 
 /**
@@ -80,6 +88,27 @@ fun SearchScreen(
     var results by remember { mutableStateOf<List<Vod>>(emptyList()) }
     var err by remember { mutableStateOf<String?>(null) }
     var searched by remember { mutableStateOf(false) }
+    // 只有「按确认 / 点热词」才算一次真正的搜索，才进历史。
+    // 防抖搜索是逐字触发的，原来每次防抖都记一条历史 —— 打 tyson 会留下
+    // t / ty / tys … 一串半截词，最近搜索列表基本没法用。
+    var explicitSearch by remember { mutableStateOf(false) }
+    // 点热词/历史时不希望软键盘弹出来：chip 行消失后焦点会掉回输入框，
+    // 输入框一拿到焦点就开软键盘，正好盖住刚出来的结果。
+    var fromChip by remember { mutableStateOf(false) }
+    val firstResult = remember { FocusRequester() }
+
+    // 结果到了就把焦点交给第一张海报（只在「点词进来」时这么做，
+    // 手动打字时必须留在输入框里，否则打一半焦点被抢走）
+    LaunchedEffect(results, fromChip) {
+        if (!fromChip || results.isEmpty()) return@LaunchedEffect
+        repeat(10) {
+            if (runCatching { firstResult.requestFocus() }.isSuccess) {
+                fromChip = false
+                return@LaunchedEffect
+            }
+            delay(40)
+        }
+    }
 
     LaunchedEffect(committed) {
         val kw = committed.trim()
@@ -89,7 +118,10 @@ fun SearchScreen(
             return@LaunchedEffect
         }
         delay(400)                      // 停下再查，别打满 NAS
-        onHistoryCommit(kw)
+        if (explicitSearch) {
+            onHistoryCommit(kw)
+            explicitSearch = false
+        }
         loading = true
         err = null
         runCatching { search(kw) }
@@ -112,14 +144,25 @@ fun SearchScreen(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = com.projectionroom.ui.component.TvPageHeaderSpec.inset),
+                // 返回胶囊和搜索框同色、同一条左边线，贴在一起像两个输入框
+                .padding(
+                    start = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
+                    top = 10.dp,
+                    end = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.weight(1f)) {
                 SearchField(
                     value = q,
-                    onValueChange = { q = it; committed = it },
-                    onSearch = { committed = q },
+                    // 删空时立刻回到空态：等 LaunchedEffect 重启要过一帧，
+                    // 中间那一帧会闪出「没找到「」，换个片名试试」
+                    onValueChange = {
+                        q = it
+                        committed = it
+                        if (it.isBlank()) searched = false
+                    },
+                    onSearch = { explicitSearch = true; committed = q },
                 )
             }
         }
@@ -127,29 +170,26 @@ fun SearchScreen(
         // 历史：每条右侧一个 ×，右上角「清空」
         if (!searched && q.isBlank() && history.isNotEmpty()) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 40.dp, end = 40.dp, top = ProomSpace.md),
+                Modifier.fillMaxWidth().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = ProomSpace.md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("最近搜索", style = ProomType.label, color = ProomColor.muted)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "清空",
-                    style = ProomType.label,
-                    color = ProomColor.muted,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable(onClick = onHistoryClear)
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                )
             }
             LazyRow(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp),
+                contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX),
             ) {
                 items(history) { w ->
-                    HistoryChip(w, onPick = { q = w; committed = w }, onRemove = { onHistoryRemove(w) })
+                    HistoryChip(
+                        w,
+                        onPick = { explicitSearch = true; fromChip = true; q = w; committed = w },
+                        onRemove = { onHistoryRemove(w) },
+                    )
                 }
+                // 「清空」挂在最后一个历史词后面，而不是右上角：
+                // 右上角那颗离 chip 行是斜上方，遥控器按上会先回搜索框，根本走不到它。
+                item { ClearChip(onHistoryClear) }
             }
         }
 
@@ -157,29 +197,34 @@ fun SearchScreen(
         if (!searched && q.isBlank()) {
             // 用 LazyRow：5 个词在窄屏上放不下，横滑而不是被裁掉
             Row(
-                Modifier.fillMaxWidth().padding(start = 40.dp, end = 40.dp, top = ProomSpace.md),
+                Modifier.fillMaxWidth().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = ProomSpace.md),
             ) {
                 Text("热门", style = ProomType.label, color = ProomColor.muted)
             }
             LazyRow(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp),
+                contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX),
             ) {
                 items(HOT_WORDS) { w ->
-                    HotChip(w) { q = w; committed = w }
+                    HotChip(w) { explicitSearch = true; fromChip = true; q = w; committed = w }
                 }
             }
         }
 
-        Box(Modifier.fillMaxWidth().weight(1f).padding(top = ProomSpace.lg)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).padding(top = ProomSpace.lg)) {
+            // 和片库页同一条算法：列数从安全区内的可用宽度反算。
+            // 原来这里写死 3 列 + 20dp 边距，搜索框比它多缩进 28dp，
+            // 一屏里两个左边线对不齐，而且 960dp 上 3 列的大卡片远看只有 3 张。
+            val gap = 14.dp
+            val columns = ((maxWidth - TvLayout.insetX * 2) / 130.dp).toInt().coerceIn(3, 8)
             when {
                 // 骨架屏而不是转圈：网格形状先立住，结果回来直接换内容，不会整页跳
                 loading -> LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    columns = GridCells.Fixed(columns),
+                    contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                    verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
                 ) {
                     items(9) {
                         com.projectionroom.ui.component.PosterSkeleton()
@@ -197,17 +242,18 @@ fun SearchScreen(
                 !searched -> Center("输入片名后按确认，会同时问所有片源")
 
                 else -> LazyVerticalGrid(
-                    // 与片库页保持同一套网格：3 列、10dp 横距、18dp 纵距
-                    columns = GridCells.Fixed(3),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
+                    columns = GridCells.Fixed(columns),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                    verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
+                    contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, bottom = ProomSpace.xxl),
                 ) {
-                    items(results) { vod ->
+                    itemsIndexed(results) { i, vod ->
                         PosterCard(
                             title = vod.name,
-                            meta = listOf(vod.year, vod.type).filter { it.isNotBlank() }.joinToString(" · "),
+                            meta = metaLine(vod.year, vod.type),
                             poster = vod.pic,
+                            // 点词搜索后把焦点交给第一张，避免焦点掉回输入框弹软键盘
+                            modifier = if (i == 0) Modifier.focusRequester(firstResult) else Modifier,
                             onClick = { onOpen(vod) },
                         )
                     }
@@ -235,11 +281,12 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit, onSearch
                 shape,
             )
             .onFocusChanged { focused = it.isFocused }
-            .padding(horizontal = 15.dp),
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 左边一个小放大镜：形状上是「搜索」，比占位文字更早被认出来
-        androidx.compose.foundation.Canvas(Modifier.size(15.dp)) {
+        androidx.compose.foundation.Canvas(Modifier.size(20.dp)) {
             val w = 1.6.dp.toPx()
             val c = androidx.compose.ui.geometry.Offset(size.width * 0.42f, size.height * 0.42f)
             val r = size.minDimension * 0.31f
@@ -291,11 +338,18 @@ private val HOT_WORDS = listOf("繁花", "沙丘", "庆余年", "奥本海默", 
 /** 历史词：点正文搜，点 × 删这一条 —— 不用长按，也不藏进二级菜单 */
 @Composable
 private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit) {
+    val shape = RoundedCornerShape(ProomSpace.md)
+    var pickFocused by remember { mutableStateOf(false) }
+    var removeFocused by remember { mutableStateOf(false) }
+    // 正文和 × 是两个独立焦点目标，各自都要看得见 —— 原来这整颗 chip
+    // 在遥控器上完全静默，22dp 的 × 更是既看不见也点不准
     Row(
         Modifier
-            .clip(RoundedCornerShape(ProomSpace.md))
-            .background(ProomColor.surface)
-            .padding(start = 13.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            .heightIn(min = 44.dp)
+            .clip(shape)
+            .background(if (pickFocused || removeFocused) ProomColor.surface2 else ProomColor.surface)
+            .then(if (pickFocused) Modifier.border(2.dp, Color.White, shape) else Modifier)
+            .padding(start = 15.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -304,17 +358,53 @@ private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit)
             color = ProomColor.text,
             maxLines = 1,
             softWrap = false,
-            modifier = Modifier.clickable(onClick = onPick).padding(vertical = 4.dp),
+            modifier = Modifier
+                .onFocusChanged { pickFocused = it.isFocused }
+                .clickable(onClick = onPick)
+                .padding(vertical = 10.dp),
         )
         Box(
             Modifier
-                .size(22.dp)
+                .size(40.dp)
                 .clip(CircleShape)
+                .then(if (removeFocused) Modifier.background(ProomColor.accentSoft) else Modifier)
+                .then(if (removeFocused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
+                .onFocusChanged { removeFocused = it.isFocused }
                 .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center,
         ) {
-            Text("×", color = ProomColor.muted, fontSize = 15.sp)
+            Text(
+                "×",
+                color = if (removeFocused) ProomColor.accent else ProomColor.muted,
+                fontSize = ProomSp(16.sp),
+            )
         }
+    }
+}
+
+/** 历史词行尾的「清空」：形状与 hot chip 同高，但只用文字色区分主次 */
+@Composable
+private fun ClearChip(onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(ProomSpace.md)
+    Box(
+        Modifier
+            .heightIn(min = 44.dp)
+            .clip(shape)
+            .then(if (focused) Modifier.background(ProomColor.surface2) else Modifier)
+            .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "清空",
+            style = ProomType.meta,
+            color = if (focused) ProomColor.accent else ProomColor.muted,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
@@ -326,10 +416,14 @@ private fun HotChip(label: String, onClick: () -> Unit) {
         Modifier
             .clip(shape)
             .background(if (focused) ProomColor.surface2 else ProomColor.surface)
-            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
+            // 金边在这一页会和「已选中的分类」撞语义，焦点统一走白色
+            .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 8.dp),
+            // 13/8 只有 34dp 高，遥控器上下换行时很容易越过去
+            .heightIn(min = 44.dp)
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(label, style = ProomType.meta, color = ProomColor.text, maxLines = 1, softWrap = false)
     }

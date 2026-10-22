@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,6 +64,8 @@ import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
+import com.projectionroom.ui.theme.ProomSp
 import kotlin.time.Duration.Companion.minutes
 
 /**
@@ -192,7 +195,7 @@ fun LiveScreen(
                 state = gridState,
                 modifier = Modifier.fillMaxSize().weight(1f),
                 contentPadding = PaddingValues(
-                    start = 40.dp, end = 40.dp, top = 14.dp, bottom = ProomSpace.xxl,
+                    start = TvLayout.insetX, end = TvLayout.insetX, top = 14.dp, bottom = ProomSpace.xxl,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -314,9 +317,10 @@ private fun GroupRail(
     // 这里收敛成一行横滑：分组再多也只占一行，滚动时始终可见。
     Box(Modifier.fillMaxWidth()) {
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 40.dp),
+            // 分组条从安全区起步：40dp 会压到过扫描区里，左右还得和页头对齐
+            contentPadding = PaddingValues(horizontal = TvLayout.insetX),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().height(44.dp),
+            modifier = Modifier.fillMaxWidth().height(TvLayout.minTouch),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             item {
@@ -345,15 +349,24 @@ private fun GroupRail(
 private fun LiveChip(label: String, on: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(140), label = "live-chip")
     Box(
         Modifier
-            // 44dp 高：低于 48dp 的触控目标手指一定会点错
-            .height(34.dp)
+            // 48dp 高：低于这个数在电视上换行时极易点错（原来写的是 34dp，注释和代码不一致）
+            .heightIn(min = TvLayout.minTouch)
+            .scale(scale)
             .clip(shape)
             .background(if (on) ProomColor.accentSoft else ProomColor.surface)
             .then(
                 when {
-                    focused -> Modifier.border(2.dp, ProomColor.accent, shape)
+                    // 焦点落在「已经选中」的那颗 chip 上时，原来只是把 1dp 半透明金边
+                    // 换成 2dp 金边 —— 3 米外和选中态一模一样，看不出遥控器在哪。
+                    // 焦点统一给白边：金色只表示选中，白色只表示焦点。
+                    focused -> Modifier.border(
+                        if (on) 3.dp else 2.dp,
+                        Color.White,
+                        shape,
+                    )
                     on -> Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.55f), shape)
                     else -> Modifier
                 }
@@ -365,7 +378,7 @@ private fun LiveChip(label: String, on: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             label,
-            fontSize = 13.sp,
+            fontSize = ProomSp(13.sp),
             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
             color = if (on) ProomColor.accent else ProomColor.dim,
             maxLines = 1,
@@ -445,7 +458,7 @@ private fun LiveMessage(title: String, desc: String, action: String, onAction: (
                 .clickable(onClick = onAction)
                 .padding(horizontal = 18.dp, vertical = 9.dp),
         ) {
-            Text(action, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = ProomColor.text)
+            Text(action, fontSize = ProomSp(13.sp), fontWeight = FontWeight.Medium, color = ProomColor.text)
         }
     }
 }

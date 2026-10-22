@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
@@ -51,9 +52,11 @@ import com.projectionroom.ui.component.WideCard
 import com.projectionroom.shared.catalog.NasApi
 import androidx.compose.ui.unit.Dp
 import com.projectionroom.ui.component.TvRow
+import com.projectionroom.ui.util.metaLine
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
 
 /**
  * 电视首页：搜索入口 + 「继续观看」+「最近更新」两条货架。
@@ -125,12 +128,13 @@ fun TvHome(
             contentPadding = PaddingValues(bottom = ProomSpace.xxl),
         ) {
             // Hero 顶到屏幕上沿、导航浮在它上面，首屏才是一整块画面。
-            // 高度从 0.66 提到 0.76：原来那 0.1 是被顶栏吃掉的空间。
+            // 0.76 会让第一排货架只剩半张卡片露在屏幕外（"下面还有内容"变成了"被切掉了"），
+            // 0.68 正好容下 hero + 区块标题 + 一整排卡片。
             item {
                 if (latest.isNotEmpty()) {
                     TvHero(
                         items = heroItems,
-                        height = maxHeight * 0.76f,
+                        height = maxHeight * 0.68f,
                         topInset = TOP_BAR_HEIGHT + topInset,
                         playFocusRequester = if (latest.isNotEmpty()) heroPlay else null,
                         navFocusRequester = landing,
@@ -146,7 +150,7 @@ fun TvHome(
                         text = "正在读 NAS…",
                         style = ProomType.label,
                         color = ProomColor.muted,
-                        modifier = Modifier.padding(horizontal = ProomSpace.xxl, vertical = ProomSpace.sm),
+                        modifier = Modifier.padding(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
                     )
                 }
             }
@@ -158,7 +162,7 @@ fun TvHome(
                         items = continueWatching.take(10),
                         itemWidth = wideCardW,
                         gap = ProomSpace.md,
-                        contentPadding = PaddingValues(horizontal = ProomSpace.xxl, vertical = ProomSpace.sm),
+                        contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
                     ) { v, focused ->
                         WideCard(
                             vod = v,
@@ -178,11 +182,11 @@ fun TvHome(
                         items = latestRest.take(14),
                         itemWidth = cardW,
                         gap = ProomSpace.md,
-                        contentPadding = PaddingValues(horizontal = ProomSpace.xxl, vertical = ProomSpace.sm),
+                        contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
                     ) { v, focused ->
                         PosterCard(
                             title = v.name,
-                            meta = listOf(v.year, v.type).filter { it.isNotBlank() }.joinToString(" · "),
+                            meta = metaLine(v.year, v.type),
                             poster = v.pic,
                             focused = focused,
                             onClick = { onOpen(v) },
@@ -212,7 +216,13 @@ fun TvHome(
         }
 
         // 顶栏浮在 Hero 上：不再单独占一条高度，首屏就是一整块画面。
-        // 滚动后货架会从它下面穿过，所以垫一层极淡的竖向渐变把字压住（在暗色 Hero 上几乎看不出来）。
+        // 滚动后货架会从它下面穿过 —— 渐变能压住深色海报，压不住金底的「立即播放」，
+        // logo 会直接叠在按钮上。所以滚离顶部后就切成实底，滚动位置是唯一判据。
+        val scrolled by remember(listState) {
+            derivedStateOf {
+                listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8
+            }
+        }
         TvTopBar(
             navIndex = navIndex,
             landing = landing,
@@ -222,6 +232,7 @@ fun TvHome(
             onNas = onNas,
             onMine = onMine,
             topInset = topInset,
+            floating = !scrolled,
         )
     }
 }
@@ -240,6 +251,7 @@ private fun TvTopBar(
     onNas: () -> Unit,
     onMine: () -> Unit,
     topInset: Dp = 0.dp,
+    floating: Boolean = true,
 ) {
     // 一级导航只有一份实现（见 TvRootHeader）：首页只是「浮在 Hero 上」的那一种用法，
     // 片库 / 直播 / 音乐用的是同一颗组件的实底版本，横向位置逐像素一致。
@@ -252,7 +264,7 @@ private fun TvTopBar(
             onMine = onMine,
         ),
         topInset = topInset,
-        floating = true,
+        floating = floating,
         landing = landing,
         downTarget = downTarget,
     )
@@ -261,7 +273,7 @@ private fun TvTopBar(
 @Composable
 private fun SectionTitle(title: String, sub: String) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = ProomSpace.xxl),
+        Modifier.fillMaxWidth().padding(horizontal = TvLayout.insetX),
         verticalAlignment = Alignment.Bottom,
     ) {
         Text(title, style = ProomType.title, color = ProomColor.text)
@@ -305,7 +317,7 @@ private fun CategoryShelf(
 ) {
     Column {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = ProomSpace.xxl),
+            Modifier.fillMaxWidth().padding(horizontal = TvLayout.insetX),
             verticalAlignment = Alignment.Bottom,
         ) {
             Text(group.cat, style = ProomType.title, color = ProomColor.text)
@@ -323,11 +335,11 @@ private fun CategoryShelf(
             items = group.items.take(14),
             itemWidth = cardW,
             gap = ProomSpace.md,
-            contentPadding = PaddingValues(horizontal = ProomSpace.xxl, vertical = ProomSpace.sm),
+            contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
         ) { v, focused ->
             PosterCard(
                 title = v.name,
-                meta = listOf(v.year, v.type).filter { it.isNotBlank() }.joinToString(" · "),
+                meta = metaLine(v.year, v.type),
                 poster = v.pic,
                 focused = focused,
                 onClick = { onOpen(v) },

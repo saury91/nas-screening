@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.ui.component.PlayerIcons
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.ProomSp
 
 /** 数字统一等宽：跳秒时右边的总时长不会左右抖 */
 internal val clockFont = FontFamily.Monospace
@@ -82,7 +83,7 @@ internal fun RemoteProgress(
                         .background(ProomColor.line),
                 )
             }
-            Text("直播流不支持拖动进度", color = ProomColor.muted, fontSize = 11.5.sp)
+            Text("直播流不支持拖动进度", color = ProomColor.muted, fontSize = ProomSp(11.5.sp))
         }
         return
     }
@@ -140,7 +141,7 @@ internal fun RemoteProgress(
                 if (w > 0.5f) {
                     drawRoundRect(
                         brush = Brush.horizontalGradient(
-                            listOf(ProomColor.accent2, ProomColor.accent),
+                            listOf(ProomColor.castSoft, ProomColor.cast),
                         ),
                         topLeft = Offset(0f, cy - r),
                         size = Size(w, r * 2),
@@ -150,12 +151,12 @@ internal fun RemoteProgress(
 
                 val tone = if (enabled) 1f else 0.45f
                 drawCircle(
-                    color = ProomColor.accent.copy(alpha = 0.20f * tone),
+                    color = ProomColor.cast.copy(alpha = 0.22f * tone),
                     radius = 9.dp.toPx() * thumbScale,
                     center = Offset(w, cy),
                 )
                 drawCircle(
-                    color = Color(0xFFFFF6E6).copy(alpha = tone),
+                    color = ProomColor.castSoft.copy(alpha = tone),
                     radius = 4.5.dp.toPx() * thumbScale,
                     center = Offset(w, cy),
                 )
@@ -168,14 +169,14 @@ internal fun RemoteProgress(
         ) {
             Text(
                 fmtClock(shown),
-                color = if (drag >= 0f) ProomColor.accent else ProomColor.dim,
-                fontSize = 11.5.sp,
+                color = if (drag >= 0f) ProomColor.cast else ProomColor.dim,
+                fontSize = ProomSp(11.5.sp),
                 fontFamily = clockFont,
             )
             Text(
                 if (duration > 0) fmtClock(duration) else "--:--",
                 color = ProomColor.muted,
-                fontSize = 11.5.sp,
+                fontSize = ProomSp(11.5.sp),
                 fontFamily = clockFont,
             )
         }
@@ -212,8 +213,6 @@ private fun SideSkipKey(icon: ImageVector, label: String, enabled: Boolean, onCl
             Modifier
                 .size(48.dp)
                 .clip(CircleShape)
-                .background(ProomColor.surface)
-                .border(1.dp, ProomColor.line, CircleShape)
                 .clickable(enabled = enabled, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
@@ -228,7 +227,7 @@ private fun SideSkipKey(icon: ImageVector, label: String, enabled: Boolean, onCl
         Text(
             label,
             color = if (enabled) ProomColor.muted else ProomColor.muted.copy(alpha = 0.35f),
-            fontSize = 10.5.sp,
+            fontSize = ProomSp(10.5.sp),
             letterSpacing = 0.3.sp,
         )
     }
@@ -246,8 +245,8 @@ private fun PlayToggle(enabled: Boolean, playing: Boolean, onClick: () -> Unit) 
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                ProomColor.accent.copy(alpha = 0.34f),
-                                ProomColor.accent.copy(alpha = 0.11f),
+                                ProomColor.castGlow,
+                                ProomColor.cast.copy(alpha = 0.12f),
                                 Color.Transparent,
                             ),
                             center = center,
@@ -264,7 +263,7 @@ private fun PlayToggle(enabled: Boolean, playing: Boolean, onClick: () -> Unit) 
                 .clip(CircleShape)
                 .background(
                     if (enabled) {
-                        Brush.verticalGradient(listOf(ProomColor.accent, ProomColor.accent2))
+                        Brush.verticalGradient(listOf(ProomColor.castSoft, ProomColor.cast))
                     } else {
                         Brush.verticalGradient(listOf(ProomColor.surface2, ProomColor.surface2))
                     },
@@ -275,7 +274,7 @@ private fun PlayToggle(enabled: Boolean, playing: Boolean, onClick: () -> Unit) 
             Icon(
                 if (playing) PlayerIcons.Pause else PlayerIcons.Play,
                 contentDescription = if (playing) "暂停" else "播放",
-                tint = if (enabled) Color(0xFF17120A) else ProomColor.muted,
+                tint = if (enabled) ProomColor.castInk else ProomColor.muted,
                 modifier = Modifier.size(27.dp),
             )
         }

@@ -30,7 +30,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
 
 /**
  * 顶栏搜索态：把整条顶栏让给一个输入框。
@@ -77,7 +79,7 @@ fun TvSearchField(
             onValueChange = onQuery,
             singleLine = true,
             textStyle = TextStyle(
-                fontSize = 16.sp,
+                fontSize = ProomSp(16.sp),
                 fontWeight = FontWeight.Medium,
                 color = ProomColor.text,
             ),
@@ -99,14 +101,14 @@ fun TvSearchField(
             },
         )
         Box(
-            Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onClose),
+            Modifier.size(TvLayout.minTouch).clip(CircleShape).clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = TabIcons.Close,
                 contentDescription = "关闭搜索",
                 tint = ProomColor.muted,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(20.dp),
             )
         }
     }

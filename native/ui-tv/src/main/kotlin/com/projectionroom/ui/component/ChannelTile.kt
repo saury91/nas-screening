@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -128,8 +129,10 @@ fun ChannelTile(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 7.dp),
         )
-        // 行高固定：副标题即使不显示也占位，切换筛选时整页不会上下跳
-        Box(Modifier.height(16.dp)) {
+        // 行高固定：副标题即使不显示也占位，切换筛选时整页不会上下跳。
+        // 高度跟着字阶走 —— 写死 16dp 时电视上的 13sp 副标题会被裁掉半个字。
+        val subLine = with(LocalDensity.current) { ProomType.label.lineHeight.toDp() }
+        Box(Modifier.height(subLine)) {
             if (subtitle.isNotBlank()) {
                 Text(
                     text = subtitle,

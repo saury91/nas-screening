@@ -41,6 +41,8 @@ import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
+import com.projectionroom.ui.theme.ProomSp
 
 /** 配对页的状态 */
 sealed interface PairState {
@@ -84,14 +86,14 @@ fun PairScreen(
         )
 
         Row(
-            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 48.dp),
+            Modifier.fillMaxWidth().weight(1f).padding(horizontal = TvLayout.insetX),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
             // 二维码必须白底：电视是暗色界面，反色二维码很多相机认不出来
             Box(
                 Modifier
-                    .size(300.dp)
+                    .size(320.dp)
                     .clip(RoundedCornerShape(ProomShape.md))
                     .background(Color.White)
                     .padding(12.dp),
@@ -100,13 +102,15 @@ fun PairScreen(
                 if (qr != null) {
                     Image(qr, contentDescription = "配对二维码", modifier = Modifier.fillMaxSize())
                 } else {
-                    Text("二维码生成失败", color = Color.Black, fontSize = 14.sp)
+                    Text("二维码生成失败", color = Color.Black, fontSize = ProomSp(14.sp))
                 }
             }
 
-            Spacer(Modifier.width(48.dp))
+            Spacer(Modifier.width(44.dp))
 
-            Column(Modifier.width(360.dp)) {
+            // 360dp 的正文列在 18sp 下每行只剩 12~14 个字，说明文字被折成
+            // 「手机路径：我 / 的 → 设置 → …」这种断法，读起来要来回扫
+            Column(Modifier.width(420.dp)) {
                 Text(
                     "用手机上的「放映室」扫这个码",
                     style = ProomType.title,
@@ -118,12 +122,20 @@ fun PairScreen(
                     color = ProomColor.muted,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+                // 一张码两用：配置同步和投屏用的都是「这台电视的地址」，
+                // 没必要让用户在电视上再翻出第二张码
+                Text(
+                    "投屏时也能扫这张：手机播放页 → 投屏 → 扫码连接电视。",
+                    style = ProomType.body,
+                    color = ProomColor.cast.copy(alpha = 0.85f),
+                    modifier = Modifier.padding(top = 6.dp),
+                )
                 Spacer(Modifier.height(ProomSpace.lg))
                 Text("配对码", style = ProomType.label, color = ProomColor.muted)
                 Text(
                     code.chunked(2).joinToString(" "),
                     color = ProomColor.accent,
-                    fontSize = 34.sp,
+                    fontSize = ProomSp(34.sp),
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 2.sp,
                 )

@@ -5,11 +5,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
@@ -42,6 +43,18 @@ object ProomColor {
     val accent2 = Color(0xFFFF9F5A)
     val accentSoft = Color(0x24FFCF7A)  // rgba(255,207,122,.14)
 
+    /**
+     * 投屏通道的冷色强调。
+     *
+     * 暖金留给「内容」——封面、评分、收藏；播放控制属于「设备」，用青色。
+     * 手机遥控页和电视控制条共用这一组值，同一个动作的两个入口才不会像
+     * 两个产品；同时也把遥控器从整屏的暖金里拎出来。
+     */
+    val cast = Color(0xFF33C1DA)
+    val castSoft = Color(0xFF96EEF9)
+    val castInk = Color(0xFF06222A)
+    val castGlow = Color(0x5733C1DA)    // rgba(51,193,218,.34)
+
     val danger = Color(0xFFFF6B6B)
     val ok = Color(0xFF7EE2A8)
 }
@@ -49,19 +62,104 @@ object ProomColor {
 /**
  * 字阶。Web 版用的是 Inter + Noto Sans SC，移动端改用系统字体：
  * 系统字在原生渲染下笔画更实，也省掉几 MB 字体文件。
+ *
+ * **电视上这些属性会自动换成 [TvType] 的那一套**（见 [ProomRoot] 提供的 LocalProomTv）：
+ * 调用点统一写 `ProomType.body`，手机拿 14sp、电视拿 18sp，页面代码里不再出现
+ * `if (isTv) 18.sp else 14.sp` 这种各写各的分支 —— 之前就是那么写的，
+ * 结果是 12 个电视页面出现了 6 种正文字号、3 种边距。
+ *
+ * 之所以做成 @Composable getter：字阶是随主题走的，和字号有关的一切都应该只有
+ * 一个出口；代价是它不能在非 composable 上下文（remember 计算块、顶层常量）里读。
  */
 @Immutable
 object ProomType {
-    val display = TextStyle(fontSize = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp, lineHeight = 46.sp)
-    val headline = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.SemiBold, lineHeight = 32.sp)
-    val title = TextStyle(fontSize = 21.sp, fontWeight = FontWeight.SemiBold, lineHeight = 28.sp)
-    val body = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Normal, lineHeight = 21.sp)
-    val cardTitle = TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.Medium, lineHeight = 19.sp)
-    val meta = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal, lineHeight = 17.sp)
-    val label = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp)
-    val eyebrow = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.4.sp)
+    private val phoneDisplay = TextStyle(fontSize = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp, lineHeight = 46.sp)
+    private val phoneHeadline = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.SemiBold, lineHeight = 32.sp)
+    private val phoneTitle = TextStyle(fontSize = 21.sp, fontWeight = FontWeight.SemiBold, lineHeight = 28.sp)
+    private val phoneBody = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Normal, lineHeight = 21.sp)
+    private val phoneCardTitle = TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.Medium, lineHeight = 19.sp)
+    private val phoneMeta = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal, lineHeight = 17.sp)
+    private val phoneLabel = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp)
+    private val phoneEyebrow = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.4.sp)
 
-    val font: FontFamily = FontFamily.Default
+    /** 全屏页主标题 / Hero 大标题 */
+    val display: TextStyle @Composable @ReadOnlyComposable get() = if (LocalProomTv.current) TvType.display else phoneDisplay
+
+    /** 页面标题、区块标题 */
+    val headline: TextStyle @Composable @ReadOnlyComposable get() = if (LocalProomTv.current) TvType.headline else phoneHeadline
+
+    /** 次级标题 */
+    val title: TextStyle @Composable @ReadOnlyComposable get() = if (LocalProomTv.current) TvType.title else phoneTitle
+
+    /** 正文：简介、说明、表单值 */
+    val body: TextStyle @Composable @ReadOnlyComposable get() = if (LocalProomTv.current) TvType.body else phoneBody
+
+    /** 卡片标题（重量级比正文轻一档） */
+    val cardTitle: TextStyle @Composable @ReadOnlyComposable get() = if (LocalProomTv.current) TvType.cardTitle else phoneCardTitle
+
+    /** 次要信息：年份 / 时长 / 副标题 */
+    val meta: TextStyle @Composable @ReadOnlyComposable get() = if (LocalProomTv.current) TvType.meta else phoneMeta
+
+    /** 最弱一级：序号、角标、时间码 */
+    val label: TextStyle @Composable @ReadOnlyComposable get() = if (LocalProomTv.current) TvType.label else phoneLabel
+
+    /** 全大写小标（“歌单”“正在播放”那类 eyebrow） */
+    val eyebrow: TextStyle @Composable @ReadOnlyComposable get() = if (LocalProomTv.current) TvType.eyebrow else phoneEyebrow
+}
+
+/**
+ * 电视字阶（10-foot UI）。
+ *
+ * 画布按 960×540dp 算（density 2 + 1080p，Android TV 的基准分辨率），视距 3 米。
+ * 依据（Google/Apple TV 设计与可读性经验值）：正文不小于画布宽度的 2%（≈18sp），
+ * 标题 3%（≈30sp），最小一级（序号/时间码）不低于 1.35%（≈13sp）。
+ *
+ * 层级固定成 1.35 左右的等比阶梯，页面里**不允许**再出现裸 sp：
+ * 40 主标题 / 30 页面标题 / 24 次级标题 / 18 正文 / 17 卡片标题 / 15 次要信息 / 13 最弱一级。
+ */
+object TvType {
+    val display = TextStyle(fontSize = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp, lineHeight = 48.sp)
+    val headline = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.SemiBold, lineHeight = 38.sp)
+    val title = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.SemiBold, lineHeight = 31.sp)
+    val body = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Normal, lineHeight = 26.sp)
+    val cardTitle = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium, lineHeight = 23.sp)
+    val meta = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Normal, lineHeight = 21.sp)
+    val label = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium, lineHeight = 18.sp)
+    val eyebrow = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 3.sp)
+}
+
+/**
+ * 电视安全区。55~100 寸的屏普遍有 2%~5% 过扫描，内容压到边会被切掉：
+ * 960×540dp 画布下左右留 48dp（5%）、上下留 27dp（5%）。
+ */
+object TvLayout {
+    val insetX = 48.dp
+    val insetY = 27.dp
+
+    /** 遥控器可点目标下限。10-foot UI 里所有能聚焦的东西都不该小于这个尺寸 */
+    val minTouch = 48.dp
+}
+
+/**
+ * 逐点平移的字号，专给视频播放器控制层这类「必须按像素微调」的地方。
+ *
+ * 它不做等比缩放（11sp×1.4=15sp 仍然偏小，34sp×1.4=48sp 又没必要），
+ * 而是把手机的档位钳到电视的可读下限：≤11.5→14、≤13.5→16、≤15.5→18、
+ * ≤17.5→20、≤22→24，再大的（配对码那种）按 1.35 倍放。
+ */
+@Composable
+@ReadOnlyComposable
+fun ProomSp(phone: TextUnit): TextUnit {
+    if (!LocalProomTv.current) return phone
+    val v = phone.value
+    return when {
+        v <= 11.5f -> 14.sp
+        v <= 13.5f -> 16.sp
+        v <= 15.5f -> 18.sp
+        v <= 17.5f -> 20.sp
+        v <= 22f -> 24.sp
+        else -> (v * 1.35f).sp
+    }
 }
 
 @Immutable

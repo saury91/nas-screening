@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomType
 
 /**
@@ -160,7 +161,7 @@ private fun ClosePill(onDismiss: () -> Unit) {
         Text(
             "✕",
             color = ProomColor.dim,
-            fontSize = 13.sp,
+            fontSize = ProomSp(13.sp),
             fontWeight = FontWeight.Medium,
         )
     }
@@ -202,7 +203,7 @@ private fun EpisodeGrid(vod: Vod, lineIndex: Int, epIndex: Int, onPick: (Int) ->
                 Text(
                     ep.name.ifBlank { (i + 1).toString() },
                     color = if (sel) ProomColor.accent else ProomColor.dim,
-                    fontSize = 12.5.sp,
+                    fontSize = ProomSp(12.5.sp),
                     fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -249,18 +250,18 @@ private fun LineList(vod: Vod, lineIndex: Int, onPick: (Int) -> Unit) {
                     Text(
                         ln.site.ifBlank { "线路 ${i + 1}" },
                         color = if (sel) ProomColor.accent else ProomColor.text,
-                        fontSize = 13.5.sp,
+                        fontSize = ProomSp(13.5.sp),
                         fontWeight = FontWeight.Medium,
                     )
                     if (ln.remarks.isNotBlank()) {
                         Spacer(Modifier.height(2.dp))
-                        Text(ln.remarks, color = ProomColor.muted, fontSize = 11.sp)
+                        Text(ln.remarks, color = ProomColor.muted, fontSize = ProomSp(11.sp))
                     }
                 }
                 Text(
                     "${ln.count} 集",
                     color = ProomColor.muted,
-                    fontSize = 11.5.sp,
+                    fontSize = ProomSp(11.5.sp),
                 )
             }
         }
