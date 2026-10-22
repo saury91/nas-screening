@@ -16,9 +16,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -341,8 +344,10 @@ class MainActivity : ComponentActivity() {
                 .getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
         }
         val d = resources.displayMetrics.density
-        var barTop = ((sysInsets?.top ?: statusBarPx()) / d).dp
-        var barBottom = ((sysInsets?.bottom ?: 0) / d).dp
+        // 只当兜底：onCreate 阶段 rootWindowInsets 往往还没准备好（拿到 0），
+        // 真实值在 setContent 里用 Compose 的 insets 实时取（导航栏切换会变）。
+        val fallbackTop = ((sysInsets?.top ?: statusBarPx()) / d).dp
+        val fallbackBottom = ((sysInsets?.bottom ?: 0) / d).dp
 
         // 关键：让 Compose 的内容**画到系统栏后面**。
         // 只把 statusBarColor 设成透明是不够的 —— DecorView 默认仍会把内容限制在
@@ -371,6 +376,14 @@ class MainActivity : ComponentActivity() {
         // 这里直接量「onCreate 到第一帧」的 App 侧开销
         val bootT0 = android.os.SystemClock.uptimeMillis()
         setContent {
+            // 系统栏高度必须**实时**取：小米等 ROM 开着「三键导航」时底栏比手势条高一截，
+            // 且用户能在运行中切换。onCreate 里 rootWindowInsets 还是 0，只取一次的话
+            // 底部 tab 就会被系统返回键/导航栏压住 —— 这里改成 Compose insets，随配置变化。
+            val insetsDensity = androidx.compose.ui.platform.LocalDensity.current
+            val navBottomPx = WindowInsets.navigationBars.getBottom(insetsDensity)
+            val statusTopPx = WindowInsets.statusBars.getTop(insetsDensity)
+            val barBottom = if (navBottomPx > 0) (navBottomPx / insetsDensity.density).dp else fallbackBottom
+            val barTop = if (statusTopPx > 0) (statusTopPx / insetsDensity.density).dp else fallbackTop
             if (debuggable) {
                 androidx.compose.runtime.LaunchedEffect(Unit) {
                     android.view.Choreographer.getInstance().postFrameCallback {
@@ -1034,7 +1047,10 @@ class MainActivity : ComponentActivity() {
                 // Android 15+ 强制 edge-to-edge：内容会画到状态栏/手势条下面，
                 // 状态栏还会吃掉那块区域的点击。除播放页（要满屏视频）外统一让开。
                 // 顶部让开交给各页面自己（放外层会让正在退出的首页也一起上移，沉浸感瞬间消失）
-                val insetMod = Modifier.padding(bottom = barBottom)
+                //
+                // 首页例外：底部 tab 在 PhoneShell 里自己按 inset 垫高（背景要一直铺到屏幕底边），
+                // 这里再垫一次就会多出一条空白，所以 Home 交给壳子处理。
+                val insetMod = if (screen is Screen.Home) Modifier else Modifier.padding(bottom = barBottom)
 
                 Box(Modifier.fillMaxSize().background(ProomColor.bg).then(insetMod)) {
                     // 页面切换动效：新页从右侧滑入淡入，旧页微左移淡出（硬切太突兀）
@@ -1123,6 +1139,22 @@ class MainActivity : ComponentActivity() {
                                         loadCats = doMusicCats,
                                         loadPlaylists = doMusicLists,
                                         onOpenPlaylist = { p -> screen = Screen.Playlist(p.id, s) },
+                                        // 音乐页顶栏那颗放大镜搜的是歌，不是片：
+                                        // 走和歌单同一套聚合接口（App 直连，NAS 不参与）
+                                        searchTracks = { kw ->
+                                            runCatching { musicApi.search(kw) }
+                                                .getOrDefault(emptyList())
+                                        },
+                                        onPlayTracks = { tracks, index ->
+                                            val q = tracks.map {
+                                                com.projectionroom.ui.music.MusicTrack(
+                                                    id = it.id, title = it.title,
+                                                    artist = it.artist, cover = it.cover,
+                                                )
+                                            }
+                                            com.projectionroom.ui.music.MusicBox
+                                                .playAll(this@MainActivity, q, index, false)
+                                        },
                                     )
                                 },
                                 mine = {
@@ -1188,6 +1220,23 @@ class MainActivity : ComponentActivity() {
                                 loadCats = doMusicCats,
                                 loadPlaylists = doMusicLists,
                                 onOpenPlaylist = { p -> screen = Screen.Playlist(p.id, s) },
+                                searchTracks = { kw ->
+                                    runCatching { musicApi.search(kw) }
+                                        .getOrDefault(emptyList())
+                                },
+                                onPlayTracks = { tracks, index ->
+                                    val q = tracks.map {
+                                        com.projectionroom.ui.music.MusicTrack(
+                                            id = it.id, title = it.title,
+                                            artist = it.artist, cover = it.cover,
+                                        )
+                                    }
+                                    com.projectionroom.ui.music.MusicBox
+                                        .playAll(this@MainActivity, q, index, false)
+                                    // 这一页没有迷你条的位置：直接进播放器，
+                                    // 否则点了歌什么都看不见（电视端也是这么跳的）
+                                    screen = Screen.MusicPlayer(s)
+                                },
                                 onBack = { screen = s.from },
                                 topInset = barTop,
                             )
@@ -1230,7 +1279,9 @@ class MainActivity : ComponentActivity() {
                             },
                             onBack = { screen = s.from },
                             footer = {
-                                Box(Modifier.navigationBarsPadding()) {
+                                // 底部让开已由外层 Box 统一做（padding = barBottom），
+                                // 这里再来一次 navigationBarsPadding 会多出一条空档
+                                Box(Modifier.fillMaxWidth()) {
                                     MiniPlayerOrEmpty { screen = Screen.MusicPlayer(s) }
                                 }
                             },
