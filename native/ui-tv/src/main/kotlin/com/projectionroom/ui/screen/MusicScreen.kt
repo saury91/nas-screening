@@ -51,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -102,6 +103,10 @@ fun MusicScreen(
     var cats by remember { mutableStateOf(MusicCache.cats()) }
     // 推荐区
     var rec by remember { mutableStateOf(MusicCache.lists(REC_KEY).orEmpty()) }
+    // 两路数据是否已经拉完（缓存命中也算）。没有这两位就分不清
+    // 「还在拉」和「拉回空」，没配音乐接口时会一直停在骨架屏上。
+    var catsLoaded by remember { mutableStateOf(MusicCache.cats().isNotEmpty()) }
+    var recLoaded by remember { mutableStateOf(MusicCache.lists(REC_KEY) != null) }
     // 分类区：一级下标 + 组内二级下标。默认落在「语种 · 华语」（最大众的一档）
     val initGi = remember(cats) {
         cats.indexOfFirst { it.name == "语种" }.takeIf { it >= 0 } ?: 0
@@ -156,12 +161,20 @@ fun MusicScreen(
     val sub = subs.getOrNull(si)
 
     LaunchedEffect(Unit) {
-        if (MusicCache.cats().isNotEmpty()) return@LaunchedEffect
+        if (cats.isNotEmpty()) {
+            catsLoaded = true
+            return@LaunchedEffect
+        }
         runCatching { loadCats().collect { cats = MusicCache.putCats(it) } }
+        catsLoaded = true
     }
     LaunchedEffect(Unit) {
-        if (rec.isNotEmpty()) return@LaunchedEffect
+        if (rec.isNotEmpty()) {
+            recLoaded = true
+            return@LaunchedEffect
+        }
         runCatching { loadPlaylists("").collect { rec = MusicCache.putLists(REC_KEY, it) } }
+        recLoaded = true
     }
     // 二级分类变化才重新拉。命中缓存立刻出内容，不闪骨架
     LaunchedEffect(sub?.id) {
@@ -264,59 +277,65 @@ fun MusicScreen(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
 
-            // ── 推荐歌单 ──
-            if (rec.isNotEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    SectionHead("推荐歌单", "编辑挑的，点开就是整张歌单")
+            // 两路都拉完还是空 = 没配音乐接口，给一句话，别让灰块一直转
+            val emptyAll = recLoaded && catsLoaded && rec.isEmpty() && cats.isEmpty()
+            if (emptyAll) {
+                item(span = { GridItemSpan(maxLineSpan) }) { EmptyMusic() }
+            } else {
+                // ── 推荐歌单 ──
+                if (rec.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SectionHead("推荐歌单", "编辑挑的，点开就是整张歌单")
+                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        // 横滑要通栏：网格给了 20dp 内边距，这里抵消掉
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = TvLayout.insetX),
+                            horizontalArrangement = Arrangement.spacedBy(recGap),
+                            modifier = Modifier.bleed(TvLayout.insetX),
+                        ) {
+                            items(rec) { p -> RecCard(p, recW) { onOpenPlaylist(p) } }
+                        }
+                    }
+                } else if (!recLoaded) {
+                    item(span = { GridItemSpan(maxLineSpan) }) { RecSkeleton(recW) }
                 }
+
+                // ── 分类歌单 ──
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    // 横滑要通栏：网格给了 20dp 内边距，这里抵消掉
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = TvLayout.insetX),
-                        horizontalArrangement = Arrangement.spacedBy(recGap),
-                        modifier = Modifier.bleed(TvLayout.insetX),
-                    ) {
-                        items(rec) { p -> RecCard(p, recW) { onOpenPlaylist(p) } }
+                    SectionHead(
+                        "分类歌单",
+                        cats.joinToString(" · ") { it.name }
+                            .ifBlank { "主题 · 语种 · 风格 · 场景 · 情感" },
+                        top = ProomSpace.lg,
+                    )
+                }
+
+                if (cats.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        GroupTabs(cats.map { it.name }, gi) { i ->
+                            gi = i
+                            si = 0
+                        }
+                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SubChips(subs.map { it.name }, si) { i -> si = i }
                     }
                 }
-            } else if (cats.isEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) { RecSkeleton(recW) }
-            }
 
-            // ── 分类歌单 ──
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                SectionHead(
-                    "分类歌单",
-                    cats.joinToString(" · ") { it.name }
-                        .ifBlank { "主题 · 语种 · 风格 · 场景 · 情感" },
-                    top = ProomSpace.lg,
-                )
-            }
-
-            if (cats.isNotEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    GroupTabs(cats.map { it.name }, gi) { i ->
-                        gi = i
-                        si = 0
+                when {
+                    listErr != null -> item(span = { GridItemSpan(maxLineSpan) }) {
+                        ListHint("这个分类读取失败", listErr.orEmpty())
                     }
-                }
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    SubChips(subs.map { it.name }, si) { i -> si = i }
-                }
-            }
 
-            when {
-                listErr != null -> item(span = { GridItemSpan(maxLineSpan) }) {
-                    ListHint("这个分类读取失败", listErr.orEmpty())
+                    listLoading && cards.isEmpty() -> items(count = 6) { PlSkeleton() }
+
+                    cards.isEmpty() && subs.isNotEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                        ListHint("这个分类暂时没有歌单", "换一个分类看看")
+                    }
+
+                    else -> items(cards) { p -> PlCard(p) { onOpenPlaylist(p) } }
                 }
-
-                listLoading && cards.isEmpty() -> items(count = 6) { PlSkeleton() }
-
-                cards.isEmpty() && subs.isNotEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                    ListHint("这个分类暂时没有歌单", "换一个分类看看")
-                }
-
-                else -> items(cards) { p -> PlCard(p) { onOpenPlaylist(p) } }
             }
         }
         }
@@ -607,6 +626,27 @@ private fun CoverBox(p: NasApi.Playlist, width: Dp?) {
 }
 
 /* ───────────────────── 骨架 / 提示 ───────────────────── */
+
+/**
+ * 没配音乐接口时的空态：说清楚是「没配」而不是「坏了」。
+ */
+@Composable
+private fun EmptyMusic() {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 60.dp, start = 12.dp, end = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("在线音乐没配置", color = ProomColor.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "安装包不带任何音乐接口。\n在设置里填上聚合接口地址后，推荐歌单和分类才会出现。",
+            color = ProomColor.dim,
+            fontSize = 13.sp,
+            lineHeight = 21.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+    }
+}
 
 @Composable
 private fun RecSkeleton(width: Dp) {
