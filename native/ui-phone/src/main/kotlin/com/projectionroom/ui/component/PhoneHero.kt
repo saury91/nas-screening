@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +38,7 @@ import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.util.plainText
 import com.projectionroom.ui.component.RemoteImage
 
 /**
@@ -193,10 +195,14 @@ fun PhoneHero(
                                 )
                             }
                         }
-                        if (vod.desc.isNotBlank()) {
+                        // 源站简介常是二次转义（"&amp;#039;"），不洗会原样露出来：
+                        // 第一轮只把 &amp; 解成 &，剩下的 &#039; 得再解一次。
+                        // 用 remember 是因为 pager 翻页会反复重组，没必要每次重洗几百字。
+                        val desc = remember(vod.desc) { vod.desc.plainText() }
+                        if (desc.isNotBlank()) {
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                vod.desc,
+                                desc,
                                 style = ProomType.body,
                                 color = ProomColor.dim,
                                 maxLines = 2,

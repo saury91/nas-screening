@@ -17,6 +17,15 @@ function tintAmbient(pic) {
     pic ? `url("${String(pic).replace(/["'\\\n\r]/g, '')}")` : 'none');
 }
 
+// 返回：优先回上一页，直接打开的深链接就回首页。骨架期也绑，页面一出现就能退
+function bindBack(root) {
+  const b = root.querySelector('#btn-back');
+  if (b) b.onclick = () => {
+    if (history.length > 1) history.back();
+    else location.hash = '#/home';
+  };
+}
+
 export async function render(root, ctx) {
   const name = ctx.query.n || '';
   const year = ctx.query.y || '';
@@ -25,21 +34,44 @@ export async function render(root, ctx) {
     return;
   }
 
+  // 骨架屏和真实详情页同构：返回按钮、hero 底纹、海报/标题/操作区/简介、
+  // 下面的线路面板都占好位，加载完不会整页跳一下。之前只有四个灰条，
+  // 又恰好露出上一页那张暖色海报的全局环境光，看起来像块脏橘布。
+  tintAmbient('');   // 骨架阶段没有封面，先清掉上一页残留的环境光
   root.innerHTML = `<div class="page bleed" style="padding:0">
-    <div class="detail-hero"><div class="hero-veil"></div>
+    <button class="back-pill" id="btn-back" data-focus aria-label="返回上一页">
+      ${icon('back')}<span>返回</span>
+    </button>
+    <section class="detail-hero is-skeleton">
+      <div class="hero-bg"></div>
+      <div class="hero-veil"></div>
       <div class="detail-body">
-        <div class="skl" style="width:200px;aspect-ratio:2/3;border-radius:16px"></div>
-        <div style="flex:1">
-          <div class="skl skl-line" style="width:52%;height:42px"></div>
-          <div class="skl skl-line" style="width:32%"></div>
-          <div class="skl skl-line" style="width:76%;margin-top:24px"></div>
-          <div class="skl skl-line" style="width:64%"></div>
+        <div class="detail-poster skl"></div>
+        <div class="detail-main">
+          <div class="skl skl-ph" style="width:124px;height:11px;margin:0 0 14px"></div>
+          <div class="skl skl-ph" style="width:58%;height:clamp(30px,4.6vw,54px);margin-bottom:16px"></div>
+          <div class="skl skl-ph" style="width:min(420px,52%);height:13px;margin-bottom:20px"></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+            <div class="skl skl-ph" style="width:132px;height:44px;border-radius:999px"></div>
+            <div class="skl skl-ph" style="width:104px;height:44px;border-radius:999px"></div>
+            <div class="skl skl-ph" style="width:118px;height:44px;border-radius:999px"></div>
+          </div>
+          <div class="skl skl-ph" style="width:min(760px,88%);height:12px;margin-bottom:10px"></div>
+          <div class="skl skl-ph" style="width:min(680px,74%);height:12px"></div>
         </div>
       </div>
-    </div>
-    <p class="result-hint" style="padding:0 var(--pad)">
-      正在向十几个片源要线路，慢的会自动跳过…
-    </p></div>`;
+    </section>
+    <div class="detail-panels">
+      <section class="panel play-panel">
+        <div class="panel-head"><h3>播放线路</h3></div>
+        <div class="skl-chips">
+          ${Array(4).fill('<div class="skl skl-ph" style="width:104px;height:36px;border-radius:10px"></div>').join('')}
+        </div>
+        <p class="skl-hint">正在向十几个片源要线路，慢的会自动跳过…</p>
+      </section>
+    </div></div>`;
+
+  bindBack(root);
 
   let d;
   try {
@@ -57,10 +89,16 @@ export async function render(root, ctx) {
       root.querySelector('#od-retry')?.addEventListener('click', () => location.reload());
       return;
     }
+    const down = e.code === 'sources_down' || e.status === 503;
     root.innerHTML = `<div class="page">${emptyState({
-      iconName: 'wifi', title: '没找到这部片子', desc: e.message,
-      action: `<a class="btn" href="#/search?q=${encodeURIComponent(name)}" data-focus>搜搜看</a>`,
+      iconName: 'wifi',
+      title: down ? '片源都没响应' : '没找到这部片子',
+      desc: down ? '十几个采集站这次都没回话，多半是网络或源站抽风，过会儿再试。' : e.message,
+      action: down
+        ? `<button class="btn" id="d-retry" data-focus>重试</button>`
+        : `<a class="btn" href="#/search?q=${encodeURIComponent(name)}" data-focus>搜搜看</a>`,
     })}</div>`;
+    root.querySelector('#d-retry')?.addEventListener('click', () => location.reload());
     return;
   }
   hit = d;
@@ -240,14 +278,7 @@ function paint(root, d, ctx) {
     toggle.textContent = open ? '收起' : '展开简介';
   };
 
-  // 返回：优先回上一页，直接打开的深链接就回首页
-  const backBtn = root.querySelector('#btn-back');
-  if (backBtn) {
-    backBtn.onclick = () => {
-      if (history.length > 1) history.back();
-      else location.hash = '#/home';
-    };
-  }
+  bindBack(root);
 
   root.querySelector('#btn-play').onclick = () => play(ctx);
   root.querySelector('#btn-fav').onclick = async () => {

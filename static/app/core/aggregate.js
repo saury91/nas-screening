@@ -7,6 +7,7 @@
 // XML 接口（type=0）暂时跳过，离线时少几个源，不影响主流程。
 
 import { load, save } from './offline.js';
+import { plainText } from './dom.js';
 
 const BUNDLE_KEY = 'config:bundle';
 const BUNDLE_TTL = 30 * 86400 * 1000;
@@ -89,7 +90,8 @@ function toItem(v) {
     type: String(v.vod_type_name || v.type_name || '').trim(),
     remarks: String(v.vod_remarks || '').trim(),
     score: String(v.vod_score || '').trim(),
-    desc: String(v.vod_content || v.vod_blurb || '').replace(/<[^>]+>/g, '').trim(),
+    // 只剥标签不够：简介里还有 &amp;#039; 这类实体，渲染出来是字面量
+    desc: plainText(v.vod_content || v.vod_blurb || ''),
   };
 }
 

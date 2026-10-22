@@ -196,6 +196,10 @@ fun DetailScreen(
                     vod.name,
                     fontSize = 40.sp,
                     fontWeight = FontWeight.SemiBold,
+                    // 显式行高：在 verticalScroll 里文本的 lineHeight 会按「剩余高度」
+                    // 重新测量，量出来比字形还矮，片名上半截被切（截图里只剩一条底边）。
+                    // 40sp 配 48sp 行高，任何名字都不会切。
+                    lineHeight = 48.sp,
                     color = ProomColor.text,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

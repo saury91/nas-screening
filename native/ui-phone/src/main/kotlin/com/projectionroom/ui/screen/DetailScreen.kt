@@ -62,6 +62,7 @@ import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.util.plainText
 import com.projectionroom.ui.component.RemoteImage
 
 /**
@@ -246,10 +247,12 @@ private fun PhoneDetail(
                     Text("评分 ${vod.score}", style = ProomType.label, color = ProomColor.accent)
                 }
                 // 简介限 3 行：源站简介经常几百字，放开会把整页撑变形
-                if (vod.desc.isNotBlank()) {
+                // 文本先洗一遍：富文本标签与二次转义实体（"&amp;#039;"）都要清掉
+                val desc = remember(vod.desc) { vod.desc.plainText() }
+                if (desc.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        vod.desc,
+                        desc,
                         style = ProomType.meta,
                         color = ProomColor.dim,
                         maxLines = 3,
