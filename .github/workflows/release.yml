@@ -1,0 +1,161 @@
+name: release
+
+# 打一个 tag（或手动点一次），就把两个带签名的 APK 挂到 GitHub Release。
+# 版本号从 tag 解析（v0.13.0 → 0.13.0），versionCode 用 run_number 递增，
+# 不需要手工改 build.gradle.kts 里的数字。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "版本号，如 v0.13.0；留空则用当前提交短 SHA"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: app-tv
+            slug: tv
+            label: 电视端
+          - module: app-phone
+            slug: phone
+            label: 手机端
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析版本号
+        id: ver
+        working-directory: .
+        env:
+          TAG_INPUT: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          ref="${TAG_INPUT:-$REF_NAME}"
+          name="${ref#v}"
+          if [ -z "$name" ]; then
+            name="0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "tag=v$name" >> "$GITHUB_OUTPUT"
+          # versionCode 必须严格递增，用流水号 + 偏移最省事
+          echo "code=$((100 + RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          echo "版本 $name / code $((100 + RUN_NUMBER))"
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 SDK 平台
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: wrapper
+
+      # 签名走仓库里的 native/keystore/proom.jks（固定签名才能覆盖升级）。
+      # 想换成自己的钥匙，在仓库 Secrets 里配 PROOM_KEYSTORE 指向的路径即可，
+      # build.gradle.kts 会用环境变量覆盖。
+      - name: 构建 ${{ matrix.label }} release APK
+        env:
+          PROOM_VERSION_NAME: ${{ steps.ver.outputs.name }}
+          PROOM_VERSION_CODE: ${{ steps.ver.outputs.code }}
+        run: ./gradlew :${{ matrix.module }}:assembleRelease --no-daemon --stacktrace
+
+      - name: 归档产物
+        env:
+          SLUG: ${{ matrix.slug }}
+          VER: ${{ steps.ver.outputs.name }}
+        run: |
+          set -euo pipefail
+          src=$(find "${{ matrix.module }}/build/outputs/apk/release" -name '*.apk' -print -quit)
+          if [ -z "$src" ]; then
+            echo "::error::没有找到 release APK"
+            exit 1
+          fi
+          dst="$GITHUB_WORKSPACE/dist/proom-$SLUG-$VER.apk"
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$src" "$dst"
+          # 附一份 sha256，下载后可校验；App 端自升级也会核对这个值
+          (cd "$GITHUB_WORKSPACE/dist" && shasum -a 256 "proom-$SLUG-$VER.apk" > "proom-$SLUG-$VER.apk.sha256")
+          ls -lh "$dst" 
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.slug }}
+          path: ${{ github.workspace }}/dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 重新解析版本号
+        id: ver
+        env:
+          TAG_INPUT: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          ref="${TAG_INPUT:-$REF_NAME}"
+          name="${ref#v}"
+          if [ -z "$name" ]; then
+            name="0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "tag=v$name" >> "$GITHUB_OUTPUT"
+
+      - name: 下载全部 APK
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 发布到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: 放映室 ${{ steps.ver.outputs.tag }}
+          generate_release_notes: true
+          append_body: true
+          body: |
+
+            ### 安装
+
+            | 文件 | 说明 |
+            |---|---|
+            | `proom-tv-*.apk` | 电视 / TV 盒子，包名 `com.projectionroom.tv` |
+            | `proom-phone-*.apk` | 手机 / 平板，包名 `com.projectionroom.app` |
+
+            `adb install -r <apk>`，或在设备上直接打开安装。
+            每个 APK 旁边有 `.sha256`，可用 `shasum -a 256 -c` 校验。
+            两个包共用同一把签名，覆盖安装不会丢配置；跨过签名变更则需要先卸载。
+          files: dist/**
+
+      - name: 输出结果
+        run: ls -lh dist

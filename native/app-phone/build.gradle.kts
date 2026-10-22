@@ -16,8 +16,9 @@ android {
         applicationId = "com.projectionroom.app"
         minSdk = 21
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.13.0"
+        // 发版时由 CI/脚本注入（tag 里解析），本地构建用默认值
+        versionCode = System.getenv("PROOM_VERSION_CODE")?.toIntOrNull() ?: 3
+        versionName = System.getenv("PROOM_VERSION_NAME") ?: "0.13.0"
     }
 
     buildFeatures { compose = true }
@@ -29,14 +30,18 @@ android {
 
     kotlinOptions { jvmTarget = "17" }
 
+    // 默认用仓库里那把公用钥匙，谁构建都是同一条升级链；CI 或私有构建
+    // 可以用环境变量换成自己的钥匙，不需要改代码。
     signingConfigs {
         create("release") {
-            val ks = rootProject.file("keystore/proom.jks")
+            val ks = rootProject.file(
+                System.getenv("PROOM_KEYSTORE") ?: "keystore/proom.jks")
             if (ks.exists()) {
                 storeFile = ks
-                storePassword = "proom-release"
-                keyAlias = "proom"
-                keyPassword = "proom-release"
+                storePassword = System.getenv("PROOM_KEYSTORE_PASS") ?: "proom-release"
+                keyAlias = System.getenv("PROOM_KEY_ALIAS") ?: "proom"
+                keyPassword = System.getenv("PROOM_KEY_PASS")
+                    ?: System.getenv("PROOM_KEYSTORE_PASS") ?: "proom-release"
             }
         }
     }
