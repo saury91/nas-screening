@@ -322,7 +322,8 @@ private fun SubChips(names: List<String>, current: Int, onSelect: (Int) -> Unit)
             val shape = RoundedCornerShape(50)
             Box(
                 Modifier
-                    .height(32.dp)
+                    // 48dp：32dp 的胶囊是这一页最难点的东西
+                    .height(48.dp)
                     .clip(shape)
                     .background(if (on) ProomColor.accentSoft else ProomColor.surface)
                     .then(

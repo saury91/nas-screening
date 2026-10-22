@@ -15,9 +15,16 @@ import kotlinx.serialization.json.Json
 /**
  * NAS 端的接口客户端。
  *
- * App 不直接聚合源站，而是走 NAS 的 `/api/online` 与 `/api/detail`：
- * 那边已经做过跨源合并、去重、画质探测，App 只需要渲染。
- * （NAS 不在时才回落到本地聚合，那是后面才接的能力。）
+ * **调用范围约定（项目规则）**：NAS 只承担四件事 ——
+ *   1. 同步（`/api/fav`、`/api/history`、`/api/library`）；
+ *   2. 投射（投屏桥接，见 CastClient）；
+ *   3. 更新（版本检查）；
+ *   4. 配置（`/api/config/bundle`，以及配置里带下来的直播频道表）。
+ *
+ * 其余一切都是**资源加载**，App 直连源站，不许经过 NAS：
+ * 首页、片库、搜索、详情、线路解析、播放、音乐、封面图。
+ * 这样 NAS 关机 / 返回 502 时，点播全链路照常可用 —— 之前 search/detail/browse
+ * 挂 NAS 兜底，NAS 一挂就白等好几秒，用户看到的就是「一直在转」。
  */
 class NasApi(
     private val http: Http,

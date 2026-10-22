@@ -332,7 +332,8 @@ private fun PhoneDetail(
 private fun FavIconButton(active: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(40.dp)
+            // 它就紧挨着「立即播放」：40dp 时手指偏一点就点进了播放
+            .size(48.dp)
             .clip(CircleShape)
             .background(if (active) ProomColor.accentSoft else ProomColor.surface)
             .clickable(onClick = onClick),
@@ -346,7 +347,7 @@ private fun FavIconButton(active: Boolean, onClick: () -> Unit) {
             },
             contentDescription = if (active) "取消收藏" else "收藏",
             tint = if (active) ProomColor.accent else ProomColor.dim,
-            modifier = Modifier.size(19.dp),
+            modifier = Modifier.size(22.dp),
         )
     }
 }

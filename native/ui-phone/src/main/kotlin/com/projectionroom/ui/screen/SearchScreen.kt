@@ -78,10 +78,13 @@ fun SearchScreen(
     var committed by remember { mutableStateOf(initialQuery) }
     var loading by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<Vod>>(emptyList()) }
+    val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var err by remember { mutableStateOf<String?>(null) }
     var searched by remember { mutableStateOf(false) }
+    // 重试计数器：加进 key 里就能重跑同一关键词（只改 committed 不会重新触发）
+    var retry by remember { mutableStateOf(0) }
 
-    LaunchedEffect(committed) {
+    LaunchedEffect(committed, retry) {
         val kw = committed.trim()
         if (kw.isEmpty()) {
             results = emptyList()
@@ -131,7 +134,12 @@ fun SearchScreen(
                 SearchField(
                     value = q,
                     onValueChange = { q = it; committed = it },
-                    onSearch = { committed = q },
+                    // 提交后收键盘：不收的话结果区只剩屏幕下半截（键盘占了 300dp+），
+                    // 空态/错误态的提示和「重试」按钮全被压在键盘后面
+                    onSearch = {
+                        committed = q
+                        kb?.hide()
+                    },
                 )
             }
         }
@@ -201,7 +209,14 @@ fun SearchScreen(
                 err != null -> {
                     // 取一次再判断：err 是 Compose state，两次读之间可能被置空
                     val e = err.orEmpty()
-                    Center(if (e.contains("NAS", true)) "连不上 NAS" else e)
+                    // 「源都没响应」和「没这部片」是两回事，说的不是一句话
+                    val msg = when {
+                        e.contains("没响应") || e.contains("SourcesUnavailable") ->
+                            "片源都没响应，检查下网络再试"
+                        e.contains("NAS", true) -> "连不上 NAS"
+                        else -> e
+                    }
+                    Center(msg, action = "重试", onAction = { retry++ })
                 }
 
                 searched && results.isEmpty() -> Center("没找到「$committed」，换个片名试试")
@@ -348,8 +363,33 @@ private fun HotChip(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Center(text: String) {
+private fun Center(
+    text: String,
+    /** 给错误态留一个出口：不给就只能退出重进 */
+    action: String? = null,
+    onAction: () -> Unit = {},
+) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, style = ProomType.meta, color = ProomColor.muted)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
+            Text(text, style = ProomType.meta, color = ProomColor.muted)
+            if (action != null) {
+                Spacer(Modifier.height(ProomSpace.md))
+                Box(
+                    Modifier
+                        // 48dp 热区，和全站其它按钮一致
+                        .height(48.dp)
+                        .clip(CircleShape)
+                        .background(ProomColor.surface2)
+                        .clickable(onClick = onAction)
+                        .padding(horizontal = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(action, style = ProomType.meta, color = ProomColor.accent)
+                }
+            }
+        }
     }
 }
