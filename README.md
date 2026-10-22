@@ -137,7 +137,8 @@
 - **氛围背景不依赖 `Modifier.blur`**：它在 API 31 以下是空操作，而电视盒子一大半跑在 28~30，统一走 `SoftBackdrop`（小尺寸解码 + GPU 放大），任何 API 上都是同一种软色雾
 
 <p>
-<img src="docs/screenshot-app-tv.png" width="560" alt="电视首页">
+<img src="docs/screenshot-app-tv.png" width="380" alt="电视首页">
+<img src="docs/screenshot-app-tv-detail.png" width="380" alt="电视详情">
 </p>
 
 ---
