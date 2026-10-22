@@ -26,6 +26,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
@@ -57,6 +60,13 @@ import com.projectionroom.ui.component.RemoteImage
 fun MiniPlayerBar(
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 电视端：把左侧「打开播放页」那一格暴露给上层。
+     *
+     * 播放条排在 LazyColumn 之后，遥控器只能一路按过整张歌单才够得着它；
+     * 上层（顶栏「播放中」胶囊、媒体键）拿到这个 requester 就能一步跳进来。
+     */
+    firstActionFocus: FocusRequester? = null,
 ) {
     val track = MusicBox.current ?: return
     // 电视上 56dp/40dp/13sp 的迷你条只有屏幕高度 1/10，字小到要凑近看：
@@ -74,28 +84,57 @@ fun MiniPlayerBar(
         // 单独抽成 composable：进度每秒变一次，只让这一条重组，
         // 不要把封面/标题/按钮跟着重画一遍（静置时那是白烧的帧）
         ProgressLine()
-        // 整条是「打开播放页」的热区：电视上它同样会被焦点选中，但原来毫无反馈
-        var rowFocused by remember { mutableStateOf(false) }
+        // 电视上不能让「整条」当焦点目标：整条可聚焦时遥控器只停在外沿，
+        // 里面 4 颗按钮永远选不到（原来就是这样），而且它会连同 LazyColumn
+        // 一起把焦点串到列表末尾。现在拆成 5 个独立目标：
+        // 左侧「打开播放页」+ 4 颗按钮，左右键在本组内循环。
+        var openFocused by remember { mutableStateOf(false) }
         Row(
             Modifier
                 .fillMaxWidth()
                 .height(barH)
-                .then(
-                    if (tv && rowFocused) {
-                        Modifier.border(
-                            2.dp,
-                            ProomColor.accent,
-                            RoundedCornerShape(ProomShape.sm),
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
-                .onFocusChanged { rowFocused = it.isFocused }
-                .clickable(onClick = onOpen)
+                .then(if (tv) Modifier.focusGroup() else Modifier)
+                // 手机上整条仍是热区；电视上由内部 5 个目标各自接管
+                .then(if (tv) Modifier else Modifier.clickable(onClick = onOpen))
                 .padding(start = if (tv) 18.dp else 10.dp, end = if (tv) 10.dp else 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .then(
+                        if (tv) {
+                            Modifier
+                                .clip(RoundedCornerShape(ProomShape.sm))
+                                .then(
+                                    if (openFocused) {
+                                        Modifier.border(
+                                            2.dp,
+                                            ProomColor.accent,
+                                            RoundedCornerShape(ProomShape.sm),
+                                        )
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                // requester 要挂在 focusable 之前，否则绑不到节点
+                                .then(
+                                    if (firstActionFocus != null) {
+                                        Modifier.focusRequester(firstActionFocus)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .onFocusChanged { openFocused = it.isFocused }
+                                .clickable(onClick = onOpen)
+                        } else {
+                            Modifier
+                        }
+                    )
+                    // 焦点环画在格子外沿，别贴着封面和文字
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
             Box(
                 Modifier
                     .size(cover)
@@ -142,6 +181,7 @@ fun MiniPlayerBar(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            } // 左侧「打开播放页」格子结束：与 4 颗按钮平级
             // 四个按钮：上一首 / 播放暂停 / 下一首 / 关闭。
             // 之前只有「暂停 + 下一首」，想回上一首或收掉播放条都没有入口
             MiniBtn(PlayerIcons.Prev, "上一首") { MusicBox.prev() }

@@ -1,5 +1,7 @@
 package com.projectionroom.ui.component
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -12,12 +14,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,15 +46,20 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.projectionroom.ui.music.MusicBox
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
 import com.projectionroom.ui.theme.ProomSp
+import kotlinx.coroutines.isActive
 
 /**
  * 电视端**一级导航**：这 8 项是 tab，不是页面。
@@ -98,6 +108,13 @@ class TvRootNav(
     val onSearch: () -> Unit,
     val onNas: () -> Unit,
     val onMine: () -> Unit,
+    /**
+     * 顶栏「正在播放」唱片被点中时去哪（全屏播放页）。
+     *
+     * 有队列才画这颗唱片，所以不需要再传「播放状态」进来 ——
+     * 转不转由组件自己读 [MusicBox.playing] 决定，壳只管导航。
+     */
+    val onNowPlaying: (() -> Unit)? = null,
 ) {
     /**
      * 换掉「搜索」这一颗图标的行为。
@@ -107,7 +124,7 @@ class TvRootNav(
      * 一颗写着「搜索」的胶囊，同一个功能两个入口，还各搜各的。
      */
     fun withSearch(action: () -> Unit): TvRootNav =
-        TvRootNav(index, onSelect, action, onNas, onMine)
+        TvRootNav(index, onSelect, action, onNas, onMine, onNowPlaying)
 }
 
 /**
@@ -197,6 +214,16 @@ fun TvRootHeader(
                 trailing()
                 Spacer(Modifier.width(ProomSpace.lg))
             }
+            // 正在播放的唱片：离开播放页之后唯一的「歌还在响」的可见证据。
+            // 放在「我的」左边而不是塞进 tab 行 —— tab 是导航，这个是有状态的控件，
+            // 混在一排文字里会被当成第九个分类
+            if (nav.onNowPlaying != null && MusicBox.hasQueue) {
+                NowPlayingDisc(
+                    onClick = nav.onNowPlaying,
+                    downTarget = downTarget,
+                )
+                Spacer(Modifier.width(TvRootHeaderSpec.gap))
+            }
             HeaderIcon(HeaderIconKind.Mine, downTarget, nav.onMine)
             Spacer(Modifier.width(TvRootHeaderSpec.gap))
             HeaderIcon(HeaderIconKind.Server, downTarget, nav.onNas)
@@ -259,6 +286,112 @@ private fun RootTab(
 }
 
 private enum class HeaderIconKind { Mine, Server, Search }
+
+/**
+ * 顶栏的「正在播放」唱片。
+ *
+ * 用户离开播放页之后，这个 App 里就再没有任何地方能看出「歌还在放」——
+ * 迷你条只活在歌单页左栏，切到首页或电影就消失了。所以顶栏要有一个常驻入口，
+ * 而且它必须是**会动的**：静止的圆形图标和「我的」「搜索」没有区别，没人会去点它。
+ *
+ * 旋转用 [Animatable] 而不是 `rememberInfiniteTransition`：后者在 `playing`
+ * 变 false 时把角度归零，唱片会「倒转回去」一下再停住；Animatable 的动画
+ * 被取消时停在当前角度，暂停就是暂停。
+ */
+@Composable
+private fun NowPlayingDisc(
+    onClick: () -> Unit,
+    downTarget: FocusRequester? = null,
+) {
+    val track = MusicBox.current ?: return
+    var focused by remember { mutableStateOf(false) }
+    val playing = MusicBox.playing
+
+    val angle = remember { Animatable(0f) }
+    LaunchedEffect(playing) {
+        if (!playing) return@LaunchedEffect
+        while (isActive) {
+            angle.animateTo(
+                targetValue = angle.value + 360f,
+                // 9 秒一圈：再快就成了加载指示器，转盘该是慢的
+                animationSpec = tween(9000, easing = LinearEasing),
+            )
+        }
+    }
+
+    Box(
+        Modifier
+            .then(
+                if (downTarget != null) Modifier.focusProperties { down = downTarget } else Modifier
+            )
+            .size(TvLayout.minTouch)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(ProomColor.card)
+                // 焦点环画在旋转层外面：跟着唱片一起转会像碟片在打滑
+                .then(
+                    if (focused) Modifier.border(2.dp, ProomColor.accent, CircleShape) else Modifier
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            // 封面上留一圈黑胶边（26 在 34 里）：整块铺满的话，
+            // 旋转时只有画面在动，读不出「这是张唱片」
+            Box(
+                Modifier.fillMaxSize().graphicsLayer { rotationZ = angle.value },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (track.cover.isNotBlank()) {
+                    RemoteImage(
+                        model = track.cover,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(26.dp).clip(CircleShape),
+                    )
+                } else {
+                    Icon(
+                        imageVector = TabIcons.Music,
+                        contentDescription = null,
+                        tint = ProomColor.dim,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+            // 中心孔 + 一小段金色弧。
+            //
+            // 光靠封面转是不够的：专辑封面常常是纯色块或浅色图，圆形裁切后
+            // 转起来和静止的图标没有区别（实测两帧只差 1% 像素，肉眼看不见）。
+            // 这条 62° 的弧给「在转」提供了一个固定的参照物 —— 暂停时它停在原地，
+            // 用户一眼就能分辨这张唱片是转着的还是停着的。
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(ProomColor.bg.copy(alpha = 0.92f))
+            )
+            Canvas(Modifier.fillMaxSize()) {
+                rotate(angle.value) {
+                    val inset = 1.5.dp.toPx()
+                    val side = size.minDimension - inset * 2
+                    drawArc(
+                        color = ProomColor.accent,
+                        startAngle = 0f,
+                        sweepAngle = 62f,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = Size(side, side),
+                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                }
+            }
+        }
+    }
+}
 
 /**
  * 顶栏右侧的圆形图标位（我的 / 换 NAS / 搜索）。

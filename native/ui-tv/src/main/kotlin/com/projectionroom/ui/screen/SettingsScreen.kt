@@ -172,7 +172,7 @@ fun SettingsScreen(
                         title = "地址",
                         value = state.nasUrl.removePrefix("http://").removePrefix("https://"),
                         hint = "局域网内自动发现，也可以手动填",
-                        action = "更换 ›",
+                        action = "更换",
                         focusRequester = firstRow,
                         onClick = onChangeNas,
                     )
@@ -207,7 +207,7 @@ fun SettingsScreen(
                         title = "重新发现 NAS",
                         value = "",
                         hint = "换了网段、改了 IP 时用",
-                        action = "去发现 ›",
+                        action = "去发现",
                         onClick = onChangeNas,
                     )
                 }
@@ -222,7 +222,7 @@ fun SettingsScreen(
                         title = "显示配对二维码",
                         value = "",
                         hint = "让另一台设备扫码取走这份配置（手机给手机、手机给电视都行）",
-                        action = "显示 ›",
+                        action = "显示",
                         onClick = onShowPair,
                     )
                     Divider()
@@ -238,7 +238,7 @@ fun SettingsScreen(
                         title = "从文件导入",
                         value = "",
                         hint = "选一个 proom-config 配置文件",
-                        action = "选择文件 ›",
+                        action = "选择文件",
                         onClick = onImportFile,
                     )
                     Divider()
@@ -246,7 +246,7 @@ fun SettingsScreen(
                         title = "从剪贴板导入",
                         value = "",
                         hint = "对方把配置文本发在聊天里，复制后点这里",
-                        action = "粘贴 ›",
+                        action = "粘贴",
                         onClick = onImportClipboard,
                     )
                 }
@@ -276,7 +276,7 @@ fun SettingsScreen(
                         title = "添加订阅",
                         value = "",
                         hint = "填 TVBox 配置地址（http…/tvbox.json）或直播列表地址",
-                        action = "添加 ›",
+                        action = "添加",
                         enabled = !state.busy,
                         onClick = { addSubOpen = true },
                     )
@@ -329,7 +329,7 @@ fun SettingsScreen(
                         },
                         action = when {
                             up == null -> "检查"
-                            up.newer -> "去更新 ›"
+                            up.newer -> "去更新"
                             else -> "再查"
                         },
                         enabled = !state.busy,

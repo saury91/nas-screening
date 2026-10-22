@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,7 +21,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -48,6 +48,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,7 +64,8 @@ import com.projectionroom.ui.component.SkeletonBlock
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.component.TvPageHeader
 import com.projectionroom.ui.component.TvPageHeaderSpec
-import com.projectionroom.ui.component.TvPillButton
+import com.projectionroom.ui.component.TvNowPlayingBar
+import com.projectionroom.ui.component.TvPlayingBadge
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
@@ -101,8 +107,13 @@ fun PlaylistScreen(
      * 所以在顶栏右侧补一颗「播放中」胶囊，从「播放全部」往上一下就到。
      */
     onOpenPlayer: (() -> Unit)? = null,
-    /** 底部常驻层（迷你播放条），由壳决定放什么 */
-    footer: @Composable () -> Unit = {},
+    /**
+     * 底部常驻层（迷你播放条），由壳决定放什么。
+     *
+     * 参数是播放条里「打开播放页」那一格的 FocusRequester：
+     * 顶栏胶囊按 down 直接落到它上面，省掉「穿过整张曲目列表」。
+     */
+    footer: @Composable (FocusRequester) -> Unit = {},
 ) {
     // 先看进程内缓存：从播放页返回、或者刚看过的歌单再点一次，
     // 有数据就直接出内容 —— 不再先闪一屏骨架
@@ -127,6 +138,19 @@ fun PlaylistScreen(
     }
 
     val detail = d
+    // 左栏播放器的空态要能直接开播，所以得把当前歌单转成播放器的队列元素。
+    // 转成 MusicTrack 而不是直接用 NasApi.Track：播放器不该认识接口模型，
+    // 否则以后换歌单来源（本地歌、收藏夹）就要改 MusicBox
+    val idleTracks = remember(detail?.id, detail?.tracks) {
+        detail?.tracks.orEmpty().map {
+            com.projectionroom.ui.music.MusicTrack(
+                id = it.id,
+                title = it.title,
+                artist = it.artist,
+                cover = it.cover,
+            )
+        }
+    }
     // 歌单简介是上游 CMS 的原文，常带硬换行和上游自己截断留下的「...」。
     // 原样丢给 2 行的 Text，第二行会单独渲染出一行省略号，看着像排版坏了。
     val descText = remember(detail?.desc) {
@@ -147,6 +171,9 @@ fun PlaylistScreen(
     // 而不是完全没反应（后台看着什么都没选中，用户以为界面卡住）。
     // 内容在 LazyColumn 里，首帧前节点还没测量，requestFocus 会静默失败，所以要重试。
     val firstAction = remember { FocusRequester() }
+    // 播放条「打开播放页」那一格：顶栏胶囊按 down 直达这里，
+    // 不用再让遥控器一路穿过整张曲目列表
+    val footerAction = remember { FocusRequester() }
     LaunchedEffect(detail == null) {
         if (detail == null) return@LaunchedEffect
         // 必须等首帧：测量之前 requestFocus 也能成功，但那一格还没进 LazyColumn
@@ -176,6 +203,9 @@ fun PlaylistScreen(
         val padX = if (wide) TvLayout.insetX else 20.dp
         // 封面不超过屏高 1/4：176dp 在 540dp 高的画布上占 1/3，头部一压，一屏只剩两三首
         val headerCover = if (wide) 148.dp else 132.dp
+        // 宽屏左栏宽：46% 是「封面够大 + 曲目行还能放下编号/曲名/歌手」的交点。
+        // 下限 380dp 是播放条内联布局（56 封面 + 4×48 按钮）不把曲名挤成省略号的最小宽度
+        val leftW = (maxWidth * 0.46f).coerceIn(380.dp, 470.dp)
 
         Box(Modifier.fillMaxSize().background(ProomColor.bg)) {
             // ── 背景：整页一层封面色雾 ──
@@ -213,7 +243,90 @@ fun PlaylistScreen(
                     }
                 }
 
-                else -> {
+                else -> if (wide) {
+                    // ── 左右分栏：左「信息 + 操作 + 播放器」/ 右「曲目列表」──
+                    // 原来是单条 LazyColumn + 底部浮层播放条：D-pad 要穿过整张歌单
+                    // 才够得着播放条；而那条浮层横跨全宽，还会把「从顶栏往下」的
+                    // 焦点流整个截断（返回键按 down 直接掉进播放条，列表反而进不去）。
+                    // 拆栏后焦点天然分区：左右键换栏，上下键在各自栏内走，互不抢占。
+                    Row(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(
+                                top = topInset + TvPageHeaderSpec.height + 12.dp,
+                                start = padX,
+                                end = padX,
+                            )
+                    ) {
+                        Column(Modifier.width(leftW).fillMaxHeight()) {
+                            PlaylistHero(
+                                detail = detail,
+                                descText = descText,
+                                cover = headerCover,
+                                gap = 22.dp,
+                                descLines = 2,
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            )
+                            PlaylistActions(
+                                firstAction = firstAction,
+                                wide = true,
+                                enabled = detail.tracks.isNotEmpty(),
+                                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                                onPlayAll = { onPlayTrack(detail, 0, false) },
+                                onShuffle = {
+                                    onPlayTrack(detail, detail.tracks.indices.random(), true)
+                                },
+                            )
+                            Spacer(Modifier.weight(1f))
+                            // 左下：播放器常驻。它就在焦点链里 ——
+                            // 从「播放全部」按一下 down 就到，不必滚到列表末尾。
+                            //
+                            // 这里不用壳注入的 footer：宽屏要的空态占位需要「当前歌单」
+                            // 才能让播放键有东西可播，而 footer 的签名里只有一个 FocusRequester
+                            TvNowPlayingBar(
+                                onOpen = { onOpenPlayer?.invoke() },
+                                idleTracks = idleTracks,
+                                // 空态点「播放/下一首」= 第一首，点「上一首」= 最后一首
+                                onPlayIdle = { i -> onPlayTrack(detail, i, false) },
+                                firstActionFocus = footerAction,
+                            )
+                        }
+                        Spacer(Modifier.width(24.dp))
+                        Column(Modifier.weight(1f).fillMaxHeight()) {
+                            // 曲目标题从列表里提出来固定在栏顶：右栏滚的是「歌」，
+                            // 不是「页」，标题跟着一起走会让人失去位置感
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 12.dp, top = 4.dp, bottom = 8.dp),
+                                verticalAlignment = Alignment.Bottom,
+                            ) {
+                                Text(
+                                    "曲目",
+                                    style = ProomType.title,
+                                    color = ProomColor.text,
+                                )
+                                Text(
+                                    "  ${detail.tracks.size}",
+                                    style = ProomType.meta,
+                                    color = ProomColor.muted,
+                                    modifier = Modifier.padding(bottom = 3.dp),
+                                )
+                            }
+                            LazyColumn(state = state, modifier = Modifier.weight(1f)) {
+                                itemsIndexed(detail.tracks) { i, t ->
+                                    TrackRow(
+                                        index = i + 1,
+                                        track = t,
+                                        current = t.id == nowPlayingId,
+                                        playing = t.id == nowPlayingId && isPlaying,
+                                        big = true,
+                                    ) { onPlayTrack(detail, i, false) }
+                                }
+                            }
+                        }
+                    }
+                } else {
                     LazyColumn(
                         state = state,
                         modifier = Modifier.fillMaxSize(),
@@ -225,91 +338,32 @@ fun PlaylistScreen(
                         item { Spacer(Modifier.height(topInset + TvPageHeaderSpec.height + 12.dp)) }
 
                         item {
-                            Row(Modifier.padding(start = padX, end = padX, top = 4.dp, bottom = 18.dp)) {
-                                Box(
-                                    Modifier
-                                        .width(headerCover)
-                                        .aspectRatio(1f)
-                                        .clip(RoundedCornerShape(ProomShape.md))
-                                        .background(ProomColor.card),
-                                ) {
-                                    if (detail.cover.isNotBlank()) {
-                                        RemoteImage(
-                                            model = detail.cover,
-                                            contentDescription = null,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize(),
-                                        )
-                                    }
-                                }
-                                Spacer(Modifier.width(if (wide) 22.dp else 16.dp))
-                                Column(Modifier.weight(1f).padding(top = 2.dp)) {
-                                    Text(
-                                        "歌单",
-                                        style = ProomType.eyebrow,
-                                        color = ProomColor.accent,
-                                    )
-                                    Text(
-                                        detail.name,
-                                        style = ProomType.headline,
-                                        color = ProomColor.text,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(top = 4.dp),
-                                    )
-                                    Text(
-                                        "${detail.count} 首",
-                                        style = ProomType.meta,
-                                        color = ProomColor.muted,
-                                        modifier = Modifier.padding(top = 4.dp),
-                                    )
-                                    if (descText.isNotBlank()) {
-                                        Text(
-                                            descText,
-                                            style = ProomType.body,
-                                            color = ProomColor.dim,
-                                            // 横屏一行能放 60 个字，正文拉满整行会失去视线落点
-                                            maxLines = if (wide) 2 else 3,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier
-                                                .padding(top = 8.dp)
-                                                .widthIn(max = if (wide) 680.dp else Dp.Unspecified),
-                                        )
-                                    }
-                                }
-                            }
+                            PlaylistHero(
+                                detail = detail,
+                                descText = descText,
+                                cover = headerCover,
+                                gap = if (wide) 22.dp else 16.dp,
+                                descLines = if (wide) 2 else 3,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = padX, end = padX, top = 4.dp, bottom = 18.dp),
+                            )
                         }
 
                         // ── 播放全部 / 随机 ──
                         item {
-                            Row(
-                                Modifier.fillMaxWidth().padding(horizontal = padX, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                // 横屏别用 weight(1f)：1920px 上一根通栏金条有一米多长，
-                                // 中间只蹲一个播放三角，力距太长也看不出这是一组操作。
-                                // 宽屏改回按钮自身宽度、左对齐并放大到 52dp 高（10-foot 视距）。
-                                PlayAllButton(
-                                    text = "播放全部",
-                                    filled = true,
-                                    modifier = if (wide) Modifier.width(180.dp) else Modifier.weight(1f),
-                                    big = wide,
-                                    // 进页焦点落在这颗主操作上
-                                    focusRequester = firstAction,
-                                ) {
-                                    onPlayTrack(detail, 0, false)
-                                }
-                                PlayAllButton(
-                                    text = "随机",
-                                    filled = false,
-                                    modifier = Modifier.width(if (wide) 132.dp else 96.dp),
-                                    // 空歌单点「随机」会抛 NoSuchElement：先判一下
-                                    enabled = detail.tracks.isNotEmpty(),
-                                    big = wide,
-                                ) {
+                            PlaylistActions(
+                                firstAction = firstAction,
+                                wide = wide,
+                                enabled = detail.tracks.isNotEmpty(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = padX, vertical = 4.dp),
+                                onPlayAll = { onPlayTrack(detail, 0, false) },
+                                onShuffle = {
                                     onPlayTrack(detail, detail.tracks.indices.random(), true)
-                                }
-                            }
+                                },
+                            )
                         }
 
                         item {
@@ -394,13 +448,48 @@ fun PlaylistScreen(
             ) {
                 TvPageHeader(
                     onBack = onBack,
+                    // 顶栏按下要回到列表首项。默认的几何搜索会先撞上底部播放条
+                    // （它是横向占满的浮层，排在 LazyColumn 之外），把整张列表隔开。
+                    backModifier = Modifier.onKeyEvent { e ->
+                        if (
+                            detail != null &&
+                            e.type == KeyEventType.KeyDown &&
+                            e.key == Key.DirectionDown
+                        ) {
+                            runCatching { firstAction.requestFocus() }.isSuccess
+                        } else {
+                            false
+                        }
+                    },
                     title = detail?.name.orEmpty().ifBlank { null },
-                    titleAlpha = titleAlpha,
+                    // 分栏版左栏已经把歌单名完整摆在眼前，顶栏再浮一个同名标题
+                    // 只会在中间偏左多出一行字，和左栏标题视觉打架
+                    titleAlpha = if (wide) 0f else titleAlpha,
                     topInset = topInset,
                     // 和内容同一条左边距，否则返回箭头比封面少缩进 8dp
                     inset = padX,
                     trailing = if (onOpenPlayer != null && nowPlayingId.isNotBlank()) {
-                        { TvPillButton("播放中", onOpenPlayer) }
+                        {
+                            TvPlayingBadge(
+                                // 顶栏这颗原来只有"播放中"四个字，是静态的。
+                                // 竖条跟着播放动起来之后，右边的状态才真的能读出"在响"
+                                playing = isPlaying,
+                                onClick = onOpenPlayer,
+                                modifier = Modifier.onKeyEvent { e ->
+                                    // 胶囊在顶栏，正下方就是整张曲目列表：
+                                    // 按默认焦点顺序按一次 down 只落到第一首，
+                                    // 想碰播放条得穿过几十首歌。这里直接送下去。
+                                    if (
+                                        e.type == KeyEventType.KeyDown &&
+                                        e.key == Key.DirectionDown
+                                    ) {
+                                        runCatching { footerAction.requestFocus() }.isSuccess
+                                    } else {
+                                        false
+                                    }
+                                },
+                            )
+                        }
                     } else {
                         null
                     },
@@ -408,12 +497,116 @@ fun PlaylistScreen(
             }
 
             // ── 底部常驻层（迷你播放条）──
-            Box(Modifier.align(Alignment.BottomCenter)) { footer() }
+            // 只在窄屏铺在底部；宽屏时它已经在左栏底部，再铺一层就是重复的一条
+            if (!wide) {
+                Box(Modifier.align(Alignment.BottomCenter)) { footer(footerAction) }
+            }
         }
     }
 }
 
 /* ───────────────────── 小组件 ───────────────────── */
+
+/**
+ * 歌单信息块：封面 + 「歌单」/ 标题 / 曲目数 / 简介。
+ *
+ * 抽出来是因为两种版式都要用：竖屏跟着 LazyColumn 一起滚（旧行为），
+ * 宽屏固定在左栏顶部、不跟右栏滚动。
+ */
+@Composable
+private fun PlaylistHero(
+    detail: NasApi.PlaylistDetail,
+    descText: String,
+    cover: Dp,
+    gap: Dp,
+    descLines: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier) {
+        Box(
+            Modifier
+                .width(cover)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(ProomShape.md))
+                .background(ProomColor.card),
+        ) {
+            if (detail.cover.isNotBlank()) {
+                RemoteImage(
+                    model = detail.cover,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Spacer(Modifier.width(gap))
+        Column(Modifier.weight(1f).padding(top = 2.dp)) {
+            Text(
+                "歌单",
+                style = ProomType.eyebrow,
+                color = ProomColor.accent,
+            )
+            Text(
+                detail.name,
+                style = ProomType.headline,
+                color = ProomColor.text,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
+                "${detail.count} 首",
+                style = ProomType.meta,
+                color = ProomColor.muted,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            if (descText.isNotBlank()) {
+                Text(
+                    descText,
+                    style = ProomType.body,
+                    color = ProomColor.dim,
+                    maxLines = descLines,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+/** 「播放全部 / 随机」两颗按钮。宽屏是自然宽 + 48dp 高，窄屏通栏。 */
+@Composable
+private fun PlaylistActions(
+    firstAction: FocusRequester,
+    wide: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onPlayAll: () -> Unit,
+    onShuffle: () -> Unit,
+) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 横屏别用 weight(1f)：1920px 上一根通栏金条有一米多长，
+        // 中间只蹲一个播放三角，力距太长也看不出这是一组操作。
+        PlayAllButton(
+            text = "播放全部",
+            filled = true,
+            modifier = if (wide) Modifier.width(180.dp) else Modifier.weight(1f),
+            big = wide,
+            // 进页焦点落在这颗主操作上
+            focusRequester = firstAction,
+            onClick = onPlayAll,
+        )
+        PlayAllButton(
+            text = "随机",
+            filled = false,
+            modifier = Modifier.width(if (wide) 132.dp else 96.dp),
+            // 空歌单点「随机」会抛 NoSuchElement：先判一下
+            enabled = enabled,
+            big = wide,
+            onClick = onShuffle,
+        )
+    }
+}
 
 @Composable
 private fun PlayAllButton(

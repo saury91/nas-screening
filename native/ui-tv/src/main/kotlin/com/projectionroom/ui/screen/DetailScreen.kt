@@ -336,7 +336,9 @@ fun DetailScreen(
 private fun FavIconButton(active: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(40.dp)
+            // 48dp 是电视上的最小可点目标：40dp 的圆钮在 3 米外要瞄两下，
+            // 而它就紧挨着「立即播放」，瞄偏一点就点进了播放
+            .size(TvLayout.minTouch)
             .clip(CircleShape)
             .background(if (active) ProomColor.accentSoft else ProomColor.surface)
             .clickable(onClick = onClick),
@@ -350,7 +352,7 @@ private fun FavIconButton(active: Boolean, onClick: () -> Unit) {
             },
             contentDescription = if (active) "取消收藏" else "收藏",
             tint = if (active) ProomColor.accent else ProomColor.dim,
-            modifier = Modifier.size(19.dp),
+            modifier = Modifier.size(22.dp),
         )
     }
 }
