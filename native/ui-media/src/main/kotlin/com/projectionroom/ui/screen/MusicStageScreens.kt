@@ -95,6 +95,8 @@ import kotlinx.coroutines.flow.collect
 import com.projectionroom.ui.music.AudioFx
 import com.projectionroom.ui.music.MusicBox
 import com.projectionroom.ui.music.RepeatMode
+import com.projectionroom.ui.music.SleepTimer
+import com.projectionroom.ui.theme.LocalProomTv
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
@@ -122,6 +124,7 @@ internal fun MusicStageScreen(isTv: Boolean, wide: Boolean, onBack: () -> Unit) 
     val track = MusicBox.current ?: return
     var queueOpen by remember { mutableStateOf(false) }
     var fxOpen by remember { mutableStateOf(false) }
+    var sleepOpen by remember { mutableStateOf(false) }
     // 焦点是否已在本页。遥控器进来的第一下按键会选「第一个可聚焦元素」，
     // 顶部那两个图标按组合顺序排在主体前面，会把焦点抢走，
     // 所以页面还没焦点时先关掉它们的可聚焦性，让焦点直接落到播放键上。
@@ -136,11 +139,11 @@ internal fun MusicStageScreen(isTv: Boolean, wide: Boolean, onBack: () -> Unit) 
     LaunchedEffect(isTv) {
         if (!isTv) return@LaunchedEffect
         while (true) {
-            if (!pageFocused && !queueOpen && !fxOpen) runCatching { playFocus.requestFocus() }
+            if (!pageFocused && !queueOpen && !fxOpen && !sleepOpen) runCatching { playFocus.requestFocus() }
             delay(120)
         }
     }
-    BackHandler(enabled = !queueOpen && !fxOpen) { onBack() }
+    BackHandler(enabled = !queueOpen && !fxOpen && !sleepOpen) { onBack() }
 
     Box(
         Modifier
@@ -166,20 +169,21 @@ internal fun MusicStageScreen(isTv: Boolean, wide: Boolean, onBack: () -> Unit) 
                 Modifier
                     .fillMaxSize()
                     // 弹层打开时整块让位，否则遥控器一按上键焦点会跑到背后的收藏按钮上
-                    .focusProperties { canFocus = !queueOpen && !fxOpen }
+                    .focusProperties { canFocus = !queueOpen && !fxOpen && !sleepOpen }
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(horizontal = TvLayout.insetX),
             ) {
-                EditorialStage(track.title, track.artist, track.cover, onBack, { fxOpen = true }, { queueOpen = true }, pageFocused, playFocus)
+                EditorialStage(track.title, track.artist, track.cover, onBack, { fxOpen = true }, { queueOpen = true }, pageFocused, playFocus, { sleepOpen = true })
                 StageErrorLine()
             }
         } else {
             // 手机：整页交给竖向翻页（上下滑切歌），顶栏和传输条作为固定层压在上面
-            PhoneStage(wide, onBack, { fxOpen = true }, { queueOpen = true })
+            PhoneStage(wide, onBack, { fxOpen = true }, { queueOpen = true }, { sleepOpen = true })
         }
         if (queueOpen) StageQueueSheet(wide) { queueOpen = false }
         if (fxOpen) StageFxSheet { fxOpen = false }
+        if (sleepOpen) StageSleepSheet { sleepOpen = false }
     }
 }
 
@@ -228,6 +232,7 @@ private fun PhoneStage(
     onBack: () -> Unit,
     onFx: () -> Unit,
     onQueue: () -> Unit,
+    onSleep: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val track = MusicBox.current ?: return
@@ -242,7 +247,7 @@ private fun PhoneStage(
                 .navigationBarsPadding()
                 .padding(horizontal = 22.dp),
         ) {
-            VinylStage(true, track.title, track.artist, track.cover, onBack, onFx, onQueue)
+            VinylStage(true, track.title, track.artist, track.cover, onBack, onFx, onQueue, onSleep = onSleep)
             StageErrorLine()
         }
         return
@@ -316,7 +321,7 @@ private fun PhoneStage(
                 .navigationBarsPadding()
                 .padding(horizontal = 22.dp),
         ) {
-            StageHeader(isTv = false, onBack, onFx, "正在播放") { NowPlayingBadge() }
+            StageHeader(isTv = false, onBack, onFx, "正在播放", onSleep = onSleep) { NowPlayingBadge() }
             Spacer(Modifier.weight(1f))
             Column(
                 Modifier
@@ -438,8 +443,9 @@ private fun StageHeader(
     onBack: () -> Unit,
     onFx: () -> Unit,
     title: String,
-    // 电视：页面还没拿到焦点时先不让这两个图标可聚焦，避免它们抢走遥控器的第一下
+    // 电视：页面还没拿到焦点时先不让这几个图标可聚焦，避免它们抢走遥控器的第一下
     trailingFocusable: Boolean = true,
+    onSleep: () -> Unit = {},
     center: @Composable () -> Unit,
 ) {
     if (isTv) {
@@ -449,6 +455,7 @@ private fun StageHeader(
             inset = 0.dp,
             trailing = {
                 FavBtn(40.dp, trailingFocusable)
+                SleepBtn(40.dp, onSleep, trailingFocusable)
                 FxBtn(40.dp, onFx, trailingFocusable)
                 StopBtn(40.dp, trailingFocusable) { onBack(); MusicBox.stop() }
             },
@@ -465,9 +472,32 @@ private fun StageHeader(
         Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) { center() }
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
             FavBtn(40.dp)
+            SleepBtn(40.dp, onSleep)
             FxBtn(40.dp, onFx)
             StopBtn(40.dp) { onBack(); MusicBox.stop() }
         }
+    }
+}
+
+/** 睡眠定时：开着时图标变金，旁边挂剩余时间 */
+@Composable
+private fun SleepBtn(size: Dp, onClick: () -> Unit, focusable: Boolean = true) {
+    val on = SleepTimer.mode != SleepTimer.Mode.Off
+    Box(
+        Modifier
+            .size(size)
+            .focusProperties { canFocus = focusable }
+            .clip(CircleShape)
+            .tvFocusRing(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            PlayerIcons.Timer,
+            if (on) "睡眠定时 · ${SleepTimer.remainingText()}" else "睡眠定时",
+            tint = if (on) ProomColor.accent else Color.White.copy(alpha = 0.78f),
+            modifier = Modifier.size(21.dp),
+        )
     }
 }
 
@@ -541,8 +571,9 @@ private fun ColumnScope.VinylStage(
     onFx: () -> Unit,
     onQueue: () -> Unit,
     tv: Boolean = false,
+    onSleep: () -> Unit = {},
 ) {
-    StageHeader(isTv = false, onBack, onFx, "正在播放") {
+    StageHeader(isTv = false, onBack, onFx, "正在播放", onSleep = onSleep) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Canvas(Modifier.size(5.dp)) { drawCircle(ProomColor.accent) }
             Text("正在播放", color = ProomColor.muted, fontSize = ProomSp(11.sp), letterSpacing = 2.sp, modifier = Modifier.padding(start = 7.dp))
@@ -685,8 +716,9 @@ private fun ColumnScope.EditorialStage(
     onQueue: () -> Unit,
     pageFocused: Boolean = true,
     playFocus: FocusRequester? = null,
+    onSleep: () -> Unit = {},
 ) {
-    StageHeader(isTv = true, onBack, onFx, "正在播放", trailingFocusable = pageFocused) {
+    StageHeader(isTv = true, onBack, onFx, "正在播放", trailingFocusable = pageFocused, onSleep = onSleep) {
         Text("正在播放", color = ProomColor.muted, style = ProomType.eyebrow)
     }
 
@@ -1234,29 +1266,254 @@ private fun StageFxSheet(onClose: () -> Unit) {
                 "均衡器预设，按设备频段自动适配",
                 style = ProomType.label,
                 color = ProomColor.muted,
+                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+            )
+            // 两列：8 档单列排下来会顶出屏幕
+            AudioFx.Preset.entries.chunked(2).forEachIndexed { rowIdx, pair ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    pair.forEachIndexed { colIdx, p ->
+                        val on = AudioFx.current == p && AudioFx.manual == null
+                        Row(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(ProomShape.sm))
+                                .background(if (on) ProomColor.accentSoft else Color.Transparent)
+                                .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
+                                .then(
+                                    if (rowIdx == 0 && colIdx == 0) Modifier.focusRequester(firstFocus)
+                                    else Modifier
+                                )
+                                .clickable { AudioFx.select(p) }
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                p.label,
+                                color = if (on) ProomColor.accent else ProomColor.text,
+                                fontSize = ProomSp(13.sp),
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (on) Text("✓", color = ProomColor.accent, fontSize = ProomSp(12.sp))
+                        }
+                    }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+
+            // 响度增强：手机外放/小耳机听对白时最有用
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(ProomShape.sm))
+                    .clickable { AudioFx.setLoudnessOn(!AudioFx.loudness) }
+                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("响度增强", color = ProomColor.text, fontSize = ProomSp(13.sp), modifier = Modifier.weight(1f))
+                Text(
+                    if (AudioFx.loudness) "开" else "关",
+                    color = if (AudioFx.loudness) ProomColor.accent else ProomColor.muted,
+                    fontSize = ProomSp(12.sp),
+                )
+            }
+
+            // 手动均衡只在手机给：遥控器调 8 根柱子是折磨
+            if (!LocalProomTv.current) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("手动调节", color = ProomColor.text, fontSize = ProomSp(13.sp))
+                    Spacer(Modifier.weight(1f))
+                    if (AudioFx.manual != null) {
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { AudioFx.resetManual() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Text("重置", color = ProomColor.muted, fontSize = ProomSp(11.sp))
+                        }
+                    }
+                }
+                if (AudioFx.bandCount <= 0) {
+                    Text(
+                        "开始播放后可调节",
+                        color = ProomColor.muted,
+                        fontSize = ProomSp(11.sp),
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                } else {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        for (i in 0 until AudioFx.bandCount) {
+                            EqBar(i, AudioFx.bandFreqs.getOrElse(i) { 0 })
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 一根柱子：中间是 0dB，往上推是增益、往下是衰减。
+ * 按下就跳到位再拖动，和播放页进度条同一套手感。
+ */
+@Composable
+private fun EqBar(index: Int, freq: Int) {
+    val v = AudioFx.valueAt(index)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .width(20.dp)
+                .height(82.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+                .pointerInput(index) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val h = size.height.toFloat().coerceAtLeast(1f)
+                        fun at(y: Float) = (1f - y / h * 2f).coerceIn(-1f, 1f)
+                        AudioFx.setBand(index, at(down.position.y))
+                        down.consume()
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!c.pressed) break
+                            AudioFx.setBand(index, at(c.position.y))
+                            c.consume()
+                        }
+                    }
+                },
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val cy = size.height / 2f
+                drawLine(
+                    Color.White.copy(alpha = 0.18f),
+                    Offset(0f, cy), Offset(size.width, cy), 1.dp.toPx(),
+                )
+                val hh = (size.height / 2f) * abs(v)
+                if (hh > 0.5f) {
+                    drawRoundRect(
+                        color = ProomColor.accent.copy(alpha = if (v >= 0f) 0.9f else 0.5f),
+                        topLeft = Offset(2.dp.toPx(), if (v >= 0f) cy - hh else cy),
+                        size = androidx.compose.ui.geometry.Size(
+                            (size.width - 4.dp.toPx()).coerceAtLeast(1f),
+                            hh,
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+                    )
+                }
+            }
+        }
+        Text(
+            if (freq >= 1000) "${freq / 1000}k" else "$freq",
+            color = ProomColor.muted,
+            fontSize = ProomSp(8.5.sp),
+            modifier = Modifier.padding(top = 3.dp),
+        )
+    }
+}
+
+/**
+ * 睡眠定时。
+ *
+ * 放在全屏播放页而不是设置里：这是「正在听、准备睡」这个瞬间的动作，
+ * 走开去翻设置页会把刚酝酿的睡意弄没。
+ * 「听完这首」比「N 分钟后」更常用 —— 睡着前最后一首通常想听完整。
+ */
+@Composable
+private fun StageSleepSheet(onClose: () -> Unit) {
+    val firstFocus = remember { FocusRequester() }
+    BackHandler { onClose() }
+    LaunchedEffect(Unit) {
+        delay(120)
+        runCatching { firstFocus.requestFocus() }
+    }
+    val options = listOf(15, 30, 45, 60)
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .focusProperties { canFocus = false }
+                .clickable(onClick = onClose),
+        )
+        Column(
+            Modifier
+                .align(Alignment.Center)
+                .width(260.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(ProomColor.bgSoft)
+                .clickable(enabled = false) {}
+                .padding(18.dp),
+        ) {
+            Text("睡眠定时", style = ProomType.title, color = ProomColor.text, fontSize = ProomSp(16.sp))
+            Text(
+                if (SleepTimer.mode == SleepTimer.Mode.Off) "最后 30 秒渐弱，到点暂停"
+                else "${SleepTimer.remainingText()} 后停止",
+                style = ProomType.label,
+                color = ProomColor.muted,
                 modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
             )
-            AudioFx.Preset.entries.forEachIndexed { i, p ->
-                val on = AudioFx.current == p
+            options.forEachIndexed { idx, m ->
+                val on = SleepTimer.mode == SleepTimer.Mode.Timer && SleepTimer.minutes == m
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(ProomShape.sm))
                         .background(if (on) ProomColor.accentSoft else Color.Transparent)
                         .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
-                        .then(if (i == 0) Modifier.focusRequester(firstFocus) else Modifier)
-                        .clickable { AudioFx.select(p) }
+                        .then(if (idx == 0) Modifier.focusRequester(firstFocus) else Modifier)
+                        .clickable { SleepTimer.start(m); onClose() }
                         .padding(horizontal = 10.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        p.label,
+                        "$m 分钟",
                         color = if (on) ProomColor.accent else ProomColor.text,
                         fontSize = ProomSp(14.sp),
                         modifier = Modifier.weight(1f),
                     )
                     if (on) Text("✓", color = ProomColor.accent, fontSize = ProomSp(14.sp))
                 }
+            }
+            val trackEnd = SleepTimer.mode == SleepTimer.Mode.TrackEnd
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(ProomShape.sm))
+                    .background(if (trackEnd) ProomColor.accentSoft else Color.Transparent)
+                    .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
+                    .clickable { SleepTimer.startTrackEnd(); onClose() }
+                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "听完这首",
+                    color = if (trackEnd) ProomColor.accent else ProomColor.text,
+                    fontSize = ProomSp(14.sp),
+                    modifier = Modifier.weight(1f),
+                )
+                if (trackEnd) Text("✓", color = ProomColor.accent, fontSize = ProomSp(14.sp))
+            }
+            if (SleepTimer.mode != SleepTimer.Mode.Off) {
+                Text(
+                    "关闭定时",
+                    color = ProomColor.danger,
+                    fontSize = ProomSp(13.sp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(ProomShape.sm))
+                        .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
+                        .clickable { SleepTimer.cancel(); onClose() }
+                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                )
             }
         }
     }

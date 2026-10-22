@@ -19,6 +19,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +31,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +59,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import com.projectionroom.ui.music.AudioFx
+import com.projectionroom.ui.music.SleepTimer
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -369,10 +374,13 @@ fun PlayerScreen(
     var panel by remember { mutableStateOf(Panel.None) }
     // 右侧设置抽屉：线路 + 选集都放这儿，播放器上不再挂一排按钮
     var sidePanel by remember { mutableStateOf(false) }
+    var sleepOpen by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var speed by remember { mutableFloatStateOf(1f) }
     var hint by remember { mutableStateOf<String?>(null) }
+    /** 长按临时 2 倍速：按住加速、松手还原（直播禁用） */
+    var boost by remember { mutableStateOf(false) }
 
     // ── 遥控器 ──
     // 电视上的一切都靠焦点：控制层出现时把焦点送到主按钮，
@@ -401,6 +409,8 @@ fun PlayerScreen(
     // 设备发现、SOAP 控制在 shared 的 DlnaClient 里；这里只管界面状态
     val dlna = remember { com.projectionroom.shared.cast.DlnaClient() }
     val castScope = rememberCoroutineScope()
+    // 睡眠定时的淡出单独一条，页面销毁时一起取消
+    val fadeScope = rememberCoroutineScope()
     var castOpen by remember { mutableStateOf(false) }
     var castScanning by remember { mutableStateOf(false) }
     var castDevices by remember { mutableStateOf<List<com.projectionroom.shared.cast.CastDevice>>(emptyList()) }
@@ -739,6 +749,9 @@ fun PlayerScreen(
             exo.setMediaSource(source, if (saved > 5_000L) saved else 0L)
             exo.prepare()
             exo.playWhenReady = true
+            // 视频也吃同一套音效：对白听不清时开「人声」比调大音量有效
+            AudioFx.init(context)
+            AudioFx.attach(exo.audioSessionId)
         }
         onDispose {
             // 直播不记进度、不写观看记录：看完一个台不该出现在「继续观看」里
@@ -787,7 +800,11 @@ fun PlayerScreen(
 
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_READY) readyOnce = true
+                if (state == Player.STATE_READY) {
+                    readyOnce = true
+                    // 会话 id 在 prepare 之后才真正建出来，这里补绑一次才保证音效生效
+                    AudioFx.attach(exo.audioSessionId)
+                }
                 // 直播流结束多半是源断了，自动跳下一个台会让人莫名其妙
                 if (state == Player.STATE_ENDED && !live) {
                     val eps = curEps
@@ -863,10 +880,30 @@ fun PlayerScreen(
     // 无操作自动收起（锁定时只留锁图标）
     // key 必须带上 sidePanel：否则打开抽屉时计时器还在跑，几秒后照样把整个控制层（含抽屉）一起收掉。
     // 电视上再带上 focusTick：遥控器每动一下都重新计时，否则用户正在选集时整块会消失。
-    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen, focusTick) {
-        if (controlsVisible && !locked && panel == Panel.None && !sidePanel && !castOpen) {
+    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen, focusTick, sleepOpen) {
+        if (controlsVisible && !locked && panel == Panel.None && !sidePanel && !castOpen && !sleepOpen) {
             delay(if (isTv) 8_000 else 5_000)
             controlsVisible = false
+        }
+    }
+
+    // 睡眠定时到点：本页在播就淡出后暂停。owner 用 exo，离开播放页时解绑，
+    // 之后由 SleepTimer 自己回落到「音乐在响就淡出暂停」。
+    DisposableEffect(exo) {
+        // 最后 30 秒的淡出由定时器统一下发系数，这里只负责把它落到播放器上
+        SleepTimer.setFadeSink(exo) { k -> runCatching { exo.volume = k } }
+        SleepTimer.bind(exo) {
+            fadeScope.launch {
+                runCatching { exo.pause() }
+                runCatching { exo.volume = 1f }
+                hint = "睡眠定时：已暂停"
+            }
+        }
+        onDispose {
+            SleepTimer.unbind(exo)
+            SleepTimer.setFadeSink(exo, null)
+            // 页面走了就别再让定时器压着这一路的音量
+            runCatching { exo.volume = 1f }
         }
     }
 
@@ -920,6 +957,12 @@ fun PlayerScreen(
         }
     }
 
+    // 长按 2x：boost 只在按住期间为 true，松手立刻回到面板选的倍速。
+    // 依赖 speed —— 面板改倍速时这一条会重算，两者不会互相覆盖。
+    LaunchedEffect(boost, speed) {
+        runCatching { exo.setPlaybackSpeed(if (boost) 2f else speed) }
+    }
+
     // 面板开着时，返回键先关面板 —— 否则遥控器上按返回直接把整页播掉了，
     // 用户只是想退出「播放设置」
     BackHandler(enabled = !locked) {
@@ -948,8 +991,8 @@ fun PlayerScreen(
                 // 按键在这里统一分发 —— 左右快进退、OK/上下退出，别让 OK 落成暂停
                 if (seekMode) {
                     return@onPreviewKeyEvent when (e.key) {
-                        Key.DirectionLeft -> { seekBy(-10_000); true }
-                        Key.DirectionRight -> { seekBy(10_000); true }
+                        Key.DirectionLeft -> { seekBy(-PlaybackPrefs.doubleTapMs); true }
+                        Key.DirectionRight -> { seekBy(PlaybackPrefs.doubleTapMs); true }
                         Key.DirectionCenter, Key.Enter,
                         Key.DirectionUp, Key.DirectionDown,
                         -> { seekMode = false; true }
@@ -965,9 +1008,9 @@ fun PlayerScreen(
                         castOpen -> { castOpen = false; true }
                         else -> false
                     }
-                    // 收起状态：左右 = 快退/快进 10 秒；上下/OK = 唤出控制层
-                    Key.DirectionLeft -> if (controlsVisible) false else { seekBy(-10_000); true }
-                    Key.DirectionRight -> if (controlsVisible) false else { seekBy(10_000); true }
+                    // 收起状态：左右 = 快退/快进（步长同双击设置）；上下/OK = 唤出控制层
+                    Key.DirectionLeft -> if (controlsVisible) false else { seekBy(-PlaybackPrefs.doubleTapMs); true }
+                    Key.DirectionRight -> if (controlsVisible) false else { seekBy(PlaybackPrefs.doubleTapMs); true }
                     Key.DirectionUp, Key.DirectionDown ->
                         if (controlsVisible) false else { controlsVisible = true; true }
                     Key.DirectionCenter, Key.Enter ->
@@ -1058,24 +1101,45 @@ fun PlayerScreen(
                         if (controlsVisible) return@pointerInput
                         detectTapGestures(
                             onTap = { controlsVisible = true },
+                            // 长按 2 倍速。手指一挪动超过 touchSlop，detectTapGestures
+                            // 就自己取消长按 —— 上下滑调音量/亮度不会误触发。
+                            onLongPress = {
+                                if (live) return@detectTapGestures
+                                boost = true
+                                hint = "2x 快放中"
+                            },
                             onDoubleTap = { off ->
                                 // 直播没有「快进 10 秒」这回事
                                 if (live) return@detectTapGestures
                                 val half = size.width / 2f
-                                val step = 10_000L
+                                // 步长走设置项；在回调里读，改完设置不用重建手势
+                                val step = PlaybackPrefs.doubleTapMs
                                 if (off.x < half) {
                                     exo.seekTo((exo.currentPosition - step).coerceAtLeast(0L))
-                                    hint = "« 10 秒"
+                                    hint = "« ${PlaybackPrefs.label(step)}"
                                 } else {
                                     val max = exo.duration.coerceAtLeast(0L)
                                     exo.seekTo((exo.currentPosition + step).let {
                                         if (max > 0) it.coerceAtMost(max) else it
                                     })
-                                    hint = "10 秒 »"
+                                    hint = "${PlaybackPrefs.label(step)} »"
                                 }
                                 position = exo.currentPosition
                             },
                         )
+                    }
+                    // 长按的「松手还原」：detectTapGestures 的 onLongPress 只告诉我们
+                    // 已经按住了，没有释放回调，所以单开一路等抬起。
+                    .pointerInput(controlsVisible) {
+                        if (controlsVisible) return@pointerInput
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            waitForUpOrCancellation()
+                            if (boost) {
+                                boost = false
+                                hint = null
+                            }
+                        }
                     }
             )
         }
@@ -1314,6 +1378,7 @@ fun PlayerScreen(
                         },
                         onSpeed = { panel = Panel.Speed },
                         onSettings = { sidePanel = true },
+                        onSleep = { sleepOpen = true },
                     )
                 }
 
@@ -1379,6 +1444,15 @@ fun PlayerScreen(
                             panel = Panel.None
                         },
                         onDismiss = { panel = Panel.None },
+                    )
+                }
+
+                // 睡眠定时（和音乐页同一套：全局一个计时器，到点淡出暂停）
+                if (sleepOpen) {
+                    PlayerSleepSheet(
+                        modifier = Modifier.align(Alignment.Center),
+                        live = live,
+                        onClose = { sleepOpen = false },
                     )
                 }
             }
@@ -1604,6 +1678,7 @@ private fun PlayerBottomBar(
     onTogglePlay: () -> Unit,
     onSpeed: () -> Unit,
     onSettings: () -> Unit,
+    onSleep: () -> Unit = {},
 ) {
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
@@ -1811,6 +1886,14 @@ private fun PlayerBottomBar(
                     // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
                     if (!live) {
                         CircleTextChip(if (speed == 1f) "1×" else "${speed}×", onSpeed)
+                        // 定时开着时图标变金：不然「有没有设过」完全看不出来
+                        val sleepOn = SleepTimer.mode != SleepTimer.Mode.Off
+                        CircleIcon(
+                            PlayerIcons.Timer,
+                            if (sleepOn) "睡眠定时 · ${SleepTimer.remainingText()}" else "睡眠定时",
+                            onSleep,
+                            tint = if (sleepOn) ProomColor.accent else null,
+                        )
                     }
                     CircleIcon(
                         PlayerIcons.More,
@@ -2256,6 +2339,7 @@ private fun CircleIcon(
     label: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    tint: Color? = null,
 ) {
     // 电视上 40dp 的圆钮在 3 米外只有指甲盖大：抬到 56dp，图标同步放大
     val tv = LocalProomTv.current
@@ -2273,7 +2357,7 @@ private fun CircleIcon(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = Color.White.copy(alpha = if (enabled) 0.92f else 0.28f),
+            tint = tint ?: Color.White.copy(alpha = if (enabled) 0.92f else 0.28f),
             modifier = Modifier.size(if (tv) 28.dp else 24.dp),
         )
     }
@@ -2378,6 +2462,66 @@ private fun PlayerPanel(
                         ) { onLine(lines.indexOf(label)) }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 睡眠定时面板。
+ *
+ * 影视这一侧「听完这集」比「N 分钟后」更贴合场景：多数人是看完这集就睡，
+ * 而不是恰好 30 分钟后睡。直播没有「这集结束」，所以那一项不给。
+ */
+@Composable
+private fun PlayerSleepSheet(
+    modifier: Modifier = Modifier,
+    live: Boolean,
+    onClose: () -> Unit,
+) {
+    val options = listOf(15, 30, 45, 60)
+    Box(
+        modifier
+            .fillMaxSize()
+            .focusProperties { canFocus = false }
+            .clickable(onClick = onClose),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier
+                .width(220.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.Black.copy(alpha = 0.9f))
+                .clickable(enabled = false) {}
+                .padding(vertical = 10.dp),
+        ) {
+            Text(
+                "睡眠定时",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = ProomSp(11.sp),
+                modifier = Modifier.padding(start = 14.dp, bottom = 2.dp),
+            )
+            Text(
+                if (SleepTimer.mode == SleepTimer.Mode.Off) "最后 30 秒渐弱，到点暂停"
+                else "${SleepTimer.remainingText()} 后停止",
+                color = Color.White.copy(alpha = 0.32f),
+                fontSize = ProomSp(10.5.sp),
+                modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
+            )
+            options.forEach { m ->
+                PanelRow(
+                    label = "$m 分钟",
+                    selected = SleepTimer.mode == SleepTimer.Mode.Timer && SleepTimer.minutes == m,
+                ) { SleepTimer.start(m); onClose() }
+            }
+            if (!live) {
+                PanelRow(
+                    label = "听完这集",
+                    selected = SleepTimer.mode == SleepTimer.Mode.TrackEnd,
+                ) { SleepTimer.startTrackEnd(); onClose() }
+            }
+            if (SleepTimer.mode != SleepTimer.Mode.Off) {
+                PanelRow(label = "关闭定时", selected = false) { SleepTimer.cancel(); onClose() }
             }
         }
     }
