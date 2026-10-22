@@ -55,9 +55,11 @@ jobs:
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "tag=v$name" >> "$GITHUB_OUTPUT"
-          # versionCode 必须严格递增，用流水号 + 偏移最省事
-          echo "code=$((100 + RUN_NUMBER))" >> "$GITHUB_OUTPUT"
-          echo "版本 $name / code $((100 + RUN_NUMBER))"
+          # versionCode 必须严格递增，用流水号 + 偏移最省事。
+          # 偏移取 1000：设备上现装的包是手打时注入的 104，若 CI 首次跑出
+          # 101，覆盖安装会被系统当成降级直接拒装（INSTALL_FAILED_VERSION_DOWNGRADE）
+          echo "code=$((1000 + RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          echo "版本 $name / code $((1000 + RUN_NUMBER))"
 
       - name: JDK 17
         uses: actions/setup-java@v4
