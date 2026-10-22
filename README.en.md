@@ -2,9 +2,7 @@
 
 [中文](README.md) · **English**
 
-Turn the NAS in your closet into a private cinema: films, TV channels and music in one interface, running on your own hardware — and the same frontend installs on your TV and phone.
-
-Search a title → open it → press play. The home screen is content only; sources and downloads live in the admin console.
+Films, live TV and music from your NAS in one interface. The same frontend runs in a browser, on a phone and on a TV.
 
 - Version **0.13.0** (Android TV / Phone / Web, one codebase)
 - **No bundled content sources**: no film sources, channel lists or music APIs ship with it — you get an empty shell and bring your own config
@@ -25,21 +23,18 @@ Search a title → open it → press play. The home screen is content only; sour
   - [Independence](#independence)
 - [The three clients](#the-three-clients)
 - [Screenshots](#screenshots)
-- [Architecture](#architecture)
+- [How it runs](#how-it-runs)
 - [Getting started](#getting-started)
   - [First launch: the empty shell is expected](#first-launch-the-empty-shell-is-expected)
   - [Bring your own sources](#bring-your-own-sources)
 - [Environment variables](#environment-variables)
 - [Project layout](#project-layout)
 - [Development and tests](#development-and-tests)
-- [House rules](#house-rules)
 - [Copyright and license](#copyright-and-license)
 
 ---
 
 ## Features
-
-In one sentence: **content goes straight to the sources; the NAS only handles config, sync, casting bridges and upgrades.**
 
 ### Films
 
@@ -57,8 +52,8 @@ In one sentence: **content goes straight to the sources; the NAS only handles co
 | Capability | What it does |
 |---|---|
 | Import and grouping | M3U / TXT import, auto-grouped, same-name channels deduped |
-| Health check | One tap to probe; dead channels are dimmed but kept, never silently dropped |
-| Daily refresh | Fetch every candidate source → merge → probe each channel → keep what plays |
+| Health check | One tap to probe; dead channels are dimmed and kept, never removed automatically |
+| Daily refresh | Fetches candidate sources daily, merges and health-checks them, keeps what plays |
 | Maintenance | Grouped view, manual refresh, batch health check (Web) |
 
 ### Music
@@ -70,7 +65,7 @@ In one sentence: **content goes straight to the sources; the NAS only handles co
 | Playback | Queue, repeat modes, scrolling lyrics, waveform progress, remembered playback mode |
 | DSP | Web gets a 10-band EQ with 8 presets; the TV's presets adapt to the device's own frequency bands |
 
-All three clients have music, each with a player shaped by its input: the phone spins a record with line-by-line lyrics and keeps a mini player under every tab; the TV puts the record left and lyrics right, with the D-pad changing tracks and seeking.
+All three clients play music: the phone shows a spinning record with line-by-line lyrics and a mini player under every tab; the TV shows the record left and lyrics right, with the D-pad changing tracks and seeking.
 
 ### Player
 
@@ -83,17 +78,17 @@ All three clients have music, each with a player shaped by its input: the phone 
 
 ### Casting
 
-The phone hands a title to the TV and turns into the remote. The TV is a **real receiver** — it starts playback in place and reports true progress, rather than mirroring the phone's screen.
+The phone hands a title to the TV and turns into the remote. The TV is a receiver: it plays in place and reports real progress rather than mirroring the phone's screen.
 
-Three transports, whichever connects first wins, and unsupported keys grey out automatically:
+Three transports, chosen automatically; keys the active transport doesn't support are greyed out:
 
 | Transport | How it connects | What it can do |
 |---|---|---|
-| NAS relay | Both ends connect to the NAS, via the `/api/cast/*` directory | Everything: speed, volume, progress read-back; works across subnets |
-| LAN peer-to-peer | Homegrown `PROOM-CAST/1`: UDP discovery + JSON over HTTP | Everything, without the NAS — works with the NAS off |
-| DLNA | The TV acts as a standard MediaRenderer (AVTransport) | Play / pause / seek / stop only; speed and volume grey out, and the current position can't be read |
+| NAS relay | Both ends connect to the same NAS | Everything: speed, volume, progress read-back; works across subnets |
+| LAN peer-to-peer | Auto-discovered on the same LAN | Everything, without the NAS — works with the NAS off |
+| DLNA | The TV acts as a standard DLNA renderer | Play / pause / seek / stop only; no speed, volume or progress read-back |
 
-When SSDP is blocked by the router there are two fallbacks: a pairing QR code (the TV shows a code and address, the phone scans once) and manual entry.
+If LAN discovery is blocked by the router, pair via the QR code and PIN shown on the TV, or enter the address manually.
 
 ### Admin and backup
 
@@ -119,8 +114,6 @@ When SSDP is blocked by the router there are two fallbacks: a pairing QR code (t
 
 ## The three clients
 
-These are not one layout at three zoom levels. The input device and viewing distance decide the interaction rules.
-
 | | Desktop web | Phone app | TV app |
 |---|---|---|---|
 | Package | — (open in a browser) | `com.projectionroom.app` | `com.projectionroom.tv` |
@@ -138,13 +131,13 @@ Open `http://<nas>:8899` — always the latest build, nothing to install.
 
 - **Everything**: films, live TV, music, search, playback, casting
 - **Everything else too**: source import and ordering, live feed maintenance, download tasks, config backup
-- Wide screens get a proper content width instead of stretching; layouts cover 375 to 3840
+- Adaptive content width; layouts cover 375 to 3840
 
 ![Home](docs/screenshot-home.png)
 
 ### Phone app
 
-The pocket client. There is **no settings section**: anything that changes server state happens on the desktop. The phone reads config and plays.
+The pocket client. It offers no configuration management: anything that changes server state happens in the desktop console.
 
 - Four bottom tabs: Films / Live / Music / Mine
 - "Mine" merges favorites and history into one screen
@@ -159,12 +152,12 @@ The pocket client. There is **no settings section**: anything that changes serve
 
 ### TV app
 
-A 10-foot UI where the remote is the only input. The rules deliberately differ from the phone:
+Remote only, 10-foot UI:
 
-- **BACK is the only way back.** There is no focusable back button on the page — it would sit in the path of any cursor moving up-left, and it would steal initial focus.
-- **Initial focus always lands on the first actionable item** (first card, primary button), never on navigation chrome.
-- **No lock, no PiP, no casting.** The TV is a receiver, so it can only cast to itself; the platform has no PiP; a lock screen guards against finger taps and a TV has none.
-- **The ambient backdrop never uses `Modifier.blur`.** That is a no-op below API 31, and most TV boxes run 28–30, so every screen goes through `SoftBackdrop` (decode small, upscale on the GPU) and looks the same everywhere.
+- BACK is the only way back; pages carry no focusable back button
+- Initial focus lands on the first actionable item (first card or primary button)
+- No lock screen, picture-in-picture or casting entry
+- Ambient backdrops look the same on Android 8.0 and newer
 
 <p>
 <img src="docs/screenshot-app-tv.png" width="380" alt="TV home">
@@ -175,15 +168,13 @@ A 10-foot UI where the remote is the only input. The rules deliberately differ f
 
 ## Screenshots
 
-Ordered by feature, matching the section above.
-
 ### Film screenshots
 
 One search asks every source at once; the same title is merged and all its streams listed.
 
 ![Search](docs/screenshot-search.png)
 
-The detail screen shows synopsis, director, cast, rating and the quality of each stream — 35 of them is still workable.
+The detail screen shows synopsis, director, cast, rating and the quality of every stream.
 
 ![Detail](docs/screenshot-detail.png)
 
@@ -199,7 +190,7 @@ Imported feeds are grouped automatically, health-checked in one tap, and refresh
 
 ![Live](docs/screenshot-live.png)
 
-The phone and the TV eat the same channel table: three wide columns on the phone (409 channels · 40 groups), focus-friendly tiles on the TV.
+The phone and the TV share one channel table: three wide columns on the phone (409 channels · 40 groups), focus-friendly tiles on the TV.
 
 <p>
 <img src="docs/screenshot-app-phone-live.png" width="240" alt="Phone live TV">
@@ -226,7 +217,7 @@ All three share one library with the same "recommended + browsable" structure, a
 <img src="docs/screenshot-app-phone-music-player.png" width="240" alt="Phone music player">
 </p>
 
-**TV**: the 10-foot cut — record on the left, lyrics on the right, D-pad up/down to change track and left/right to seek; the EQ presets adapt to the device's own frequency bands instead of making you guess which slider to raise.
+**TV**: the 10-foot cut — record on the left, lyrics on the right, D-pad up/down to change track and left/right to seek; EQ presets adapt to the device's own frequency bands.
 
 <p>
 <img src="docs/screenshot-app-tv-music.png" width="380" alt="TV music">
@@ -245,7 +236,7 @@ Tap to pause, double-tap for fullscreen; buffering shows a blurred poster, dots 
 
 ![Cast targets](docs/screenshot-app-phone-cast.png)
 
-When SSDP is blocked, the TV shows a pairing QR code and address, and the phone scans once:
+If LAN discovery is blocked, the TV shows a pairing QR code and PIN; the phone scans once:
 
 ![TV pairing](docs/screenshot-app-tv-pair.png)
 
@@ -257,44 +248,21 @@ The phone as a remote: seek, ±10s, speed, volume, episodes and stream switching
 
 ### Backup screen
 
-Sources, live feeds, music and UI preferences pack into one JSON; imports show a preview, and a bad import can be rolled back.
+Sources, live feeds, music and UI preferences pack into one JSON; imports show a preview and can be rolled back.
 
 ![Config backup](docs/screenshot-backup.png)
 
 ---
 
-## Architecture
+## How it runs
 
-In one sentence: **the NAS ships configuration — it is not a runtime dependency.**
+The NAS distributes configuration and updates; searching and playback go straight from the client to the source.
 
-```
-┌──────────────── NAS (may be off) ───────────────┐
-│ /api/config/bundle   sources + live channel list │
-│ /api/app/latest      APK version                 │
-│ /static/**           web build (for desktop)     │
-└──────────────────────────────────────────────────┘
-        │ pulled in the background at launch, stored locally
-        ▼
-┌──────────── Phone / TV app (standalone runtime) ─────┐
-│ bundled frontend + local HTTP server (127.0.0.1)     │
-│ local aggregation: talks to sources directly          │
-│   (/__fetch handled natively, bypassing CORS)         │
-│ local cache: IndexedDB for page data and index        │
-│ local media proxy: adds Referer, rewrites m3u8        │
-└──────────────────────────────────────────────────────┘
-```
+- **NAS off**: the app still searches, shows details and plays, with the config last synced
+- **NAS on**: config refreshes in the background, and the UI is not redrawn when nothing changed
+- **Desktop**: `http://<nas>:8899` is always the latest build, nothing to install
 
-So:
-
-- **NAS off** — the app still searches, shows details and plays; config is whatever was last synced
-- **NAS on** — config refreshes silently in the background and **nothing jumps**, because unchanged content is never redrawn
-- **Desktop** — `http://<nas>:8899` is always the newest build with nothing to install
-
-The server keeps exactly four kinds of endpoints: **sync** (favorites, history, library index), **casting** (bridge), **updates** (version check and APK download) and **config** (bundle and live channel list). Home, library, search, detail, stream resolution, playback and artwork all go straight from the client to the source; the NAS is never a fallback.
-
-The client type is decided in one place (`static/app/core/platform.js`, via `ProomTV/` or `ProomPhone/` in the user agent); admin entry points carry `data-admin-only` and are removed at launch on mobile.
-
-Design history: [`docs/standalone-arch.md`](docs/standalone-arch.md).
+See [`docs/standalone-arch.md`](docs/standalone-arch.md) for the full design.
 
 ---
 
@@ -309,8 +277,6 @@ python3 app.py
 ```
 
 Open `http://127.0.0.1:8899`. The database is created on first run; home recommendations take a dozen seconds to warm up.
-
-> No pip, no Node, no bundling required.
 
 ### Docker
 
@@ -339,10 +305,9 @@ docker run -d --name projection-room --restart unless-stopped --network host \
 
 ### First launch: the empty shell is expected
 
-**Nothing is bundled.** No film sources, no channels, no music API, no magnet site.
-You get an empty shell and a "no sources yet" screen — that is by design, not a broken install.
+Nothing is bundled: no film sources, no channels, no music API. A "no sources yet" screen on first launch is expected.
 
-Until you configure sources it will not contact any third party. Order of operations:
+Configure in this order:
 
 1. **Do not expose port 8899 to the internet.** There is no authentication by default; it is a LAN service. Put a real auth layer in front if you need remote access.
 2. **Import sources** — Console → Sources. Paste a TVBox config URL to import in bulk (see "Bring your own sources" below).
@@ -378,9 +343,9 @@ cd native
 adb install -r <apk>
 ```
 
-JDK 17 (Gradle 8.10.2 refuses JDK 27 outright), compileSdk 35.
+JDK 17, compileSdk 35.
 
-**Signing and upgrades.** APKs are signed with a fixed key (`native/keystore/proom.jks`, password `proom-release`). Android refuses to install an update signed with a different key, so the key ships with the repository and every build lands on the same upgrade chain. It guarantees upgrade continuity, not security — the key is public. For something stronger, set `PROOM_KEYSTORE` and `PROOM_KEYSTORE_PASS` in CI or locally and the build will use yours instead.
+**Signing and upgrades.** APKs are signed with a fixed key (`native/keystore/proom.jks`, password `proom-release`). Overwriting an installed app requires the same signature, so the key ships with the repository and any build upgrades any other. The key is public and adds no security; set `PROOM_KEYSTORE` and `PROOM_KEYSTORE_PASS` to sign with your own.
 
 On the TV, allow "install unknown apps" the first time. Some TV ROMs show an unverified-app warning; accept it and continue.
 
@@ -397,15 +362,14 @@ On the TV, allow "install unknown apps" the first time. Some TV ROMs show an unv
 | `CMS_SEEDS` | empty | Source "resource catalogs", comma separated, used by auto-discovery |
 | `MUSIC_ONLINE` | `0` | Set to `1` to enable online song search (third-party music API) |
 | `MUSICBOX_API` | empty | Online playlist/stream endpoint; empty disables online music |
-| `MUSICBOX_REFERER` | empty | Referer that endpoint requires |
+| `MUSICBOX_REFERER` | empty | Referer required by the playlist endpoint |
 | `MAGNET_SITE` | empty | Magnet search site; empty disables magnet search |
-| `MUSIC_DIR` | empty | Local music folder (can also be set in the UI) |
+| `MUSIC_DIR` | empty | Local music folder; can also be set in the UI |
 | `QBT_URL` | `http://127.0.0.1:8080` | qBittorrent address |
-| `QBT_USER` / `QBT_PASS` | empty | Environment only; no credentials are baked into the code |
+| `QBT_USER` / `QBT_PASS` | empty | Environment only; no default credentials |
 | `NO_AUTH` | `1` | Set to `0` to enable multi-account mode (per-person history and favorites) |
 
-The entries marked "empty disables" are content entry points: leave them empty and no
-request is ever made to any third-party service.
+Entries marked "empty disables" are content entry points: leave them empty and no request is made to any third-party service.
 
 > This is a **LAN** setup: no password, no HTTPS. Never expose 8899 directly to the internet; if you need remote access, put it behind a reverse proxy with real authentication.
 
@@ -414,10 +378,10 @@ request is ever made to any third-party service.
 ## Project layout
 
 ```
-app.py                  Entry point: create DB, warm caches, UDP discovery
+app.py                  Entry point
 server/
-  api.py                Routes and auth guard (parsing and serialization only)
-  db.py                 SQLite schema and migrations (profile-aware)
+  api.py                Routes and auth
+  db.py                 SQLite schema and migrations
   services/
     auth.py             Accounts (idle when NO_AUTH=1)
     config_io.py        Config bundle export/import (schema version + migrations)
@@ -465,20 +429,6 @@ cd .. && ./tools/publish-apk.sh tv && ./tools/publish-apk.sh phone
 `publish-apk.sh` writes the APK plus `{versionCode, versionName, size, sha256, notes}` into
 `data/apps/`; the app verifies size and sha256 before handing anything to the installer, so a
 bad build never gets installed.
-
----
-
-## House rules
-
-Read these before changing code:
-
-1. **Cache first.** Page data renders from IndexedDB immediately and refreshes in the background; identical content is never redrawn.
-2. **Never say "offline".** An unreachable NAS is normal — use the cache quietly. There is no offline mode in the UI.
-3. **Large media goes straight to the NAS.** Audio and big files skip the local proxy (they'd stall on full buffering); small segments and anything needing a Referer go through it.
-4. **The local proxy does three things only:** static assets, `/api/*` reverse proxy, and `/__fetch` (CORS bypass).
-5. **Judge video by state, not events.** Show it only when `readyState>=2 && videoWidth>0`, otherwise live streams and source switches end up with sound but no picture.
-6. **The server holds no runtime state.** It ships config, the channel list, the APK version and the web build. Nothing else.
-7. **Every client follows its own input rules.** TV is remote-only, phone is touch-only. Don't port the desktop metaphor "for consistency".
 
 ---
 
