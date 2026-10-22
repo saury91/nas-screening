@@ -159,6 +159,14 @@ object PlayerIcons {
         moveTo(15.4f, 8f); lineTo(19.6f, 8f)
     }
 
+    /** 睡眠定时：一只挂钟 */
+    val Timer: ImageVector = outline("timer") {
+        circle(12f, 12.4f, 7.4f)
+        moveTo(12f, 8.2f); lineTo(12f, 12.7f); lineTo(15.4f, 14.7f)
+        // 顶上的小提手，和「计时」区分开
+        moveTo(10f, 2.6f); lineTo(14f, 2.6f)
+    }
+
     /** 播放队列：三行文字 + 右边一个小音符 */
     val Queue: ImageVector = outline("queue") {
         moveTo(4.4f, 6.6f); lineTo(14.6f, 6.6f)

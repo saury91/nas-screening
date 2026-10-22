@@ -1,6 +1,7 @@
 package com.projectionroom.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,7 +31,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -294,6 +298,13 @@ fun SettingsScreen(
                 }
             }
 
+            item { GroupTitle("播放") }
+            item {
+                Card {
+                    PlaybackSetting()
+                }
+            }
+
             item { GroupTitle("存储") }
             item {
                 Card {
@@ -482,6 +493,56 @@ private fun Card(content: @Composable () -> Unit) {
 @Composable
 private fun Divider() {
     Box(Modifier.fillMaxWidth().height(1.dp).background(ProomColor.line))
+}
+
+/**
+ * 播放偏好。直接读写 [PlaybackPrefs]，不经过壳层回传 ——
+ * 它是个全局单例，播放页读的是同一个值，改完立刻就生效。
+ */
+@Composable
+private fun PlaybackSetting() {
+    val ctx = LocalContext.current
+    Column(Modifier.padding(horizontal = ProomSpace.md, vertical = 12.dp)) {
+        Text("双击快进", style = ProomType.cardTitle, color = ProomColor.text)
+        Text(
+            "播放页双击左右半屏快退/快进的秒数，长按仍是 2 倍速",
+            style = ProomType.label,
+            color = ProomColor.muted,
+            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PlaybackPrefs.steps.forEach { ms ->
+                SeekChip(
+                    label = PlaybackPrefs.label(ms),
+                    on = PlaybackPrefs.doubleTapMs == ms,
+                    onClick = { PlaybackPrefs.setDoubleTapMs(ctx, ms) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.SeekChip(label: String, on: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(ProomShape.sm)
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .weight(1f)
+            .onFocusChanged { focused = it.isFocused }
+            .clip(shape)
+            .background(if (on) ProomColor.accentSoft else ProomColor.bgSoft)
+            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = ProomType.label,
+            color = if (on) ProomColor.accent else ProomColor.text,
+        )
+    }
 }
 
 /**
