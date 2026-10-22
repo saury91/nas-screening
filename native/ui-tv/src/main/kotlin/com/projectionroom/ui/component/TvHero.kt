@@ -49,9 +49,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.util.metaLine
+import com.projectionroom.ui.util.plainText
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
 import com.projectionroom.ui.component.RemoteImage
 
 /**
@@ -136,7 +139,7 @@ fun TvHero(
         // ── 内容 ──
         // topInset：顶部导航是浮在 Hero 上的（不单独吃一条高度），内容要避开它
         Row(
-            Modifier.fillMaxSize().padding(start = ProomSpace.xxl, end = ProomSpace.xxl, top = topInset),
+            Modifier.fillMaxSize().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = topInset),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(
@@ -169,20 +172,20 @@ fun TvHero(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = listOf(vod.score, vod.year, vod.area, vod.type)
-                        .filter { it.isNotBlank() }.joinToString("   "),
+                    text = metaLine(vod.score, vod.year, vod.area, vod.type, sep = "   "),
                     style = ProomType.meta,
                     color = ProomColor.dim,
                 )
-                if (vod.desc.isNotBlank()) {
+                if (vod.desc.plainText().isNotBlank()) {
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        vod.desc,
+                        vod.desc.plainText(),
                         style = ProomType.body,
                         color = ProomColor.dim,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth(0.72f),
+                        // 正文一行 30 个汉字就到阅读极限了，再宽眼睛要来回扫
+                        modifier = Modifier.fillMaxWidth(0.66f),
                     )
                 }
                 Spacer(Modifier.height(20.dp))
@@ -234,17 +237,18 @@ fun TvHero(
         if (items.size > 1) {
             Row(
                 Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 18.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    .align(Alignment.BottomStart)
+                    .padding(start = TvLayout.insetX, bottom = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 repeat(items.size.coerceAtMost(8)) { i ->
                     val on = i == cur
                     Box(
                         Modifier
-                            .height(3.dp)
-                            .width(if (on) 26.dp else 14.dp)
-                            .clip(RoundedCornerShape(2.dp))
+                            // 3dp 的细条在三米外看不见，等于没有页码
+                            .height(5.dp)
+                            .width(if (on) 32.dp else 16.dp)
+                            .clip(RoundedCornerShape(3.dp))
                             .background(if (on) ProomColor.accent else Color.White.copy(alpha = 0.24f))
                     )
                 }
@@ -253,8 +257,13 @@ fun TvHero(
     }
 }
 
-private fun heroTitleSize(height: Dp): TextUnit = (height.value * 0.085f).coerceIn(28f, 64f).sp
-private fun heroPosterWidth(height: Dp): Dp = (height.value * 0.30f).dp
+private fun heroTitleSize(height: Dp): TextUnit = (height.value * 0.095f).coerceIn(30f, 64f).sp
+
+/**
+ * 竖版海报宽度。0.30 倍高时海报只有 110~125dp 宽，和 400dp 高的 Hero 不成比例；
+ * 0.40 倍高能到 145~165dp，既撑得住右侧画面，也不至于把文字挤成窄条。
+ */
+private fun heroPosterWidth(height: Dp): Dp = (height.value * 0.40f).dp
 
 @Composable
 private fun HeroButton(
@@ -277,10 +286,19 @@ private fun HeroButton(
                 } else Modifier
             )
             .clip(shape)
-            .background(if (primary) ProomColor.accent else Color.White.copy(alpha = 0.12f))
+            // 主按钮聚焦时整块翻白：金底 + 2dp 白边在电视上看不出区别，
+            // 首页这一颗是遥控器最先落到的位置，必须一眼确认
+            .background(
+                when {
+                    primary && focused -> Color.White
+                    primary -> ProomColor.accent
+                    focused -> Color.White.copy(alpha = 0.24f)
+                    else -> Color.White.copy(alpha = 0.12f)
+                }
+            )
             .then(
-                if (focused) {
-                    Modifier.border(2.dp, if (primary) Color.White else ProomColor.accent, shape)
+                if (focused && !primary) {
+                    Modifier.border(2.dp, ProomColor.accent, shape)
                 } else Modifier
             )
             .onFocusChanged {

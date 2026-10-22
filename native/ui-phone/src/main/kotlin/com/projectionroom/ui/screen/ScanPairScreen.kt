@@ -60,6 +60,9 @@ import com.google.zxing.DecodeHintType
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.projectionroom.ui.component.CameraGlyph
+import com.projectionroom.ui.component.PermissionCard
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
@@ -78,11 +81,20 @@ import java.util.concurrent.Executors
  */
 @Composable
 fun ScanPairScreen(
-    /** 扫到的原始文本（proom://pair?...），由壳解析 */
+    /** 扫到的原始文本（proom://pair?... / proom://cast?...），由壳解析 */
     onScanned: (String) -> Unit,
     /** 手动输入：地址（ip:port）+ 配对码 */
     onManual: (String, String) -> Unit,
     onBack: () -> Unit,
+    /**
+     * 投屏码模式：扫的是「电视在哪儿」而不是「配置包」。
+     *
+     * 同一台相机、同一套解码，只是少了「四位配对码」那个字段 ——
+     * 投屏只认地址，多问一个数字纯属拦路。
+     */
+    castMode: Boolean = false,
+    /** 投屏码手动输入：只有地址 */
+    onManualCast: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var hasCamera by remember {
@@ -91,10 +103,36 @@ fun ScanPairScreen(
                 PackageManager.PERMISSION_GRANTED
         )
     }
+    // 系统权限框是 permissioncontroller 画的，样式改不了；能改的是「什么时候弹、弹之前说什么」。
+    // 所以进页面不再直接拉系统框，先给一张自己的说明卡，用户点了「允许」再走系统框
+    var refused by rememberSaveable { mutableStateOf(false) }
     val askCamera = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { hasCamera = it }
-    LaunchedEffect(Unit) { if (!hasCamera) askCamera.launch(Manifest.permission.CAMERA) }
+    ) { ok ->
+        hasCamera = ok
+        // 回调为 false 有两种：用户点了拒绝，或系统已不再弹框（永久拒绝）
+        refused = !ok
+    }
+    // 系统不再弹框之后（永久拒绝 / 连拒两次），只能去设置里打开
+    val activity = remember(ctx) { ctx.findActivity() }
+    val blocked = !hasCamera && refused &&
+        activity?.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) == false
+
+    // 从系统设置返回时必须重读权限：用户可能刚把相机打开，
+    // 不重读的话卡片会一直挂在屏幕上
+    val lifecycle = LocalLifecycleOwner.current
+    DisposableEffect(lifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                hasCamera = ContextCompat.checkSelfPermission(
+                    ctx,
+                    Manifest.permission.CAMERA,
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+        lifecycle.lifecycle.addObserver(obs)
+        onDispose { lifecycle.lifecycle.removeObserver(obs) }
+    }
 
     var manual by remember { mutableStateOf(false) }
     var handled by remember { mutableStateOf(false) }
@@ -113,12 +151,14 @@ fun ScanPairScreen(
         }
 
         // 取景框：四个角就够了，整圈描边会挡住二维码
-        Box(
-            Modifier
-                .align(Alignment.Center)
-                .size(240.dp)
-                .border(2.dp, ProomColor.accent.copy(alpha = 0.9f), RoundedCornerShape(16.dp))
-        )
+        if (hasCamera) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .size(240.dp)
+                    .border(2.dp, ProomColor.accent.copy(alpha = 0.9f), RoundedCornerShape(16.dp))
+            )
+        }
 
         Row(
             Modifier.fillMaxWidth().padding(start = 8.dp, end = 20.dp, top = 44.dp),
@@ -131,41 +171,79 @@ fun ScanPairScreen(
                 Icon(TabIcons.Back, "返回", tint = Color.White, modifier = Modifier.size(22.dp))
             }
             Text(
-                "扫电视上的二维码",
+                if (castMode) "扫电视上的投屏码" else "扫电视上的二维码",
                 color = Color.White,
                 fontSize = 17.sp,
                 modifier = Modifier.padding(start = 6.dp),
             )
         }
 
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 40.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                if (hasCamera) "把电视屏幕上的二维码放进取景框" else "没有相机权限，用手动输入",
-                style = ProomType.meta,
-                color = Color.White.copy(alpha = 0.8f),
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(ProomSpace.md))
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.White.copy(alpha = 0.14f))
-                    .clickable { manual = true }
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
+        // 没授权时不画取景提示和底部小按钮：说明卡自己带着「允许」和「手动输入」，
+        // 两套入口并排只会让人不知道该点哪个
+        if (hasCamera) {
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("手动输入", style = ProomType.cardTitle, color = Color.White)
+                Text(
+                    if (castMode) "电视：设置 → 显示配对二维码" else "把电视屏幕上的二维码放进取景框",
+                    style = ProomType.meta,
+                    color = Color.White.copy(alpha = 0.8f),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(ProomSpace.md))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .clickable { manual = true }
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        if (castMode) "手动输入地址" else "手动输入",
+                        style = ProomType.cardTitle,
+                        color = Color.White,
+                    )
+                }
             }
+        } else {
+            PermissionCard(
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
+                title = "扫码要用相机",
+                message = "只在你扫电视上的二维码时打开相机，画面不会保存，也不会上传。",
+                icon = { tint -> CameraGlyph(tint, 26.dp) },
+                primary = if (blocked) "去系统设置打开" else "允许使用相机",
+                note = if (blocked) "相机权限已被拒绝，系统不会再弹窗了" else null,
+                onPrimary = {
+                    if (blocked) {
+                        runCatching {
+                            ctx.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.fromParts("package", ctx.packageName, null),
+                                )
+                            )
+                        }
+                    } else {
+                        askCamera.launch(Manifest.permission.CAMERA)
+                    }
+                },
+                secondary = if (castMode) "手动输入地址" else "手动输入",
+                onSecondary = { manual = true },
+            )
         }
 
         if (manual) {
             ManualDialog(
+                castMode = castMode,
                 onDismiss = { manual = false },
                 onConfirm = { addr, code ->
                     manual = false
                     onManual(addr, code)
+                },
+                onConfirmCast = { addr ->
+                    manual = false
+                    onManualCast(addr)
                 },
             )
         }
@@ -279,7 +357,12 @@ private class QrAnalyzer(private val onFound: (String) -> Unit) : ImageAnalysis.
 /* ───────────────────────── 手动输入 ───────────────────────── */
 
 @Composable
-private fun ManualDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
+private fun ManualDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String, String) -> Unit,
+    castMode: Boolean = false,
+    onConfirmCast: (String) -> Unit = {},
+) {
     var addr by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
@@ -290,17 +373,24 @@ private fun ManualDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> U
                 .background(ProomColor.bgSoft)
                 .padding(18.dp),
         ) {
-            Text("手动输入", style = ProomType.title, color = ProomColor.text)
             Text(
-                "电视屏幕上显示着地址和四位配对码",
+                if (castMode) "手动输入电视地址" else "手动输入",
+                style = ProomType.title,
+                color = ProomColor.text,
+            )
+            Text(
+                if (castMode) "电视屏幕上的那行地址，端口不写就是 49521"
+                else "电视屏幕上显示着地址和四位配对码",
                 style = ProomType.label,
                 color = ProomColor.muted,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             )
-            Field("192.168.1.20:8898", addr) { addr = it }
-            Spacer(Modifier.height(10.dp))
-            Field("配对码 4 位数字", code) {
-                if (it.length <= 4 && it.all { c -> c.isDigit() }) code = it
+            Field(if (castMode) "192.168.1.20:49521" else "192.168.1.20:8898", addr) { addr = it }
+            if (!castMode) {
+                Spacer(Modifier.height(10.dp))
+                Field("配对码 4 位数字", code) {
+                    if (it.length <= 4 && it.all { c -> c.isDigit() }) code = it
+                }
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = 14.dp),
@@ -308,11 +398,10 @@ private fun ManualDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> U
             ) {
                 ActionText("取消", ProomColor.muted, onDismiss)
                 Spacer(Modifier.width(8.dp))
-                ActionText(
-                    "连接",
-                    if (addr.isBlank() || code.length < 4) ProomColor.muted else ProomColor.accent,
-                ) {
-                    if (addr.isNotBlank() && code.length == 4) onConfirm(addr.trim(), code)
+                val ready = if (castMode) addr.isNotBlank() else addr.isNotBlank() && code.length == 4
+                ActionText("连接", if (ready) ProomColor.accent else ProomColor.muted) {
+                    if (!ready) return@ActionText
+                    if (castMode) onConfirmCast(addr.trim()) else onConfirm(addr.trim(), code)
                 }
             }
         }
@@ -358,4 +447,14 @@ private fun ActionText(text: String, color: Color, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     )
+}
+
+/** 从 Compose 的 Context 里挖出 Activity：判断「系统还会不会弹权限框」需要它 */
+private fun Context.findActivity(): android.app.Activity? {
+    var c: Context = this
+    while (c is android.content.ContextWrapper) {
+        if (c is android.app.Activity) return c
+        c = c.baseContext
+    }
+    return null
 }

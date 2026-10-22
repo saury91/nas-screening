@@ -1,6 +1,7 @@
 package com.projectionroom.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +31,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,6 +46,7 @@ import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.ProomSp
 
 /** 检查更新的结果 */
 data class AppUpdate(
@@ -119,6 +126,15 @@ fun SettingsScreen(
 ) {
     var addSubOpen by remember { mutableStateOf(false) }
     var subText by remember { mutableStateOf("") }
+    // 进页即焦点：设置页全是整行条目，进来没焦点的话第一次按方向键只是滚动，
+    // 看起来像「遥控器没反应」。首帧节点还没挂上，重试几次。
+    val firstRow = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        repeat(10) {
+            if (runCatching { firstRow.requestFocus() }.isSuccess) return@LaunchedEffect
+            delay(40)
+        }
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -157,6 +173,7 @@ fun SettingsScreen(
                         value = state.nasUrl.removePrefix("http://").removePrefix("https://"),
                         hint = "局域网内自动发现，也可以手动填",
                         action = "更换 ›",
+                        focusRequester = firstRow,
                         onClick = onChangeNas,
                     )
                     Divider()
@@ -356,7 +373,7 @@ fun SettingsScreen(
                         onValueChange = { subText = it },
                         singleLine = true,
                         textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 14.sp, color = ProomColor.text,
+                            fontSize = ProomSp(14.sp), color = ProomColor.text,
                         ),
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(ProomColor.accent),
                         modifier = Modifier
@@ -478,13 +495,24 @@ private fun SettingRow(
     hint: String = "",
     action: String? = null,
     enabled: Boolean = true,
+    focusRequester: FocusRequester? = null,
     onClick: (() -> Unit)? = null,
 ) {
+    val shape = RoundedCornerShape(ProomShape.sm)
+    var focused by remember { mutableStateOf(false) }
+    val actionable = onClick != null && enabled
     Row(
         Modifier
             .fillMaxWidth()
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            // 整行宽度接近满屏，不能像小控件那样放大（会顶出安全区），
+            // 电视上的替代方案是「底色提亮 + 强调色描边」
+            .clip(shape)
+            .background(if (focused) ProomColor.bgSoft else Color.Transparent)
+            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
             .then(
-                if (onClick != null && enabled) Modifier.clickable(onClick = onClick) else Modifier
+                if (actionable) Modifier.clickable(onClick = onClick!!) else Modifier
             )
             .padding(horizontal = ProomSpace.md, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

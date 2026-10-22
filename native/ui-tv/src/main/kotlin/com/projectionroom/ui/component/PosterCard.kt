@@ -16,11 +16,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.projectionroom.ui.theme.ProomColor
@@ -45,13 +50,22 @@ fun PosterCard(
     focused: Boolean = false,
     onClick: () -> Unit = {},
 ) {
-    // 电视要有明显的聚焦反馈；手机靠触摸态，不放大
-    val target = if (focused) {
+    // 电视要有明显的聚焦反馈；手机靠触摸态，不放大。
+    // 焦点默认自己跟：以前靠调用方传 focused，结果片库网格、搜索结果都忘了传，
+    // 遥控器移到海报上整格没有任何变化，只能靠标题文字猜选中的是哪张。
+    var selfFocused by remember { mutableStateOf(false) }
+    val effective = focused || selfFocused
+    val target = if (effective) {
         ProomMotion.focusScaleTv
     } else 1f
     val scale by animateFloatAsState(target, tween(ProomMotion.short, easing = ProomMotion.ease))
 
-    Column(modifier = modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .onFocusChanged { selfFocused = it.isFocused }
+            .clickable(onClick = onClick)
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -60,8 +74,9 @@ fun PosterCard(
                 .clip(RoundedCornerShape(ProomShape.md))
                 .background(ProomColor.card)
                 .then(
-                    if (focused && true) {
-                        Modifier.border(2.dp, ProomColor.accent, RoundedCornerShape(ProomShape.md))
+                    if (effective) {
+                        // 3dp：1080p 上一根 2dp 的线压在深色海报边上几乎看不出来
+                        Modifier.border(3.dp, ProomColor.accent, RoundedCornerShape(ProomShape.md))
                     } else Modifier
                 ),
         ) {
@@ -120,11 +135,13 @@ fun PosterCard(
             }
         }
         // 标题固定占两行高度：Web 版是靠 min-height:2.8em 做的，
-        // Compose 里 minLines 在部分版本上不稳定，直接用定高 Box 更保险
+        // Compose 里 minLines 在部分版本上不稳定，直接用定高 Box 更保险。
+        // 高度从字阶的行高算：电视上 cardTitle 是 17sp/23dp，写死 40dp 会把第二行裁掉。
+        val titleLine = with(LocalDensity.current) { ProomType.cardTitle.lineHeight.toDp() }
         Box(
             modifier = Modifier
                 .padding(top = ProomSpace.sm)
-                .height(40.dp),
+                .height(titleLine * 2),
         ) {
             Text(
                 text = title,

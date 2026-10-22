@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +48,8 @@ import androidx.compose.ui.unit.sp
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
+import com.projectionroom.ui.theme.ProomSp
 
 /**
  * 电视端**一级导航**：这 8 项是 tab，不是页面。
@@ -62,8 +66,8 @@ import com.projectionroom.ui.theme.ProomType
 object TvRootHeaderSpec {
     /** 顶栏高度（不含状态栏） */
     val height = 64.dp
-    /** 内容左边缘：和 [TvPageHeaderSpec.inset] 同一个数 */
-    val inset = 40.dp
+    /** 内容左边缘：和 [TvPageHeaderSpec.inset] 同一个数（48dp = 960dp 画布的 5% 安全区） */
+    val inset = TvLayout.insetX
     /** logo 区固定宽度，保证 8 个 tab 在三个页面上横向位置完全一致 */
     val logoWidth = 150.dp
     /** tab 胶囊之间的间距 */
@@ -126,6 +130,17 @@ fun TvRootHeader(
     trailing: (@Composable RowScope.() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // 页面自己没给初始焦点时，兜底把焦点放到「当前选中的 tab」上。
+    // 不给的话，切到直播/纪录片的瞬间焦点会掉到整棵树第一个可聚焦的节点 ——
+    // 也就是「首页」那颗 tab：光标停在首页、再按一下 OK 又跳回首页。
+    val fallbackLanding = remember { FocusRequester() }
+    val target = landing ?: fallbackLanding
+    if (landing == null) {
+        LaunchedEffect(nav.index) {
+            withFrameNanos { }
+            runCatching { fallbackLanding.requestFocus() }
+        }
+    }
     Box(
         modifier
             .fillMaxWidth()
@@ -150,16 +165,21 @@ fun TvRootHeader(
                 Text(
                     "放映室",
                     color = ProomColor.text,
-                    fontSize = 17.sp,
+                    // 17sp 的 logo 在 3 米外只剩个白块；20sp 才对得上 15sp 的 tab 文字
+                    fontSize = ProomSp(20.sp),
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 2.sp,
                 )
                 Text(
                     "PRIVATE SCREENING",
                     color = ProomColor.muted,
-                    fontSize = 9.sp,
-                    lineHeight = 11.sp,
-                    letterSpacing = 1.8.sp,
+                    // 9sp 是手机上的装饰字，电视上彻底看不见
+                    fontSize = ProomSp(10.5.sp),
+                    lineHeight = 13.sp,
+                    // 1.6 的字距会让这一行在 150dp 内折成两行，反而更乱
+                    letterSpacing = 1.0.sp,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(TvRootHeaderSpec.gap)) {
@@ -167,7 +187,7 @@ fun TvRootHeader(
                     RootTab(
                         label = label,
                         selected = i == nav.index,
-                        focusRequester = if (i == nav.index) landing else null,
+                        focusRequester = if (i == nav.index) target else null,
                         downTarget = downTarget,
                     ) { nav.onSelect(label, slug) }
                 }
@@ -216,12 +236,15 @@ private fun RootTab(
             )
             .then(
                 if (focused) {
-                    Modifier.border(2.dp, if (selected) Color.White else ProomColor.accent, shape)
+                    // 焦点落在已选中的 tab 上时，2dp 白边压在金底上几乎看不出来，
+                    // 3dp 才够在 3 米外认出「遥控器在这一颗」
+                    Modifier.border(3.dp, if (selected) Color.White else ProomColor.accent, shape)
                 } else Modifier
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 7.dp),
+            // 11/7 撑出来的胶囊只有 32dp 高，遥控器聚焦时几乎看不出选中范围
+            .padding(horizontal = 14.dp, vertical = 9.dp),
     ) {
         Text(
             text = label,
@@ -256,7 +279,8 @@ private fun HeaderIcon(
             .then(
                 if (downTarget != null) Modifier.focusProperties { down = downTarget } else Modifier
             )
-            .size(40.dp)
+            // 40dp 的圆形图标位小于 10-foot UI 的可点目标下限
+            .size(TvLayout.minTouch)
             .clip(RoundedCornerShape(50))
             .background(if (focused) ProomColor.surface2 else Color.Transparent)
             .then(if (focused) Modifier.border(2.dp, ProomColor.accent, RoundedCornerShape(50)) else Modifier)
@@ -264,7 +288,7 @@ private fun HeaderIcon(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(17.dp)) {
+        Canvas(Modifier.size(19.dp)) {
             when (kind) {
                 HeaderIconKind.Mine -> {
                     val w = 1.7.dp.toPx()

@@ -33,6 +33,8 @@ object Lrc {
             // 文本是「最后一个标签之后」的部分；前面的标签都只是时间点
             val text = line.substring(tags.last().range.last + 1).trim()
             if (text.isEmpty()) continue
+            // 制作信息 / 版权声明也带时间标签，不滤掉就会在歌词窗里冒出一行「母带：…」
+            if (isCredit(text)) continue
             for (t in tags) {
                 val ms = timeOf(t) ?: continue
                 out += LrcLine(ms, text)
@@ -48,6 +50,18 @@ object Lrc {
         }
         return dedup
     }
+
+    /** 「作词：」「和声编写：」这类制作署名，冒号是判据，正常歌词很少这么开头 */
+    private val CREDIT_HEAD = Regex(
+        "^\\s*(作词|作曲|编曲|制作|监制|出品|发行|统筹|母带|缩混|混音|录音|配唱|人声|和声|吉他|贝斯|鼓|弦乐|键盘|演唱|OP|SP)[^:：]{0,8}[:：]",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** 「(未经授权不得翻唱或使用)」这类整行括注的版权声明 */
+    private val RIGHTS_NOTE = Regex("[（(【\\[][^）)】\\]]*(未经授权|翻唱|版权|许可|授权)[^）)】\\]]*[）)】\\]]")
+
+    private fun isCredit(text: String): Boolean =
+        CREDIT_HEAD.containsMatchIn(text) || RIGHTS_NOTE.containsMatchIn(text)
 
     private fun timeOf(m: MatchResult): Long? {
         val mm = m.groupValues[1].toLongOrNull() ?: return null

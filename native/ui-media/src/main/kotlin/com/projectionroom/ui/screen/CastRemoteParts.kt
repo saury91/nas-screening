@@ -31,6 +31,7 @@ import com.projectionroom.ui.component.PlayerIcons
 import com.projectionroom.ui.component.RemoteImage
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomType
 
 /**
@@ -68,15 +69,15 @@ internal fun RemoteTopRow(
                         else -> "正在投屏"
                     },
                     color = ProomColor.muted,
-                    fontSize = 10.5.sp,
+                    fontSize = ProomSp(10.5.sp),
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 1.8.sp,
                 )
                 if (fullFeature) {
                     Text(
                         "  ·  全功能",
-                        color = ProomColor.accent.copy(alpha = 0.72f),
-                        fontSize = 10.5.sp,
+                        color = ProomColor.cast.copy(alpha = 0.8f),
+                        fontSize = ProomSp(10.5.sp),
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 1.8.sp,
                     )
@@ -86,7 +87,7 @@ internal fun RemoteTopRow(
             Text(
                 deviceName,
                 color = ProomColor.text,
-                style = ProomType.title.copy(fontSize = 18.sp, lineHeight = 23.sp),
+                style = ProomType.title.copy(fontSize = ProomSp(18.sp), lineHeight = 23.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -174,7 +175,7 @@ internal fun NowPlayingCard(
                 Text(
                     vod.name,
                     color = ProomColor.text,
-                    fontSize = 17.sp,
+                    fontSize = ProomSp(17.sp),
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = (-0.1).sp,
                     maxLines = 1,
@@ -191,7 +192,7 @@ internal fun NowPlayingCard(
                         }
                     }.ifBlank { "—" },
                     color = ProomColor.muted,
-                    fontSize = 12.5.sp,
+                    fontSize = ProomSp(12.5.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -199,9 +200,8 @@ internal fun NowPlayingCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val tone = when {
                         !online -> ProomColor.danger
-                        live -> ProomColor.danger
                         failed -> ProomColor.danger
-                        else -> ProomColor.accent
+                        else -> ProomColor.cast
                     }
                     StatusDot(tone)
                     Spacer(Modifier.width(6.dp))
@@ -214,7 +214,7 @@ internal fun NowPlayingCard(
                             else -> "已暂停"
                         },
                         color = tone.copy(alpha = 0.9f),
-                        fontSize = 11.sp,
+                        fontSize = ProomSp(11.sp),
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 0.4.sp,
                     )

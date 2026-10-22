@@ -46,6 +46,7 @@ import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
 import com.projectionroom.ui.component.RemoteImage
 
 /**
@@ -68,8 +69,22 @@ fun TvMineScreen(
     topInset: Dp = 0.dp,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().background(ProomColor.bg)) {
-        // 海报源图 270 宽：卡片别超过 ~120dp（240px），再大就糊
-        val cardW = (maxWidth * 0.105f).coerceIn(88.dp, 128.dp)
+        // 海报源图 270 宽：卡片别超过 ~128dp（256px），再大就糊。
+        // 一屏 6 张、左右留安全区 —— 和首页货架的卡片尺寸保持一致
+        val gap = ProomSpace.md
+        val avail = maxWidth - TvLayout.insetX * 2
+        val cardW = ((avail - gap * 5) / 6).coerceIn(96.dp, 136.dp)
+
+        // 收藏为空时，第一条记录才是这一屏「第一个能按的东西」。
+        // 不接住的话焦点会落到顶栏的「返回」上（那也是可聚焦的），一按就退出去。
+        val historyFirst = remember { FocusRequester() }
+        LaunchedEffect(favorites.size, history.size, loading) {
+            if (loading || favorites.isNotEmpty() || history.isEmpty()) return@LaunchedEffect
+            repeat(20) {
+                if (runCatching { historyFirst.requestFocus() }.isSuccess) return@LaunchedEffect
+                kotlinx.coroutines.delay(16)
+            }
+        }
 
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -109,7 +124,10 @@ fun TvMineScreen(
                         items = favorites,
                         itemWidth = cardW,
                         gap = ProomSpace.md,
-                        contentPadding = PaddingValues(horizontal = ProomSpace.xxl),
+                        contentPadding = PaddingValues(horizontal = TvLayout.insetX),
+                        // 数据是异步来的：首帧列表还是空的，焦点无处可去就会落到
+                        // 顶栏的「返回」上，按一下直接退出去。列表一到就抢回来。
+                        autoFocusFirst = true,
                     ) { v, focused ->
                         PosterCard(
                             title = v.name,
@@ -124,10 +142,13 @@ fun TvMineScreen(
 
             if (history.isNotEmpty()) {
                 item { MineSectionTitle("播放记录", "${history.size} 条") }
-                history.forEach { v ->
+                history.forEachIndexed { i, v ->
                     item {
-                        Box(Modifier.padding(horizontal = ProomSpace.xxl, vertical = 5.dp)) {
-                            HistoryBar(v) { onOpen(v) }
+                        Box(Modifier.padding(horizontal = TvLayout.insetX, vertical = 5.dp)) {
+                            HistoryBar(
+                                v,
+                                modifier = if (i == 0) Modifier.focusRequester(historyFirst) else Modifier,
+                            ) { onOpen(v) }
                         }
                     }
                 }
@@ -151,7 +172,7 @@ fun TvMineScreen(
 @Composable
 private fun MineSectionTitle(title: String, sub: String) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = ProomSpace.xxl, vertical = ProomSpace.sm),
+        Modifier.fillMaxWidth().padding(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
         verticalAlignment = Alignment.Bottom,
     ) {
         Text(title, style = ProomType.title, color = ProomColor.text)
@@ -166,11 +187,11 @@ private fun MineSectionTitle(title: String, sub: String) {
 
 /** 一条播放记录：16:9 缩略图 + 片名 + 第几集 + 进度 */
 @Composable
-private fun HistoryBar(v: Vod, onClick: () -> Unit) {
+private fun HistoryBar(v: Vod, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(ProomShape.sm)
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .clip(shape)
             .background(if (focused) ProomColor.surface2 else ProomColor.surface)
@@ -232,18 +253,19 @@ private fun HistoryBar(v: Vod, onClick: () -> Unit) {
                 modifier = Modifier.padding(top = 2.dp),
             )
             if (v.progress > 0f) {
+                // 进度条拉满文字列：0.52 这种"半条"宽度既读不出进度、又和右端的百分比对不上
                 Box(
                     Modifier
-                        .fillMaxWidth(0.52f)
-                        .padding(top = 8.dp)
-                        .height(3.dp)
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                        .height(4.dp)
                         .clip(RoundedCornerShape(2.dp))
                         .background(ProomColor.lineStrong)
                 ) {
                     Box(
                         Modifier
                             .fillMaxWidth(v.progress.coerceIn(0f, 1f))
-                            .height(3.dp)
+                            .height(4.dp)
                             .background(ProomColor.accent)
                     )
                 }

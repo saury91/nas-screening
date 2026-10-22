@@ -80,10 +80,10 @@ fun PairScreen(
         Column(
             Modifier.fillMaxWidth().padding(start = ProomSpace.lg, end = ProomSpace.xxl, top = ProomSpace.md),
         ) {
-            // 电视端返回统一成面包屑提示：不进焦点环，也不抢初始焦点
-            // （原来这里是一颗「‹ 返回」胶囊，进页面按 OK 会直接退出去）
+            // 电视端返回是胶囊提示（不可聚焦），不进焦点环、也不抢初始焦点
             com.projectionroom.ui.component.TvBackHint(onBack = onBack)
-            Spacer(Modifier.height(2.dp))
+            // 胶囊有 40dp 实体高度，原来 2dp 的间距会让标题直接贴在胶囊下沿
+            Spacer(Modifier.height(ProomSpace.md))
             Text("用手机导入配置", style = ProomType.headline, color = ProomColor.text)
         }
 
