@@ -8,6 +8,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,11 +31,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,6 +44,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -54,6 +59,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -66,6 +72,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +91,7 @@ import com.projectionroom.ui.component.TvPageHeader
 import com.projectionroom.ui.component.TvPageHeaderSpec
 import com.projectionroom.ui.component.tvFocusRing
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import com.projectionroom.ui.music.AudioFx
 import com.projectionroom.ui.music.MusicBox
 import com.projectionroom.ui.music.RepeatMode
@@ -152,32 +160,23 @@ internal fun MusicStageScreen(isTv: Boolean, wide: Boolean, onBack: () -> Unit) 
                 }
             },
     ) {
-        StageBackdrop(isTv, track.cover)
-        Column(
-            Modifier
-                .fillMaxSize()
-                // 弹层打开时整块让位，否则遥控器一按上键焦点会跑到背后的收藏按钮上
-                .focusProperties { canFocus = !queueOpen && !fxOpen }
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = if (isTv) TvLayout.insetX else 22.dp),
-        ) {
-            if (isTv) {
+        if (isTv) {
+            StageBackdrop(true, track.cover)
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    // 弹层打开时整块让位，否则遥控器一按上键焦点会跑到背后的收藏按钮上
+                    .focusProperties { canFocus = !queueOpen && !fxOpen }
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = TvLayout.insetX),
+            ) {
                 EditorialStage(track.title, track.artist, track.cover, onBack, { fxOpen = true }, { queueOpen = true }, pageFocused, playFocus)
-            } else {
-                VinylStage(wide, track.title, track.artist, track.cover, onBack, { fxOpen = true }, { queueOpen = true })
+                StageErrorLine()
             }
-            // 只在出错时出现一行，正常播放不占位置
-            MusicBox.error?.let { err ->
-                Text(
-                    err,
-                    color = ProomColor.danger,
-                    fontSize = ProomSp(11.sp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(bottom = ProomSpace.sm),
-                )
-            }
+        } else {
+            // 手机：整页交给竖向翻页（上下滑切歌），顶栏和传输条作为固定层压在上面
+            PhoneStage(wide, onBack, { fxOpen = true }, { queueOpen = true })
         }
         if (queueOpen) StageQueueSheet(wide) { queueOpen = false }
         if (fxOpen) StageFxSheet { fxOpen = false }
@@ -208,6 +207,229 @@ private fun StageBackdrop(isTv: Boolean, cover: String) {
         )
     }
     Box(Modifier.fillMaxSize().background(brush))
+}
+
+/* ─────────────────── 手机：上下滑切歌 ─────────────────── */
+
+/**
+ * 手机竖屏的舞台。
+ *
+ * 手势照主流音乐 App 的「上下滑切歌」来：背景 + 黑胶 + 歌名 + 歌词是一张整体，
+ * 向上滑下一首、向下滑上一首；两张卡一进一出，翻页途中外面那张缩一点，
+ * 中间露出缝，读起来像卡片交替，而不是整块画面平移。
+ * 顶栏、进度条、上一首/下一首这些是固定层，始终不动。
+ *
+ * 内核用 [VerticalPager]（抖音/小红书那套翻页组件）：跟手位移、甩动速度、
+ * 回弹、贴边吸附、多指取消都是系统滚动曲线，比自己算拖拽偏移稳得多。
+ */
+@Composable
+private fun PhoneStage(
+    wide: Boolean,
+    onBack: () -> Unit,
+    onFx: () -> Unit,
+    onQueue: () -> Unit,
+) {
+    val context = LocalContext.current
+    val track = MusicBox.current ?: return
+
+    // 横屏保留原来的左右版式：横向空间够，竖向翻页反而别扭
+    if (wide) {
+        StageBackdrop(false, track.cover)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 22.dp),
+        ) {
+            VinylStage(true, track.title, track.artist, track.cover, onBack, onFx, onQueue)
+            StageErrorLine()
+        }
+        return
+    }
+
+    val queue = MusicBox.queue
+    val index = MusicBox.index
+    val pager = rememberPagerState(
+        initialPage = index.coerceIn(0, queue.lastIndex.coerceAtLeast(0)),
+    ) { queue.size }
+    val density = LocalDensity.current
+    // 传输条实际多高，卡片区就留多高；量一次之后两层的分割线严丝合缝
+    var transportH by remember { mutableStateOf(0.dp) }
+
+    // 翻页落定 → 真正切歌。只认「已经停下」的那一页：
+    // 拖到一半就切会把音源/歌词请求打成一串，也浪费流量。
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.currentPage to pager.isScrollInProgress }
+            .collect { (page, scrolling) ->
+                if (!scrolling && page != MusicBox.index && page in MusicBox.queue.indices) {
+                    MusicBox.playAt(context, page)
+                }
+            }
+    }
+    // 反方向同步：播完自动下一首、通知栏/锁屏按键、点列表换歌，页面都要自己滑过去。
+    // 换了整张歌单（下标跳得很远）就直接跳过去，别一页页刷几分钟。
+    LaunchedEffect(index, queue.size) {
+        if (index in queue.indices && pager.currentPage != index && !pager.isScrollInProgress) {
+            if (abs(index - pager.currentPage) > 2) {
+                pager.scrollToPage(index)
+            } else {
+                pager.animateScrollToPage(index)
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        VerticalPager(
+            state = pager,
+            modifier = Modifier.fillMaxSize(),
+            // 前后各预排一页：下一首的背景/封面在手指抬起前就解码好了，滑过去不会先黑一下
+            beyondViewportPageCount = 1,
+            // 松手判定的位移门槛从默认的一半屏降到 1/4：
+            // 半屏太费劲，手指轻轻一划就该过一张（抖音那种手感），甩得快则靠速度过页
+            flingBehavior = PagerDefaults.flingBehavior(
+                state = pager,
+                snapPositionalThreshold = 0.25f,
+            ),
+        ) { page ->
+            val t = queue.getOrNull(page) ?: return@VerticalPager
+            val live = page == MusicBox.index
+            StageCard(
+                title = t.title,
+                artist = t.artist,
+                cover = t.cover,
+                // 歌词只有当前这首有：相邻页先只显示唱片和歌名，切过去歌词随后到
+                lyric = if (live) MusicBox.lyric else emptyList(),
+                lyricAt = if (live) MusicBox.lyricAt else -1,
+                playing = live && MusicBox.playing,
+                bottomReserve = transportH,
+                // 0 = 正中；-1/1 = 上下一张；拖拽时是小数
+                offsetFraction = (pager.currentPage - page) + pager.currentPageOffsetFraction,
+            )
+        }
+
+        // 固定层：顶栏 + 传输条。压在翻页之上，手指落在按钮/进度条上时翻页收不到事件
+        Column(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 22.dp),
+        ) {
+            StageHeader(isTv = false, onBack, onFx, "正在播放") { NowPlayingBadge() }
+            Spacer(Modifier.weight(1f))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned {
+                        val h = with(density) { it.size.height.toDp() }
+                        if (h != transportH) transportH = h
+                    },
+            ) {
+                StageTransport(wide = false, onQueue = onQueue)
+                Spacer(Modifier.height(ProomSpace.md))
+                StageErrorLine()
+            }
+        }
+    }
+}
+
+/** 翻页里的一张卡：背景 + 黑胶 + 歌名/歌手 + 歌词，整张跟着手指走 */
+@Composable
+private fun StageCard(
+    title: String,
+    artist: String,
+    cover: String,
+    lyric: List<LrcLine>,
+    lyricAt: Int,
+    playing: Boolean,
+    bottomReserve: Dp,
+    offsetFraction: Float,
+) {
+    val away = abs(offsetFraction).coerceIn(0f, 1f)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                // 离开正中时缩一点：两张卡之间闪出一道缝，翻页像「卡片交替」；
+                // 缩太多会像弹窗，0.94 这档在真机上刚好能看出层次又不掉画面
+                val s = 1f - 0.06f * away
+                scaleX = s
+                scaleY = s
+            },
+    ) {
+        StageBackdrop(false, cover)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(horizontal = 22.dp),
+        ) {
+            // 顶栏是固定层，卡片内容从它下面开始
+            Spacer(Modifier.height(56.dp))
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                val disc = minOf(maxWidth * 0.78f, maxHeight * 0.56f)
+                Column(
+                    Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    VinylDisc(cover, disc, playing)
+                    Spacer(Modifier.height(ProomSpace.lg))
+                    Text(
+                        title,
+                        color = ProomColor.text,
+                        fontSize = ProomSp(23.sp),
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        artist.ifBlank { "未知歌手" },
+                        color = ProomColor.muted,
+                        fontSize = ProomSp(12.sp),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Spacer(Modifier.height(ProomSpace.md))
+                    LyricFocus(lyric, lyricAt, rows = 3, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            // 给进度条和控制条让出同样高度，卡片不会被压在那层玻璃胶囊底下
+            Spacer(Modifier.height(bottomReserve))
+        }
+    }
+}
+
+/** 「● 正在播放」小标 */
+@Composable
+private fun NowPlayingBadge() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Canvas(Modifier.size(5.dp)) { drawCircle(ProomColor.accent) }
+        Text(
+            "正在播放",
+            color = ProomColor.muted,
+            fontSize = ProomSp(11.sp),
+            letterSpacing = 2.sp,
+            modifier = Modifier.padding(start = 7.dp),
+        )
+    }
+}
+
+/** 只在出错时出现一行，正常播放不占位置 */
+@Composable
+private fun StageErrorLine() {
+    MusicBox.error?.let { err ->
+        Text(
+            err,
+            color = ProomColor.danger,
+            fontSize = ProomSp(11.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(bottom = ProomSpace.sm),
+        )
+    }
 }
 
 @Composable
@@ -626,13 +848,29 @@ private fun ColumnScope.StageTransport(
     } else 0f
     val ratio = if (preview >= 0f) preview else live
 
+    // 拖/点之后不要把预览值立刻丢掉：播放器 seek 到位要几十~几百毫秒，
+    // 一丢就会先闪回旧位置再跳过去，看着像「点了没反应」。
+    // 等位置追上来（或 2 秒兜底）再交还给真实进度。
+    LaunchedEffect(preview) {
+        val target = preview
+        if (target < 0f) return@LaunchedEffect
+        repeat(20) {
+            if (MusicBox.duration > 0 && abs(MusicBox.position - target * MusicBox.duration) < 1500f) {
+                preview = -1f
+                return@LaunchedEffect
+            }
+            delay(100)
+        }
+        preview = -1f
+    }
+
     val progress: @Composable () -> Unit = {
         HairProgress(
             ratio = ratio,
             onDrag = { preview = it },
             onCommit = {
                 if (MusicBox.duration > 0) MusicBox.seek((it * MusicBox.duration).toLong())
-                preview = -1f
+                preview = it
             },
             // 页面还没焦点时它也让位：否则遥控器第一下会先落到这条横贯全屏的进度条上
             focusable = !tv || pageFocused,
@@ -790,7 +1028,6 @@ private fun PlayBtn(size: Dp, focusRequester: FocusRequester? = null) {
  * 左右键的快退/快进由播放键处理，比"先挪到进度条再微调"顺手得多。
  * 万一被聚焦（手机外接键盘），轨道提亮 + 金点放大，不画横贯全屏的外框。
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun HairProgress(
     ratio: Float,
@@ -801,53 +1038,13 @@ private fun HairProgress(
     var focused by remember { mutableStateOf(false) }
     val dot by animateFloatAsState(if (focused) 15f else 11f, tween(160), label = "dot")
     val glow by animateFloatAsState(if (focused) 1f else 0f, tween(160), label = "glow")
-    androidx.compose.material3.Slider(
-        value = ratio.coerceIn(0f, 1f),
-        onValueChange = onDrag,
-        onValueChangeFinished = { onCommit(ratio.coerceIn(0f, 1f)) },
-        colors = SliderDefaults.colors(
-            thumbColor = ProomColor.accent,
-            activeTrackColor = ProomColor.accent,
-            inactiveTrackColor = Color.White.copy(alpha = 0.16f),
-        ),
-        thumb = {
-            // 焦点原来只有「圆点 11→15dp + 一圈 16% 的金光」：坐在三米外
-            // 那条进度条和没聚焦几乎一样。补一圈白环，跟「白色 = 焦点」对齐
-            Box(Modifier.size(dot.dp + 12.dp), contentAlignment = Alignment.Center) {
-                if (glow > 0.01f) {
-                    Box(
-                        Modifier
-                            .size(dot.dp + 11.dp)
-                            .clip(CircleShape)
-                            .background(ProomColor.accent.copy(alpha = 0.16f * glow)),
-                    )
-                }
-                Box(
-                    Modifier
-                        .size(dot.dp)
-                        .clip(CircleShape)
-                        .background(ProomColor.accent)
-                        .then(
-                            if (glow > 0.5f) Modifier.border(2.dp, Color.White, CircleShape) else Modifier
-                        ),
-                )
-            }
-        },
-        track = { state ->
-            Canvas(Modifier.fillMaxWidth().height(3.dp)) {
-                val cy = size.height / 2f
-                val w = 3.dp.toPx()
-                drawLine(
-                    Color.White.copy(alpha = 0.16f + 0.22f * glow),
-                    Offset(0f, cy), Offset(size.width, cy), w, StrokeCap.Round,
-                )
-                drawLine(
-                    ProomColor.accent,
-                    Offset(0f, cy), Offset(size.width * state.value.coerceIn(0f, 1f), cy), w, StrokeCap.Round,
-                )
-            }
-        },
-        modifier = Modifier
+    val r = ratio.coerceIn(0f, 1f)
+    // 手势里只认最新一帧的回调，pointerInput 才可以只用 Unit 做 key（不反复重启手势）
+    val drag by rememberUpdatedState(onDrag)
+    val commit by rememberUpdatedState(onCommit)
+
+    Box(
+        Modifier
             .fillMaxWidth()
             .height(26.dp)
             .focusProperties { canFocus = focusable }
@@ -856,12 +1053,58 @@ private fun HairProgress(
                 if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val step = 0.01f
                 when (e.key) {
-                    Key.DirectionLeft -> { onCommit((ratio - step).coerceIn(0f, 1f)); true }
-                    Key.DirectionRight -> { onCommit((ratio + step).coerceIn(0f, 1f)); true }
+                    Key.DirectionLeft -> { commit((r - step).coerceIn(0f, 1f)); true }
+                    Key.DirectionRight -> { commit((r + step).coerceIn(0f, 1f)); true }
                     else -> false
                 }
+            }
+            // 原来的 M3 Slider 手机上只能拖拇指，点在轨道上没反应。
+            // 干脆整条自己接管：按下就把圆点挪到手指处（点哪跳哪），按住继续保持跟手，
+            // 松手才真正 seek —— 和拖动一套逻辑，省得两种手势各管一半。
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val w = size.width.toFloat().coerceAtLeast(1f)
+                    fun at(x: Float) = (x / w).coerceIn(0f, 1f)
+                    var cur = at(down.position.x)
+                    drag(cur)
+                    down.consume()
+                    while (true) {
+                        val ev = awaitPointerEvent()
+                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!ch.pressed) {
+                            ch.consume()
+                            break
+                        }
+                        cur = at(ch.position.x)
+                        drag(cur)
+                        ch.consume()
+                    }
+                    commit(cur)
+                }
             },
-    )
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val cy = size.height / 2f
+            val stroke = 3.dp.toPx()
+            val x = size.width * r
+            // 轨道：底色 + 已播
+            drawLine(
+                Color.White.copy(alpha = 0.16f + 0.22f * glow),
+                Offset(0f, cy), Offset(size.width, cy), stroke, StrokeCap.Round,
+            )
+            drawLine(ProomColor.accent, Offset(0f, cy), Offset(x, cy), stroke, StrokeCap.Round)
+            // 金点。焦点时放大到 15dp 并补一圈白环 —— 白 = 焦点，三米外也认得出来
+            val dotPx = dot.dp.toPx()
+            if (glow > 0.01f) {
+                drawCircle(ProomColor.accent.copy(alpha = 0.16f * glow), (dotPx + 11.dp.toPx()) / 2f, Offset(x, cy))
+            }
+            drawCircle(if (glow > 0.5f) Color.White else ProomColor.accent, dotPx / 2f, Offset(x, cy))
+            if (glow > 0.5f) {
+                drawCircle(ProomColor.accent, dotPx / 2f - 2.dp.toPx(), Offset(x, cy))
+            }
+        }
+    }
 }
 
 private fun stageClock(ms: Long): String {
