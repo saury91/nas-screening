@@ -14,11 +14,15 @@ Search a title → open it → press play. The home screen is content only; sour
 
 ## Contents
 
-- [Feature list](#feature-list)
+- [Features](#features)
+  - [Films](#films)
+  - [Live TV](#live-tv)
+  - [Music](#music)
+  - [Player](#player)
+  - [Casting](#casting)
+  - [Admin and backup](#admin-and-backup)
+  - [Independence](#independence)
 - [The three clients](#the-three-clients)
-  - [Desktop web](#1-desktop-web-admin-console)
-  - [Phone app](#2-phone-app)
-  - [TV app](#3-tv-app)
 - [Screenshots](#screenshots)
 - [Architecture](#architecture)
 - [Getting started](#getting-started)
@@ -30,51 +34,74 @@ Search a title → open it → press play. The home screen is content only; sour
 
 ---
 
-## Feature list
+## Features
 
-### Content
+In one sentence: **content goes straight to the sources; the NAS only handles config, sync, casting bridges and upgrades.**
 
-| Capability | What it does | Where |
-|---|---|---|
-| Aggregated search | Asks every source at once, merges the same title, lists all of its streams | All three |
-| Multi-stream playback | Each stream is tagged with its quality (4K / 1080P / 720P / HD); switch when one stalls | All three |
-| Series | Episodes in order, progress preserved across stream changes, auto-advance | All three |
-| Library browsing | Movies / series / anime / variety / documentary, filtered by year, region or source | All three |
-| Live TV | Import M3U or TXT, auto-group, dedupe same-name channels, health-check in one tap | Web / Phone / TV |
-| Daily live refresh | Fetch every candidate source → merge → probe each channel → keep what plays | Server side |
-| Music | Local FLAC/ID3, Subsonic-compatible servers (Navidrome / Airsonic / Gonic), online playlists | Web / Phone |
-| Music detail | Recommended and category playlists, albums, artists, queue, scrolling lyrics, online search | Web / Phone |
-| Downloads | Your own qBittorrent; magnet results show seeders, one tap to submit | Web |
+### Films
 
-### Playback
+| Capability | What it does |
+|---|---|
+| Aggregated search | Asks every source at once, merges the same title, lists all of its streams |
+| Multi-stream playback | Each stream is tagged with its quality (4K / 1080P / 720P / HD); switch when one stalls |
+| Series | Episodes in order, progress preserved across stream changes, auto-advance |
+| Library browsing | Movies / series / anime / variety / documentary, filtered by year, region or source |
+| Source management | Import a TVBox config URL in one tap, reorder by priority, test individually, toggle (Web) |
+| Downloads | Your own qBittorrent; magnet results show seeders, one tap to submit (Web) |
+
+### Live TV
+
+| Capability | What it does |
+|---|---|
+| Import and grouping | M3U / TXT import, auto-grouped, same-name channels deduped |
+| Health check | One tap to probe; dead channels are dimmed but kept, never silently dropped |
+| Daily refresh | Fetch every candidate source → merge → probe each channel → keep what plays |
+| Maintenance | Grouped view, manual refresh, batch health check (Web) |
+
+### Music
+
+| Capability | What it does |
+|---|---|
+| Library | Local FLAC/ID3, Subsonic-compatible servers (Navidrome / Airsonic / Gonic), online playlists |
+| Discovery | Recommended and category playlists (theme · language · style · scene · mood), albums, artists, online search |
+| Playback | Queue, repeat modes, scrolling lyrics, waveform progress, remembered playback mode |
+| DSP | Web gets a 10-band EQ with 8 presets; the TV's presets adapt to the device's own frequency bands |
+
+All three clients have music, each with a player shaped by its input: the phone spins a record with line-by-line lyrics and keeps a mini player under every tab; the TV puts the record left and lyrics right, with the D-pad changing tracks and seeking.
+
+### Player
 
 | Capability | Notes |
 |---|---|
+| Gestures and remote | Tap to pause/play, double-tap for fullscreen; the TV uses D-pad focus, OK, BACK |
 | Resume | Progress saved every few seconds; picks up where you stopped |
-| Gestures | Tap to pause/play, double-tap for fullscreen; identical on phone |
-| Remote | D-pad moves focus, OK confirms, BACK returns |
 | Buffering state | Blurred poster, three bouncing dots, live bitrate — never a spinner |
 | Picture-in-picture | Browse, search and switch titles in a small window; closing it ends playback |
-| Music player | 10-band EQ with 8 presets, seek, waveform progress, remembered playback mode |
 
-### Across devices
+### Casting
+
+The phone hands a title to the TV and turns into the remote. The TV is a **real receiver** — it starts playback in place and reports true progress, rather than mirroring the phone's screen.
+
+Three transports, whichever connects first wins, and unsupported keys grey out automatically:
+
+| Transport | How it connects | What it can do |
+|---|---|---|
+| NAS relay | Both ends connect to the NAS, via the `/api/cast/*` directory | Everything: speed, volume, progress read-back; works across subnets |
+| LAN peer-to-peer | Homegrown `PROOM-CAST/1`: UDP discovery + JSON over HTTP | Everything, without the NAS — works with the NAS off |
+| DLNA | The TV acts as a standard MediaRenderer (AVTransport) | Play / pause / seek / stop only; speed and volume grey out, and the current position can't be read |
+
+When SSDP is blocked by the router there are two fallbacks: a pairing QR code (the TV shows a code and address, the phone scans once) and manual entry.
+
+### Admin and backup
 
 | Capability | Notes |
 |---|---|
-| Casting | The phone is the remote, the TV is the real receiver; three transports (NAS relay / LAN peer-to-peer / DLNA), unsupported keys grey out automatically |
-| Self-update | On launch the app checks `/api/app/latest` and hands a new build to the system installer |
-| Config distribution | The NAS only ships a config bundle; apps refresh it in the background without redrawing |
-| Config sharing | Sources, live feeds, music and UI preferences in one JSON — exportable and importable |
-
-### Admin
-
-| Capability | Notes |
-|---|---|
-| Sources | Import a TVBox config URL in one tap, reorder by priority, test individually, toggle |
-| Live sources | M3U / TXT import, grouped view, manual refresh, batch health-check |
-| Download tasks | Pause / resume / delete, auto-refreshing status |
 | Config backup | Export everything or sources only; import shows a preview, backs up first, can roll back |
+| Config sharing | Sources, live feeds, music and UI preferences in one JSON — exportable and importable |
+| Config distribution | The NAS only ships a config bundle; apps refresh it in the background without redrawing |
+| Download tasks | Pause / resume / delete, auto-refreshing status |
 | About and self-check | Backend reachability, source availability, version info |
+| Self-update | On launch the app checks `/api/app/latest` and hands a new build to the system installer |
 
 ### Independence
 
@@ -96,13 +123,13 @@ These are not one layout at three zoom levels. The input device and viewing dist
 | Package | — (open in a browser) | `com.projectionroom.app` | `com.projectionroom.tv` |
 | Role | **Admin console + player** | **Pocket player** | **Big-screen player** |
 | Input | Keyboard and mouse | Touch | D-pad remote |
-| Sources / live feeds / downloads / backup | ✅ everywhere | ❌ not offered | ❌ not offered |
-| Favorites and history | ✅ | ✅ | ✅ |
 | Browse / search / play | ✅ | ✅ | ✅ |
+| Favorites and history | ✅ | ✅ | ✅ |
+| Music | ✅ full | ✅ full | ✅ full (with EQ presets) |
 | Casting | Receiver controls | ✅ sender | Receiver |
-| Music | ✅ full | ✅ full | ❌ omitted (a remote can't drive it) |
+| Sources / live feeds / downloads / backup | ✅ everywhere | ❌ not offered | ❌ not offered |
 
-### 1. Desktop web (admin console)
+### Desktop web (admin console)
 
 Open `http://<nas>:8899` — always the latest build, nothing to install.
 
@@ -112,7 +139,7 @@ Open `http://<nas>:8899` — always the latest build, nothing to install.
 
 ![Home](docs/screenshot-home.png)
 
-### 2. Phone app
+### Phone app
 
 The pocket client. There is **no settings section**: anything that changes server state happens on the desktop. The phone reads config and plays.
 
@@ -127,7 +154,7 @@ The pocket client. There is **no settings section**: anything that changes serve
 <img src="docs/screenshot-app-phone-mine.png" width="240" alt="Phone mine">
 </p>
 
-### 3. TV app
+### TV app
 
 A 10-foot UI where the remote is the only input. The rules deliberately differ from the phone:
 
@@ -145,7 +172,9 @@ A 10-foot UI where the remote is the only input. The rules deliberately differ f
 
 ## Screenshots
 
-### Films
+Ordered by feature, matching the section above.
+
+### Film screenshots
 
 One search asks every source at once; the same title is merged and all its streams listed.
 
@@ -161,13 +190,7 @@ The phone runs the same logic reflowed for portrait; a trending term is one tap 
 <img src="docs/screenshot-app-phone-search.png" width="240" alt="Phone search">
 </p>
 
-### Player
-
-Tap to pause, double-tap for fullscreen; buffering shows a blurred poster, dots and live bitrate.
-
-![Player](docs/screenshot-player.png)
-
-### Live TV
+### Live TV screenshots
 
 Imported feeds are grouped automatically, health-checked in one tap, and refreshed daily.
 
@@ -180,9 +203,9 @@ The phone and the TV eat the same channel table: three wide columns on the phone
 <img src="docs/screenshot-app-tv-live.png" width="480" alt="TV live TV">
 </p>
 
-### Music
+### Music screenshots
 
-All three share one library — the same "recommended + browsable by theme / language / style / mood" structure, with a player fitted to each screen.
+All three share one library with the same "recommended + browsable" structure, and a player fitted to each screen.
 
 **PC**: a recommended playlist opens as its own screen with a "play all" button; the bottom bar carries waveform progress, repeat mode and the queue, and expands into the full player with a 10-band EQ and 8 presets.
 
@@ -209,33 +232,31 @@ All three share one library — the same "recommended + browsable by theme / lan
 
 ![EQ presets](docs/screenshot-app-tv-eq.png)
 
-### Casting
+### Player screenshot
 
-One tap hands the film to the TV; the phone turns into a remote. The TV is a **real receiver** — it starts playback and reports true progress, rather than mirroring the phone screen.
+Tap to pause, double-tap for fullscreen; buffering shows a blurred poster, dots and live bitrate.
+
+![Player](docs/screenshot-player.png)
+
+### Casting screenshots
 
 ![Cast targets](docs/screenshot-app-phone-cast.png)
 
-Three transports, picked by whatever is reachable. Keys a transport cannot support grey out:
-
-| Transport | How it connects | What it can do |
-|---|---|---|
-| NAS relay | Both ends talk to `/api/cast/*` on the NAS | Everything: speed, volume, progress reporting; works across subnets |
-| LAN peer-to-peer | Custom `PROOM-CAST/1`: UDP discovery + JSON over HTTP | Everything; no NAS involved, works with the NAS switched off |
-| DLNA | The TV is a standard MediaRenderer (AVTransport) | Play / pause / seek / stop only — speed and volume grey out, and the phone cannot read the TV position |
-
-When SSDP is blocked by the router there are two fallbacks: scan the QR code on the TV, or type the address by hand.
+When SSDP is blocked, the TV shows a pairing QR code and address, and the phone scans once:
 
 ![TV pairing](docs/screenshot-app-tv-pair.png)
 
+The phone as a remote: seek, ±10s, speed, volume, episodes and stream switching all in hand.
+
 <p>
-<img src="docs/screenshot-app-phone-remote.png" width="300" alt="Cast remote">
+<img src="docs/screenshot-app-phone-remote.png" width="300" alt="Casting remote">
 </p>
 
-### Config backup
+### Backup screen
 
-Sources, live seeds, music and UI preferences pack into one JSON. Import shows a preview, and a bad import can be rolled back.
+Sources, live feeds, music and UI preferences pack into one JSON; imports show a preview, and a bad import can be rolled back.
 
-![Backup](docs/screenshot-backup.png)
+![Config backup](docs/screenshot-backup.png)
 
 ---
 
