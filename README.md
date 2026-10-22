@@ -360,19 +360,15 @@ docker run -d --name projection-room --restart unless-stopped --network host \
 | 手动填 | 片源管理里逐条加，或粘 TVBox 配置地址 | 只加几个 |
 | seed 文件 | 把导出的 `seed.json` 放到 `data/seed.json` 再启动 | 一次装好整套 |
 
-`data/seed.json` 是首启播种文件，格式与配置包一致：
+`seed.json` 与配置包是同一份格式：
 
 ```bash
 # 从当前库导出（里面是真实地址，只留在本地）
 python3 tools/export-seed.py                 # → data/seed.json
 
-# 换台机器：把文件拷过去，放在同样位置，启动即自动写入
+# 换台机器：把文件拷过去，放在同样位置，启动即导入
 DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 ```
-
-`data/` 整个目录都在 `.gitignore` 里，导出的文件不会被提交。想换路径用 `SEED_FILE` 指定。
-
-只有 seed 文件存在**且**对应表为空时才播种；之后完全以数据库为准，删掉的源不会因为重启又被写回来。
 
 ### 装到电视 / 手机
 
@@ -400,7 +396,7 @@ TV 第一次装需要允许「安装未知应用」；国产 ROM 会弹「未备
 |---|---|---|
 | `PORT` | `8899` | 监听端口 |
 | `DB_PATH` | `./data/media.db` | 数据文件位置，容器里建议指向挂载卷 |
-| `SEED_FILE` | `./data/seed.json` | 首启播种文件；不存在就空启动 |
+| `SEED_FILE` | `./data/seed.json` | 启动时导入的数据文件；不存在就空启动 |
 | `LIVE_SEEDS` | 空 | 直播候选源，逗号分隔，每日自动汇总用 |
 | `CMS_SEEDS` | 空 | 片源「资源目录」地址，逗号分隔，自动发现用 |
 | `MUSIC_ONLINE` | `0` | 为 `1` 时启用在线搜歌（直连第三方音乐接口） |

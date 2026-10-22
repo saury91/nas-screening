@@ -359,19 +359,15 @@ The repository contains no scraping-site addresses, no channel lists and no musi
 | Manually | Add sources one by one, or paste a TVBox config URL | Just a few |
 | seed file | Drop an exported `seed.json` at `data/seed.json` and start | Whole setup at once |
 
-`data/seed.json` is the first-launch seed file, in the same format as a config bundle:
+`seed.json` uses the same format as a config bundle:
 
 ```bash
 # Export from the current database (contains real addresses — keep it local)
 python3 tools/export-seed.py                 # → data/seed.json
 
-# Another machine: copy it over, same path, and it is written on startup
+# Another machine: copy it over, same path, and it is imported on startup
 DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 ```
-
-The whole `data/` directory is in `.gitignore`, so nothing you export gets committed. Use `SEED_FILE` to point elsewhere.
-
-Seeding only happens when the file exists **and** the matching table is empty; after that the database is the only truth, and a source you deleted never comes back on restart.
 
 ### Installing on a TV or phone
 
@@ -396,7 +392,7 @@ On the TV, allow "install unknown apps" the first time. Some TV ROMs show an unv
 |---|---|---|
 | `PORT` | `8899` | Listen port |
 | `DB_PATH` | `./data/media.db` | Database location; point it at a volume in containers |
-| `SEED_FILE` | `./data/seed.json` | First-launch seed file; absent means an empty start |
+| `SEED_FILE` | `./data/seed.json` | Data file imported on startup; absent means an empty start |
 | `LIVE_SEEDS` | empty | Candidate live sources, comma separated, used by the daily refresh |
 | `CMS_SEEDS` | empty | Source "resource catalogs", comma separated, used by auto-discovery |
 | `MUSIC_ONLINE` | `0` | Set to `1` to enable online song search (third-party music API) |
