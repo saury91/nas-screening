@@ -156,6 +156,20 @@ class MusicService : Service() {
                 foreground = false
             }
             lastKey = ""
+            // 队列被清空（全屏页点了「结束播放」）时会走到这里。
+            //
+            // 光撤通知不够：会话本身还留着上一次的 PLAYING —— 锁屏、蓝牙耳机、
+            // 车机的媒体面板会一直显示「正在播放」，按播放键还会发指令过来，
+            // 而这时候一台歌都没有。所以状态要显式落到 STOPPED。
+            runCatching {
+                session?.setPlaybackState(
+                    PlaybackStateCompat.Builder()
+                        .setActions(PlaybackStateCompat.ACTION_PLAY)
+                        .setState(PlaybackStateCompat.STATE_STOPPED, 0, 1f)
+                        .build()
+                )
+                session?.setMetadata(MediaMetadataCompat.Builder().build())
+            }
             return
         }
         coverFor(track)

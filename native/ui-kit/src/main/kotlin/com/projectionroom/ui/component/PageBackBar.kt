@@ -138,6 +138,8 @@ fun TvPageHeader(
     /** 返回提示的半透明底：视频左上角常有台标，光靠颜色救不回来 */
     hintBackdrop: Color? = null,
     trailing: (@Composable androidx.compose.foundation.layout.RowScope.() -> Unit)? = null,
+    /** 返回胶囊的修饰符：页面可以用它改写方向键（比如按下直接落到列表首项） */
+    backModifier: Modifier = Modifier,
 ) {
     Row(
         modifier
@@ -148,7 +150,12 @@ fun TvPageHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
-            TvBackHint(onBack = onBack, color = hintColor, backdrop = hintBackdrop)
+            TvBackHint(
+                onBack = onBack,
+                modifier = backModifier,
+                color = hintColor,
+                backdrop = hintBackdrop,
+            )
             if (title != null) Spacer(Modifier.width(TvPageHeaderSpec.gap))
         }
         if (title != null) {
@@ -173,11 +180,11 @@ fun TvPageHeader(
  * 焦点环粗细也不一样。现在只此一颗。
  */
 @Composable
-fun TvPillButton(text: String, onClick: () -> Unit) {
+fun TvPillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
     Box(
-        Modifier
+        modifier
             // 可点目标下限 48dp（TvLayout.minTouch），比原来的 8dp 内边距撑出来的 30dp 高一档
             .heightIn(min = TvLayout.minTouch)
             .clip(shape)

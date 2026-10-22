@@ -365,7 +365,8 @@ private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit)
         )
         Box(
             Modifier
-                .size(40.dp)
+                // 和历史词同一行的删除钮：40dp 的圆圈在电视上得瞄，48dp 才够
+                .size(TvLayout.minTouch)
                 .clip(CircleShape)
                 .then(if (removeFocused) Modifier.background(ProomColor.accentSoft) else Modifier)
                 .then(if (removeFocused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
@@ -376,7 +377,7 @@ private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit)
             Text(
                 "×",
                 color = if (removeFocused) ProomColor.accent else ProomColor.muted,
-                fontSize = ProomSp(16.sp),
+                fontSize = ProomSp(18.sp),
             )
         }
     }

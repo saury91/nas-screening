@@ -334,6 +334,50 @@ object MusicBox {
         fav = false
     }
 
+    /**
+     * 让路：视频/直播要开声了，音乐必须闭麦。
+     *
+     * 只 pause 不 stop —— 队列留着，用户从播放器退出来还能按播放键接着听。
+     * 两条音轨同时出声（一个放电影对白、一个放歌）是这类 App 最典型的翻车点。
+     */
+    fun pause() {
+        exo?.pause()
+        playing = false
+    }
+
+    /**
+     * 真正退出 App 时调用：停播 + **释放** ExoPlayer。
+     *
+     * 不能只调 [stop]：那只是 pause + 清队列，ExoPlayer 实例和它持有的
+     * 音频输出还挂在进程里。进程被系统缓存后它仍然会出声 ——
+     * 用户看到的就是「App 都关了歌还在放」。
+     */
+    fun shutdown() {
+        ticker?.cancel()
+        ticker = null
+        loadJob?.cancel()
+        lyricJob?.cancel()
+        exo?.let {
+            // stop 之后再 release：release 是异步的，正在缓冲的流要先掐断，
+            // 否则会有一声残响
+            it.stop()
+            it.release()
+        }
+        exo = null
+        playing = false
+        loading = false
+        position = 0
+        duration = 0
+        queue = emptyList()
+        index = 0
+        playingId = ""
+        lyric = emptyList()
+        lyricAt = -1
+        fav = false
+        error = null
+        failStreak = 0
+    }
+
     private var appContext: Context? = null
 
     /**

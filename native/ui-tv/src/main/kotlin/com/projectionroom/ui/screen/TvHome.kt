@@ -78,6 +78,8 @@ fun TvHome(
     onSearch: () -> Unit = {},
     onNas: () -> Unit = {},
     onMine: () -> Unit = {},
+    /** 顶栏「正在播放」唱片：进全屏播放页。null = 不提供这个入口 */
+    onNowPlaying: (() -> Unit)? = null,
     /** 状态栏高度：电视一般没有，个别盒子/模拟器有，顶栏内容要避开 */
     topInset: Dp = 0.dp,
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
@@ -231,6 +233,7 @@ fun TvHome(
             onSearch = onSearch,
             onNas = onNas,
             onMine = onMine,
+            onNowPlaying = onNowPlaying,
             topInset = topInset,
             floating = !scrolled,
         )
@@ -250,6 +253,7 @@ private fun TvTopBar(
     onSearch: () -> Unit,
     onNas: () -> Unit,
     onMine: () -> Unit,
+    onNowPlaying: (() -> Unit)? = null,
     topInset: Dp = 0.dp,
     floating: Boolean = true,
 ) {
@@ -262,6 +266,7 @@ private fun TvTopBar(
             onSearch = onSearch,
             onNas = onNas,
             onMine = onMine,
+            onNowPlaying = onNowPlaying,
         ),
         topInset = topInset,
         floating = floating,
@@ -362,6 +367,6 @@ private fun MoreLink(onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
-        Text("查看全部 ›", style = ProomType.label, color = if (focused) ProomColor.accent else ProomColor.muted)
+        Text("查看全部", style = ProomType.label, color = if (focused) ProomColor.accent else ProomColor.muted)
     }
 }

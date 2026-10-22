@@ -31,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import com.projectionroom.shared.catalog.ConfigBundle
@@ -229,6 +230,39 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_SCREEN = "screen"
     }
 
+
+    /**
+     * 真正退出（在首页按 BACK）时把这个 App 收干净。
+     *
+     * 两个服务都是 START_STICKY —— 不主动 stop 的话，进程会一直挂在那儿等系统
+     * 重启它，用户看到的就是「App 已经退出了，投屏和音乐还在后台跑」。
+     *
+     * `isFinishing` 用来区分「主动退出」和「系统回收 / 配置变更」：
+     * 后者不能收摊，否则用户切回来音乐就没了。
+     */
+    override fun onDestroy() {
+        if (isFinishing) {
+            // 音乐：停播 + **释放** ExoPlayer。只 pause 不够 ——
+            // 实例还在，音频输出就还在，进程被缓存时歌照放
+            runCatching { com.projectionroom.ui.music.MusicBox.shutdown() }
+            runCatching {
+                stopService(
+                    android.content.Intent(this, com.projectionroom.app.MusicService::class.java)
+                )
+            }
+            // 投屏接收端同理：它本来是为「手机投到电视」常驻的，
+            // 留在后台就是一条看不见的进程
+            runCatching {
+                stopService(
+                    android.content.Intent(
+                        this,
+                        com.projectionroom.app.cast.CastService::class.java
+                    )
+                )
+            }
+        }
+        super.onDestroy()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // 联调入口：`am start … -e nas http://10.0.2.2:8899` 直接指定 NAS。
@@ -1021,6 +1055,9 @@ class MainActivity : ComponentActivity() {
                     onSearch = { screen = Screen.Search(from = screen) },
                     onNas = { screen = Screen.Connect(from = screen) },
                     onMine = { screen = Screen.Mine(from = screen) },
+                    // 有队列才画（组件自己判断），所以这里无条件给：
+                    // 否则片库/直播/音乐各页都得单独穿一层参数
+                    onNowPlaying = { screen = Screen.MusicPlayer(from = screen) },
                 )
 
                 // 系统返回键：逐屏回退，只在首页才真正退出
@@ -1103,6 +1140,8 @@ class MainActivity : ComponentActivity() {
                                 onSearch = { screen = Screen.Search(from = s) },
                                 onNas = { screen = Screen.Connect(from = s) },
                                 onMine = { screen = Screen.Mine(from = s) },
+                                // 顶栏唱片：有没有队列由组件判断，壳只负责跳转
+                                onNowPlaying = { screen = Screen.MusicPlayer(from = s) },
                                 topInset = barTop,
                                 onNav = { _, slug ->
                                     screen = if (slug == null) Screen.Home else Screen.Browse(slug, Screen.Home)
@@ -1185,9 +1224,12 @@ class MainActivity : ComponentActivity() {
                             onBack = { screen = s.from },
                             // 迷你条在遥控器上要按到列表底才够得着，顶栏这颗胶囊才是入口
                             onOpenPlayer = { screen = Screen.MusicPlayer(s) },
-                            footer = {
+                            footer = { miniOpen ->
                                 Box(Modifier.navigationBarsPadding()) {
-                                    MiniPlayerOrEmpty { screen = Screen.MusicPlayer(s) }
+                                    MiniPlayerOrEmpty(
+                                        onOpen = { screen = Screen.MusicPlayer(s) },
+                                        firstActionFocus = miniOpen,
+                                    )
                                 }
                             },
                         )
@@ -1927,8 +1969,16 @@ private fun CenterHint(
  * 会多出一条 56dp 的黑带，把最后几首挤出屏幕。
  */
 @Composable
-private fun MiniPlayerOrEmpty(onOpen: () -> Unit) {
+private fun MiniPlayerOrEmpty(
+    onOpen: () -> Unit,
+    firstActionFocus: FocusRequester? = null,
+) {
     if (com.projectionroom.ui.music.MusicBox.hasQueue) {
-        com.projectionroom.ui.music.MiniPlayerBar(onOpen = onOpen)
+        // 电视端用左栏版播放器：无卡片底、进度在文字下面，
+        // 贴在歌单页左栏底部时是「版面的一部分」而不是一条浮层便签
+        com.projectionroom.ui.component.TvNowPlayingBar(
+            onOpen = onOpen,
+            firstActionFocus = firstActionFocus,
+        )
     }
 }
