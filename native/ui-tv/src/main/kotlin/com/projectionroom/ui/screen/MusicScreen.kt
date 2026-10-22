@@ -592,7 +592,7 @@ private fun CoverBox(p: NasApi.Playlist, width: Dp?) {
         Text(
             "${p.count} 首",
             color = Color.White.copy(alpha = 0.92f),
-            fontSize = ProomSp(10.sp),
+            fontSize = ProomSp(11.sp),
             fontWeight = FontWeight.Medium,
             // 放右上角：歌单封面几乎都是模板图、文字压在中间偏下，
             // 角标放左下会直接糊在人家的标题上

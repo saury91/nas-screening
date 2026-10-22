@@ -323,6 +323,8 @@ fun PlayerScreen(
     var buffering by remember { mutableStateOf(true) }
     var playbackError by remember(playUrl) { mutableStateOf<String?>(null) }
     var failedLines by remember { mutableStateOf(0) }
+    /** 这一路源有没有真正出过画面（起播超时兜底用，见下面「起播看护」） */
+    var readyOnce by remember { mutableStateOf(false) }
 
     // ── 控制层状态 ──
     var controlsVisible by remember { mutableStateOf(true) }
@@ -755,6 +757,7 @@ fun PlayerScreen(
 
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
+                if (state == Player.STATE_READY) readyOnce = true
                 // 直播流结束多半是源断了，自动跳下一个台会让人莫名其妙
                 if (state == Player.STATE_ENDED && !live) {
                     val eps = curEps
@@ -769,6 +772,41 @@ fun PlayerScreen(
         onDispose {
             exo.removeListener(listener)
             exo.release()
+        }
+    }
+
+    // 视频/直播一开声，音乐必须让路。
+    //
+    // 之前没有这行：从歌单页点进电影，电影对白和背景音乐一起响，
+    // 两个音轨叠着谁也听不清。只暂停、不清队列 —— 用户从播放器退出来
+    // 还能按播放键接着听，不用重新找歌。
+    LaunchedEffect(Unit) {
+        com.projectionroom.ui.music.MusicBox.pause()
+    }
+
+    // ── 起播看护 ──
+    //
+    // 源「连得上但一直不来数据」时 ExoPlayer 不会报错，只会停在 buffering：
+    // 实测某个 IPTV 台点了之后 20 秒还挂在「正在连接 · 直播」，遥控器上除了返回没别的出路。
+    // 这里给起播加时限，超时就走和 onPlayerError 一样的换源路径。
+    //
+    // 判据是「这一路有没有出过画面」而不是「现在缓不缓冲」：已经播起来过就不再管，
+    // 中途卡一下是网络抖动，贸然换掉等于把用户从看到一半拽走。
+    LaunchedEffect(playUrl) { readyOnce = false }
+    val curBuffering by rememberUpdatedState(buffering)
+    LaunchedEffect(playUrl, srcIndex, lineIndex, epIndex) {
+        delay(20_000)
+        if (readyOnce || !curBuffering) return@LaunchedEffect
+        if (live && srcIndex + 1 < sources.size) {
+            srcIndex += 1
+            playbackError = null
+        } else if (!live && lineIndex + 1 < vod.lines.size) {
+            failedLines += 1
+            lineIndex += 1
+            epIndex = 0
+            playbackError = null
+        } else {
+            playbackError = if (live) "这个台的源都播不动" else "这条线路播不动"
         }
     }
 
@@ -1471,7 +1509,7 @@ private fun PlayerTopBar(
                     Text(
                         subtitle,
                         color = Color.White.copy(alpha = 0.55f),
-                        fontSize = ProomSp(11.sp),
+                        fontSize = ProomSp(12.sp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp),
@@ -1483,7 +1521,7 @@ private fun PlayerTopBar(
         // 和手势/内容层叠在一起，点起来很飘
         if (!liveChannel.isNullOrBlank()) {
             Box(
-                Modifier.size(40.dp).clip(CircleShape).tvFocusRing(CircleShape).clickable(onClick = onToggleFav),
+                Modifier.size(48.dp).clip(CircleShape).tvFocusRing(CircleShape).clickable(onClick = onToggleFav),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -2239,7 +2277,8 @@ private fun LockButton(
 ) {
     Box(
         modifier
-            .size(40.dp)
+            // 锁定态是用户唯一能点的东西，40dp 在沙发上看太飘
+            .size(48.dp)
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = if (locked) 0.55f else 0.35f))
             .clickable(onClick = onToggle),

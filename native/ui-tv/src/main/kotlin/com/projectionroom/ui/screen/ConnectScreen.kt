@@ -156,7 +156,7 @@ fun ConnectScreen(
                     var skipFocused by remember { mutableStateOf(false) }
                     val skipShape = RoundedCornerShape(ProomShape.sm)
                     Text(
-                        "先跳过，稍后在「设置」里填地址 ›",
+                        "先跳过，稍后在「设置」里填地址",
                         style = ProomType.meta,
                         color = if (skipFocused) ProomColor.accent else ProomColor.muted,
                         modifier = Modifier

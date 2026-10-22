@@ -228,6 +228,7 @@ private fun StageHeader(
             trailing = {
                 FavBtn(40.dp, trailingFocusable)
                 FxBtn(40.dp, onFx, trailingFocusable)
+                StopBtn(40.dp, trailingFocusable) { onBack(); MusicBox.stop() }
             },
         )
         return
@@ -243,6 +244,7 @@ private fun StageHeader(
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
             FavBtn(40.dp)
             FxBtn(40.dp, onFx)
+            StopBtn(40.dp) { onBack(); MusicBox.stop() }
         }
     }
 }
@@ -279,6 +281,29 @@ private fun FxBtn(size: Dp, onFx: () -> Unit, focusable: Boolean = true) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(PlayerIcons.Sliders, "音效", tint = Color.White.copy(alpha = 0.78f), modifier = Modifier.size(21.dp))
+    }
+}
+
+/**
+ * 结束播放：停播 + 清空队列 + 退回上一页。
+ *
+ * 歌单页左栏第四颗按钮改成循环模式之后，整个 App 就再没有「关掉播放器」的地方了
+ * —— 队列会一直挂到退出 App 为止。全屏页是它该待的位置：这一整块版面只属于
+ * 当前这首歌，在这里关掉不会让人意外；而左栏那块是歌单页的一部分，
+ * 在那儿点个 X 把歌停了，用户还得自己再点一次播放。
+ */
+@Composable
+private fun StopBtn(size: Dp, focusable: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(size)
+            .focusProperties { canFocus = focusable }
+            .clip(CircleShape)
+            .tvFocusRing(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(PlayerIcons.Close, "结束播放", tint = Color.White.copy(alpha = 0.78f), modifier = Modifier.size(21.dp))
     }
 }
 
