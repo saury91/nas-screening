@@ -500,6 +500,7 @@ private fun CategoryPane(
     var loading by remember(slug) { mutableStateOf(cached == null) }
     var loadingMore by remember(slug) { mutableStateOf(false) }
     var err by remember(slug) { mutableStateOf<String?>(null) }
+    var sites by remember(slug) { mutableIntStateOf(0) }
     // 复原滚动位置那一下不许触底加载：scrollToItem 会把 lastIndex 推到末尾
     var allowMore by remember(slug) { mutableStateOf(cached == null) }
 
@@ -513,6 +514,7 @@ private fun CategoryPane(
             loadBrowse(slug, p, "", "").collect { d ->
                 items = if (append) (base + d.items).distinctBy { it.name } else d.items
                 more = d.more
+                sites = d.sites
                 page = p
                 // 缓存或第一个源到了就撤掉骨架；后续快照只会往队尾追加，前面的不动
                 loading = false
@@ -639,14 +641,17 @@ private fun CategoryPane(
                             Text("○", color = ProomColor.muted, fontSize = 20.sp)
                         }
                         Spacer(Modifier.height(14.dp))
+                        // sites = 0：这一类没有参与聚合的片源，提示去配片源而不是「刷新试试」
+                        val noSources = sites == 0
                         Text(
-                            "「$name」暂时没有内容",
+                            if (noSources) "还没有片源" else "「$name」暂时没有内容",
                             style = ProomType.body,
                             color = ProomColor.dim,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "下拉可以重新拉取，或者回首页看看推荐",
+                            if (noSources) "在设置里导入配置包，或连上 NAS 同步一次。"
+                            else "下拉可以重新拉取，或者回首页看看推荐",
                             style = ProomType.label,
                             color = ProomColor.muted,
                         )
