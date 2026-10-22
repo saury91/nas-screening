@@ -28,6 +28,31 @@
   linear-gradient(90deg,rgba(7,8,11,.88),rgba(7,8,11,.4) 56%,transparent 84%)}
 .detail-body{position:relative;z-index:2;display:flex;gap:clamp(22px,3.4vw,46px);
   align-items:flex-end;width:100%;max-width:var(--shell);margin-inline:auto}
+/* ── 骨架态 ──────────────────────────────────────────────
+   骨架阶段的 hero 还没有封面，如果沿用全局 ambient（上一页那张海报的
+   暖色晕染），会得到「一片脏橘 + 几块灰条」，比没有骨架更难看。
+   这里给 hero 自己一块冷灰底，和加载完的深色 hero 是同一色系。 */
+.detail-hero.is-skeleton{
+  background:
+    radial-gradient(820px 380px at 20% 4%,rgba(124,140,180,.10),transparent 66%),
+    linear-gradient(180deg,#12141b,#0a0b0f 60%,#07080b);
+}
+.detail-hero.is-skeleton .hero-bg{
+  background:linear-gradient(120deg,#232936 0%,#171b24 44%,#202634 100%);
+  filter:blur(26px) saturate(108%) brightness(.95);
+}
+.detail-hero.is-skeleton .detail-poster{box-shadow:0 24px 54px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.06)}
+/* 骨架块统一到一档更淡的灰，压在深底上不刺眼；圆角跟真实元素对齐 */
+.skl-ph{
+  border-radius:8px;
+  background:linear-gradient(100deg,rgba(255,255,255,.075) 30%,
+    rgba(255,255,255,.125) 50%,rgba(255,255,255,.075) 70%);
+  background-size:220% 100%;animation:shimmer 1.4s infinite linear;
+}
+/* 海报位给一层描边，否则在深底上只剩一团看不出形状的雾 */
+.detail-hero.is-skeleton .detail-poster{border:1px solid rgba(255,255,255,.09)}
+.skl-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.skl-hint{margin:0;font-size:12.5px;color:#8a919e}
 .detail-poster{position:relative;width:clamp(150px,16vw,224px);aspect-ratio:2/3;border-radius:16px;overflow:hidden;
   flex:none;box-shadow:0 30px 70px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.1)}
 .detail-poster img{width:100%;height:100%;object-fit:cover}
@@ -509,16 +534,17 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radiu
 .info-list dt{flex:none;width:38px;color:var(--muted)}
 .info-list dd{margin:0;color:#c3c8d2;min-width:0;word-break:break-word}
 
-@media (min-width:1200px){
-  .detail-panels{grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:stretch}
+@media (min-width:1100px){
+  /* 侧栏宽度走 --aside 变量：340 → 1720 上 380 → 2K 400 → 4K 420，
+     不用为每个显示器尺寸再写一遍 grid-template-columns */
+  .detail-panels{grid-template-columns:minmax(0,1fr) var(--aside);gap:18px;align-items:stretch}
   .play-panel{height:100%;align-content:start}
   .ep-block{display:flex;flex-direction:column;min-height:0}
   .ep-grid{flex:1;max-height:none}
 }
-@media (min-width:1600px){
-  .detail-panels{grid-template-columns:minmax(0,1fr) 340px}
-  .detail-title{font-size:clamp(44px,2.8vw,64px)}
-  .info-list>div{font-size:13px}
+@media (min-width:1720px){
+  .detail-title{font-size:clamp(44px,2.8vw,72px)}
+  .info-list>div{font-size:13.5px}
 }
 
 
@@ -592,7 +618,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radiu
 .msearch-x:hover{background:rgba(255,255,255,.12);color:#fff}
 .mresults{margin-top:14px}
 .mresults .tracklist{margin-top:4px}
-@media (max-width:700px){
+@media (max-width:760px){
   .msearch{width:100%;order:3;margin-top:10px}
   .page-head{flex-wrap:wrap}
 }
@@ -685,7 +711,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radiu
 .pl-tracks .track{grid-template-columns:38px minmax(0,1fr) minmax(0,190px) 48px}
 .pl-tracks.no-dur .track{grid-template-columns:38px minmax(0,1fr) minmax(0,220px)}
 /* 手机上歌单曲目只留 序号 + 歌名，否则歌名被挤成 "Late ..." */
-@media (max-width:700px){
+@media (max-width:760px){
   .pl-tracks .track,.pl-tracks.no-dur .track{grid-template-columns:26px minmax(0,1fr)}
   .pl-tracks .t-artist,.pl-tracks .t-dur{display:none}
 }
@@ -738,7 +764,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radiu
 }
 
 /* 收口：窄屏两栏要缩，手机单栏（前面的全局规则会盖掉旧断点，这里补回来） */
-@media (max-width:1000px) and (min-width:761px){
+@media (max-width:1100px) and (min-width:761px){
   .np-grid{grid-template-columns:minmax(160px,220px) minmax(0,1fr);column-gap:24px}
   .np-disc{width:min(24vw,200px)}
 }
@@ -749,7 +775,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radiu
 }
 
 /* 窄屏抽屉打开时，把主区压暗——否则看起来像「内容被切掉了」 */
-@media (max-width:1099px){
+@media (max-width:1100px){
   .np-wrap:has(.np-side.open) .np-main{opacity:.3;transition:opacity .28s var(--ease)}
 }
 

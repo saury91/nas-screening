@@ -82,6 +82,7 @@ SLUG_CAT = {v: k for k, v in CAT_SLUG.items()}
 
 # 十几个源并发查询时，个别慢站不能拖住整体：到点就用已返回的
 SEARCH_DEADLINE = 7.0
+BROWSE_DEADLINE = 9.0     # 片库一次要打 5 站 × 4 分类，给得比搜索宽一点
 BROWSE_SITES = 5          # 浏览用几个源
 CATMAP_TTL = 86400        # 分类 ID 映射缓存一天
 RECOMMEND_TTL = 1800      # 推荐缓存 30 分钟

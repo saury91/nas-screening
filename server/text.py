@@ -32,7 +32,17 @@ def _clean_desc(s, n=560):
     """采集站的 vod_content 带 html 标签和一堆换行，清干净再截断"""
     if not s:
         return ""
-    s = html_mod.unescape(re.sub(r"<[^>]+>", "", str(s)))
+    s = re.sub(r"<br\s*/?>", " ", str(s), flags=re.I)
+    # 段落结束也转空格：直接删会把上下段粘成一串
+    s = re.sub(r"</p\s*>", " ", s, flags=re.I)
+    s = re.sub(r"<[^>]+>", "", s)
+    # 采集站的简介常是二次转义的（"&amp;#039;"）：unescape 一趟只解到
+    # "&#039;"，撇号、引号就会以字面量露在页面上。解到不再变化为止。
+    for _ in range(3):
+        t = html_mod.unescape(s)
+        if t == s:
+            break
+        s = t
     s = re.sub(r"\s+", " ", s).strip()
     return s[:n]
 

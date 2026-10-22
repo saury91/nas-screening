@@ -112,27 +112,6 @@ function paint(root, d) {
   const rec = d.rec || {};
   const items = heroItems(rec);
   const hist = (d.history || []).filter(x => x.kind === 'online' && x.title);
-  const stat = d.stat || {};
-
-  const quick = `<section class="section">
-    <div class="section-head"><h2 class="section-title">去哪儿</h2>
-      <span class="section-sub">直播、音乐、片源都在这里</span></div>
-    <div class="quick-grid">
-      <a class="quick live" href="#/live" data-focus>
-        <h4>直播</h4><p>${stat.live ? stat.live + ' 个频道，按分组浏览，点开就看'
-        : (isApp() ? '还没有频道，等电脑端把直播源配好' : '还没有频道，去设置里导入一个 M3U 源')}</p>
-        <span class="q-ico">${icon('tv')}</span></a>
-      <a class="quick music" href="#/music" data-focus>
-        <h4>音乐</h4><p>接你的 Navidrome，或直接扫 NAS 上的音乐目录</p>
-        <span class="q-ico">${icon('music')}</span></a>
-      ${isApp() ? `<a class="quick fav" href="#/settings/favorites" data-focus>
-        <h4>我的收藏</h4><p>点过心的片子都收在这儿</p>
-        <span class="q-ico">${icon('heart')}</span></a>`
-      : `<a class="quick sources" href="#/settings/sources" data-focus>
-        <h4>片源管理</h4><p>${stat.sites || 0} 个片源在跑，支持 TVBox 配置一键导入</p>
-        <span class="q-ico">${icon('link')}</span></a>`}
-    </div>
-  </section>`;
 
   const cont = hist.length ? `<section class="section">
     <div class="section-head"><h2 class="section-title">继续观看</h2>
@@ -181,7 +160,6 @@ function paint(root, d) {
   root.innerHTML = `<div class="page bleed" style="padding:0">
     ${heroHTML(items)}
     ${cont}
-    ${quick}
     ${nothing ? `<div style="padding:40px var(--pad)">
       ${emptyState({
         iconName: 'film', title: '片库还在预热',

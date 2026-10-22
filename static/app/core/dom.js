@@ -14,6 +14,43 @@ export function el(html) {
   return t.content.firstElementChild;
 }
 
+/**
+ * 简介洗成纯文本：换行标签转空格、其余标签剥掉、常见实体解码。
+ *
+ * 采集站的 vod_content 常是二次转义的（"&amp;#039;"），第一趟只把 &amp; 解成
+ * &，剩下的 &#039; 要再解一次才干净，所以解到不再变化为止（最多三轮）。
+ *
+ * 返回的是**未转义**文本，插进 innerHTML 前必须再过一遍 esc()。
+ */
+export function plainText(html) {
+  let s = String(html == null ? '' : html);
+  if (!s) return '';
+  s = s.replace(/<br\s*\/?>/gi, ' ').replace(/<\/p\s*>/gi, ' ');
+  s = s.replace(/<[^>]+>/g, '');
+  for (let pass = 0; pass < 3; pass++) {
+    const before = s;
+    s = s
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&ldquo;/g, '\u201c')
+      .replace(/&rdquo;/g, '\u201d')
+      .replace(/&hellip;/g, '\u2026')
+      .replace(/&mdash;/g, '\u2014')
+      .replace(/&middot;/g, '\u00b7')
+      .replace(/&rsquo;/g, '\u2019')
+      .replace(/&amp;/g, '&')
+      .replace(/&#(x?)([0-9a-fA-F]+);/g, (m, hex, code) => {
+        const n = parseInt(code, hex ? 16 : 10);
+        return n >= 1 && n <= 0x10ffff ? String.fromCodePoint(n) : m;
+      });
+    if (s === before) break;
+  }
+  return s.replace(/\s+/g, ' ').trim();
+}
+
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export function debounce(fn, wait = 300) {
