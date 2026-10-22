@@ -5,6 +5,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -19,7 +20,9 @@ class MusicConfigTest {
     private class RecHttp(private val body: String = "[]") : Http {
         var lastUrl: String = ""
         var lastReferer: String? = null
+        var calls: Int = 0
         override suspend fun get(url: String, referer: String?): String {
+            calls++
             lastUrl = url
             lastReferer = referer
             return body
@@ -74,11 +77,17 @@ class MusicConfigTest {
     }
 
     @Test
-    fun `不传参数时仍是内置默认地址`() = runTest {
+    fun `没配地址时不发请求`() = runTest {
+        // 仓库不自带在线音源：不传 base 就该彻底静默，一个请求都不许出去
         val http = RecHttp()
         val api = MusicApi(http)
-        api.recommend(limit = 3)
-        assertTrue(http.lastUrl.startsWith(MusicApi.DEFAULT_BASE), http.lastUrl)
-        assertEquals(MusicApi.REFERER, http.lastReferer)
+        assertEquals("", MusicApi.DEFAULT_BASE)
+        assertTrue(api.recommend(limit = 3).isEmpty())
+        assertTrue(api.categories().isEmpty())
+        assertTrue(api.search("x").isEmpty())
+        assertEquals("", api.trackUrl("123"))
+        assertTrue(api.lyric("123").isEmpty())
+        assertFalse(api.isFullTrack("http://cdn/a.mp3"))
+        assertEquals(0, http.calls)
     }
 }
