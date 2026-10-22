@@ -189,7 +189,7 @@ async function sourcesPanel(panel) {
     }
     if (act === 'del') {
       const ok = await dialog({
-        title: '删除这个片源？', body: '删掉后搜索和浏览不再使用它。内置源删了不会自动恢复，但可以重新导入。',
+        title: '删除这个片源？', body: '删掉后搜索和浏览不再使用它。删了不会自动恢复，需要时重新导入。',
         ok: '删除',
       });
       if (ok) {
@@ -270,8 +270,15 @@ async function sourcesPanel(panel) {
 
   // 自动发现片源
   const dInfo = panel.querySelector('#src-discover-info');
+  let dState = {};
   const paintDiscover = st => {
-    st = st || {};
+    st = dState = st || {};
+    // 仓库不自带资源目录：没配 CMS_SEEDS 时这个功能一步都不会跑，
+    // 与其让用户点完等 90 秒没个结果，不如直接说清楚
+    if (!(st.catalogs || []).length) {
+      dInfo.textContent = '未配置资源目录，自动发现不可用。片源可以手动添加，或导入一份配置包。';
+      return;
+    }
     if (st.running) {
       dInfo.textContent = `正在拉取配置并逐个验证，约需 1 分钟…（已开始 ${timeAgo(st.since)}）`;
       return;
@@ -284,6 +291,7 @@ async function sourcesPanel(panel) {
   try { paintDiscover(await api.discoverSources()); } catch (e) { /* 旧库没有这个字段 */ }
 
   panel.querySelector('#src-discover').onclick = async () => {
+    if (!(dState.catalogs || []).length) { toast('未配置资源目录，自动发现不可用', 'err'); return; }
     const b = panel.querySelector('#src-discover');
     b.disabled = true;
     try {

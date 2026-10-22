@@ -64,7 +64,7 @@ fun TvMineScreen(
     onBack: () -> Unit,
     /** 打开「用手机导入配置」的配对页；不传就不显示这个入口 */
     onImportFromPhone: (() -> Unit)? = null,
-    /** 打开设置页（NAS 地址 / 同步配置 / 恢复内置配置 / 检查更新） */
+    /** 打开设置页（NAS 地址 / 同步配置 / 恢复出厂 / 检查更新） */
     onSettings: (() -> Unit)? = null,
     topInset: Dp = 0.dp,
 ) {

@@ -4,12 +4,13 @@
 ThreadingHTTPServer 每请求一个线程，sqlite3 连接不能跨线程共用，
 所以用 threading.local 按线程持有。连接断了重试一次（NAS 上偶发 I/O 抖动）。
 """
+import json
 import os
 import sqlite3
 import threading
 import time
 
-from .config import DB_PATH, DEFAULT_ONLINE_SITES, DEFAULT_LIVE_SOURCES
+from .config import DB_PATH, SEED_FILE
 from .log import log
 
 _INIT_LOCK = threading.Lock()
@@ -321,11 +322,71 @@ def source_delete(sid):
 
 
 def seed_sources():
-    """首次启动播种内置源；用户删光了也不回填（不然删不掉）。"""
+    """首启播种：**只认本地 seed 文件**，仓库里没有任何内置源。
+
+    文件格式与 /api/config/bundle 完全一致（由 tools/export-seed.py 生成），
+    放在 data/seed.json（.gitignore 已忽略）——换个环境把这份文件带过去，
+    片源、直播频道、音乐接口会一次性装回去。
+
+    没有这个文件就什么也不写：新装环境是空壳，等使用者自己配置。
+    """
+    if not os.path.exists(SEED_FILE):
+        return
+    try:
+        with open(SEED_FILE, "r", encoding="utf-8") as f:
+            seed = json.load(f)
+    except Exception as e:
+        log("seed 读取失败 %s：%s" % (SEED_FILE, str(e)[:120]))
+        return
+
+    # 片源：只在表里没有 cms 时播种，用户删光了也不回填
     if not dbrun("SELECT COUNT(*) FROM sources WHERE kind='cms'", fetch=True)[0][0]:
-        for s in DEFAULT_ONLINE_SITES:
-            source_upsert("cms", s["name"], s["api"], type_=1, pri=s["pri"])
-        log("已写入 %d 个内置片源" % len(DEFAULT_ONLINE_SITES))
+        n = 0
+        for s in seed.get("sources") or []:
+            api = (s.get("api") or "").strip()
+            if not api.startswith("http"):
+                continue
+            source_upsert("cms", s.get("name") or api, api,
+                          type_=int(s.get("type") or 1),
+                          pri=int(s.get("pri") or 5), cat=s.get("cat"))
+            n += 1
+        if n:
+            log("已从 seed 写入 %d 个片源" % n)
+
+    lv = seed.get("live") or {}
+
+    # 直播源（每日汇总 & 手动刷新用）
     if not dbrun("SELECT COUNT(*) FROM sources WHERE kind='live'", fetch=True)[0][0]:
-        for name, url in DEFAULT_LIVE_SOURCES:
-            source_upsert("live", name, url, type_=0, pri=5)
+        n = 0
+        for feed in lv.get("feeds") or []:
+            u = (feed.get("url") or "").strip()
+            if not u.startswith("http"):
+                continue
+            source_upsert("live", feed.get("name") or u, u, type_=0, pri=5)
+            n += 1
+        if n:
+            log("已从 seed 写入 %d 个直播源" % n)
+
+    # 频道表：带上就用（首启就有台可看），之后由手动/每日刷新维护
+    if not dbrun("SELECT COUNT(*) FROM live", fetch=True)[0][0]:
+        rows = []
+        for it in lv.get("items") or []:
+            grp, name = it.get("group") or "", it.get("name") or ""
+            for u in it.get("urls") or []:
+                if u:
+                    rows.append((grp, name, u, "seed", int(time.time())))
+        for r in rows:
+            dbrun("INSERT OR IGNORE INTO live(grp,name,url,src,added_at) "
+                  "VALUES(?,?,?,?,?)", r)
+        if rows:
+            log("已从 seed 写入 %d 条直播地址" % len(rows))
+
+    # 每日汇总的候选源清单
+    if lv.get("seeds") and not pref_json("live.seeds"):
+        pref_set_json("live.seeds", lv["seeds"])
+
+    # 在线音乐接口
+    mu = seed.get("music") or {}
+    if (mu.get("api") or "").strip() and not pref_read("music.api"):
+        pref_write("music.api", mu["api"])
+        pref_write("music.referer", mu.get("referer") or "")

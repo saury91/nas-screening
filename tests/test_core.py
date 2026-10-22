@@ -11,6 +11,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 测试只写临时库：必须在 import server.* 之前设置（config 在导入时读 DB_PATH），
+# 否则 pref_write 之类的用例会写进真实的 data/media.db
+os.environ.setdefault("DB_PATH", os.path.join(tempfile.mkdtemp(prefix="proom-test-"), "t.db"))
+
 from server.text import (_clean_desc, _norm_key, _relevance, _score_max,  # noqa: E402
                          _zh_count, guess_quality)
 from server.providers.cms import _parse_play_url  # noqa: E402
@@ -183,7 +187,28 @@ class TestMusicBox(unittest.TestCase):
     def test_stream_target_guard(self):
         from server.services import musicbox as mb
         self.assertEqual(mb.stream_target("abc"), "")
-        self.assertIn("type=url", mb.stream_target("123"))
+
+    def test_stream_target_needs_base(self):
+        """没配在线音源时一律返回空串，绝不拼出半截地址去打上游。"""
+        from server.services import musicbox as mb
+        self.assertFalse(mb.configured())
+        self.assertEqual(mb.stream_target("123"), "")
+        self.assertEqual(mb.lrc_url("123"), "")
+        self.assertEqual(mb.recommend(), [])
+        self.assertEqual(mb.categories(), [])
+        self.assertEqual(mb.playlist("1")["tracks"], [])
+
+    def test_stream_target_with_base(self):
+        """配了地址才拼目标 URL；用 pref 覆盖，不依赖环境变量。"""
+        from server.db import pref_write
+        from server.services import musicbox as mb
+        pref_write("music.api", "https://example.invalid")
+        try:
+            self.assertTrue(mb.configured())
+            self.assertIn("type=url", mb.stream_target("123"))
+            self.assertIn("type=lrc", mb.lrc_url("123"))
+        finally:
+            pref_write("music.api", "")
 
     def test_full_threshold(self):
         # 试听片段约 480KB，整曲至少 1.2MB：阈值两侧各判一次

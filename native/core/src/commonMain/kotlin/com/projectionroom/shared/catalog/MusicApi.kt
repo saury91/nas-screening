@@ -31,6 +31,9 @@ class MusicApi(
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    /** 没配接口地址时整块关闭：所有请求在这里短路，不发出去再失败 */
+    private val ready: Boolean get() = base.isNotBlank()
+
     /**
      * 解析放后台。
      *
@@ -41,6 +44,7 @@ class MusicApi(
 
     // ── 推荐歌单 ──────────────────────────────────────────────
     suspend fun recommend(limit: Int = 14): List<NasApi.Playlist> {
+        if (!ready) return emptyList()
         val txt = http.get("$base/netease/playlist/recommend?limit=${limit.coerceIn(1, 30)}", referer)
         return parse { runCatching { json.decodeFromString<List<PlRaw>>(txt) }.getOrDefault(emptyList()) }
             .mapNotNull { it.toPlaylist() }
@@ -48,6 +52,7 @@ class MusicApi(
 
     // ── 分类树 ────────────────────────────────────────────────
     suspend fun categories(): List<NasApi.MusicCatGroup> {
+        if (!ready) return emptyList()
         val txt = http.get("$base/getPlaylistCategory", referer)
         val roots = parse { runCatching { json.decodeFromString<List<CatRoot>>(txt) }.getOrDefault(emptyList()) }
         // 上游会返回多个音源，只取第一个（netease）
@@ -62,7 +67,7 @@ class MusicApi(
 
     // ── 分类下的歌单 ──────────────────────────────────────────
     suspend fun categoryPlaylists(cat: String, limit: Int = 24): List<NasApi.Playlist> {
-        if (cat.isBlank()) return emptyList()
+        if (cat.isBlank() || !ready) return emptyList()
         val txt = http.get(
             "$base/netease/playlist/category?type=${cat.encodeQuery()}&limit=${limit.coerceIn(1, 60)}",
             referer,
@@ -81,7 +86,7 @@ class MusicApi(
      */
     suspend fun search(keyword: String, limit: Int = 40): List<NasApi.Track> {
         val kw = keyword.trim()
-        if (kw.isBlank()) return emptyList()
+        if (kw.isBlank() || !ready) return emptyList()
         val txt = http.get("$base/netease/search/song?keywords=${kw.encodeQuery()}", referer)
         return parse { runCatching { json.decodeFromString<List<TrackRaw>>(txt) }.getOrDefault(emptyList()) }
             .asSequence()
@@ -97,7 +102,7 @@ class MusicApi(
 
     // ── 歌单详情 ──────────────────────────────────────────────
     suspend fun playlist(id: String, limit: Int = 400): NasApi.PlaylistDetail {
-        if (id.isBlank()) return NasApi.PlaylistDetail()
+        if (id.isBlank() || !ready) return NasApi.PlaylistDetail(id = id)
         val txt = http.get("$base/meting/?server=netease&type=playlist&id=${id.encodeQuery()}", referer)
         val d = parse { runCatching { json.decodeFromString<PlDetailRaw>(txt) }.getOrNull() }
             ?: return NasApi.PlaylistDetail(id = id)
@@ -131,7 +136,7 @@ class MusicApi(
      * 地址有时效（十几分钟），必须点击时现取；解开后还能避免播放器跟 302 时丢请求头。
      */
     suspend fun trackUrl(sid: String): String {
-        if (sid.isBlank()) return ""
+        if (sid.isBlank() || !ready) return ""
         val meting = "$base/meting/?server=netease&type=url&id=${sid.encodeQuery()}"
         return http.resolveRedirect(meting, referer).takeIf { it.startsWith("http") }.orEmpty()
     }
@@ -144,7 +149,7 @@ class MusicApi(
      * 拿不到就返回空，界面上显「暂无歌词」，不影响播放。
      */
     suspend fun lyric(sid: String): List<LrcLine> {
-        if (sid.isBlank()) return emptyList()
+        if (sid.isBlank() || !ready) return emptyList()
         val txt = runCatching {
             http.get("$LYRIC_BASE?id=${sid.encodeQuery()}&lv=1&kv=1&tv=-1", REFERER_NETEASE)
         }.getOrNull() ?: return emptyList()
@@ -154,6 +159,7 @@ class MusicApi(
 
     /** 判断是不是「试听片段」：整曲基本都在 1.2MB 以上，片段约 480KB */
     suspend fun isFullTrack(cdnUrl: String): Boolean {
+        if (!ready) return false
         val size = http.contentLength(cdnUrl)
         return size >= FULL_MIN
     }
@@ -211,11 +217,16 @@ class MusicApi(
     )
 
     companion object {
-        /** 公开聚合接口；可通过环境变量在服务端换，客户端这里保持一致 */
-        const val DEFAULT_BASE = "https://disabled.invalid"
+        /**
+         * 在线音乐聚合接口。**默认空**：仓库不自带任何在线音源。
+         *
+         * 地址由 NAS 下发的配置包（music.api）填进来；没配就整块关闭，
+         * 音乐页只显示本地目录与 Subsonic，不访问任何上游。
+         */
+        const val DEFAULT_BASE = ""
 
-        /** 聚合接口对 Referer 校验很死，缺了直接 403 */
-        const val REFERER = "https://disabled.invalid/"
+        /** 聚合接口对 Referer 校验很死，缺了直接 403；同样由配置包下发 */
+        const val REFERER = ""
 
         /** 整曲最短 1.2MB；试听片段固定 30 秒、约 480KB */
         const val FULL_MIN = 1200L * 1024L

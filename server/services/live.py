@@ -318,9 +318,10 @@ _RUN = {"running": False, "since": 0}
 
 
 def seeds():
-    """候选源 = 设置里的清单（没有就用内置默认值）+ 用户手动加的直播源。
+    """候选源 = 设置里的清单（没配就是空）+ 用户手动加的直播源。
 
     把这些 URL 当作同一个池子：每天全部拉一遍，谁有效留谁。
+    仓库不自带任何候选源，一条都没有时自动汇总直接跳过。
     """
     v = pref_json("live.seeds")
     if isinstance(v, list) and v:
@@ -370,7 +371,15 @@ def auto_collect(max_probe=None, workers=32, timeout=4):
     pool, used = {}, []
     fetched = 0
 
-    for u in seeds():
+    srcs = seeds()
+    if not srcs:
+        # 一条候选源都没有：不去打任何上游，也不动现有频道表
+        log("没有配置直播候选源，跳过自动汇总")
+        return {"at": int(time.time()), "seeds": 0, "fetched": 0, "channels": 0,
+                "probed": 0, "ok_urls": 0, "kept": 0, "rows": 0, "seconds": 0,
+                "skipped": True, "reason": "no-seeds", "detail": []}
+
+    for u in srcs:
         try:
             st, body, _, _ = raw_get(u, timeout=25)
             chans = parse_live(body.decode("utf-8", "replace"))

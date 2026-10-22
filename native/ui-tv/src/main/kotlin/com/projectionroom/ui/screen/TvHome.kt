@@ -211,7 +211,9 @@ fun TvHome(
             if (!loading && continueWatching.isEmpty() && latest.isEmpty()) {
                 item {
                 Box(Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) {
-                    Text("NAS 里还没有可展示的内容", style = ProomType.meta, color = ProomColor.muted)
+                    // 仓库不自带片源：空首页是首次安装的常态，不是故障
+                    Text("还没有片源：在设置里导入配置包，或连上 NAS 同步一次",
+                        style = ProomType.meta, color = ProomColor.muted)
                 }
                 }
             }
