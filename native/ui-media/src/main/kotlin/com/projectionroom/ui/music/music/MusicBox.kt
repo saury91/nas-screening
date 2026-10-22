@@ -136,13 +136,20 @@ object MusicBox {
                     Player.STATE_READY -> {
                         loading = false
                         duration = p.duration.coerceAtLeast(0L)
-                        // 会话 id 要等播放器真正建好才有，这里绑定并套用当前预设
+                        // 会话 id 要等播放器真正建好才有，这里绑定并套用当前预设。
+                        // 每次都调：看完视频后 eq 已经绑到视频的会话上了，回音乐得抢回来
+                        AudioFx.init(ctx)
                         AudioFx.attach(p.audioSessionId)
                     }
                     Player.STATE_BUFFERING -> loading = true
                     Player.STATE_ENDED -> {
-                        // 单曲循环交给 ExoPlayer 自己；其余走「下一首」
-                        if (repeat != RepeatMode.One) next(auto = true)
+                        // 睡眠定时设的是「听完这首」：到末尾就停，不自动接下一首
+                        if (SleepTimer.onTrackEnded()) {
+                            playing = false
+                        } else if (repeat != RepeatMode.One) {
+                            // 单曲循环交给 ExoPlayer 自己；其余走「下一首」
+                            next(auto = true)
+                        }
                     }
                 }
             }
@@ -154,6 +161,9 @@ object MusicBox {
             }
         })
         exo = p
+        // 睡眠定时的预淡出：定时器只给 0..1 的系数，落到哪一路由这里决定。
+        // 注册在播放器创建时，所以全屏页关掉、只在后台放时也照样收音量。
+        SleepTimer.setFadeSink(this) { k -> runCatching { p.volume = k } }
         startTicker()
         return p
     }
@@ -264,8 +274,16 @@ object MusicBox {
         next(auto = true)
     }
 
-    fun toggle() {        val p = exo ?: return
-        if (p.isPlaying) p.pause() else p.play()
+    fun toggle() {
+        val p = exo ?: return
+        if (p.isPlaying) {
+            p.pause()
+        } else {
+            // 刚看完视频时均衡器还挂在视频的音频会话上，这里抢回来
+            appContext?.let { AudioFx.init(it) }
+            AudioFx.attach(p.audioSessionId)
+            p.play()
+        }
     }
 
     fun next(auto: Boolean = false) {
@@ -304,6 +322,30 @@ object MusicBox {
         // 拖动后立刻重算当前句；等 ticker 的话暂停状态下会停在上一次的位置
         val at = Lrc.indexAt(lyric, to)
         if (at != lyricAt) lyricAt = at
+    }
+
+    /**
+     * 睡眠定时到点：先把声音收掉再暂停。
+     *
+     * 深夜戴耳机时「啪」一下静音比什么都提神，所以走 3 秒线性淡出；
+     * 淡完把音量还原，下次播放不会只剩半格声。
+     */
+    fun fadeOutAndPause(ms: Long = 3_000) {
+        val p = exo ?: return
+        scope.launch {
+            val steps = 30
+            val gap = (ms / steps).coerceAtLeast(40L)
+            // 从「当前音量」开始降：预淡出已经收掉大半时，
+            // 再从 1.0 起跳会先炸一下再变小
+            val from = runCatching { p.volume }.getOrDefault(1f)
+            for (i in steps downTo 0) {
+                runCatching { p.volume = from * i / steps }
+                delay(gap)
+            }
+            p.pause()
+            playing = false
+            runCatching { p.volume = 1f }
+        }
     }
 
     fun cycleRepeat() {
