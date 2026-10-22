@@ -17,8 +17,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from .cache import cache_peek
-from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, NO_AUTH, SLUG_CAT, STATIC,
-                     MUSICBOX_API, MUSICBOX_REFERER)
+from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, NO_AUTH, SLUG_CAT, STATIC)
 from .db import (dbrun, note_search, pref_json, source_get, sources_list,
                  toggle_fav, touch_history)
 from .log import log
@@ -411,7 +410,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not u:
                     return self._send(400, b'{"error":"bad id"}')
                 return self._proxy_stream(u, self.headers.get("Range"),
-                                          extra={"Referer": musicbox.REFERER})
+                                          extra={"Referer": musicbox.referer()})
             if path.startswith("/api/"):
                 r = self._api_get(path, qs)
                 # 少数分支（升级包）自己就把响应发出去了，返回 None；
@@ -494,8 +493,8 @@ class Handler(BaseHTTPRequestHandler):
                 # 直播频道表也一起下发：App 首次冷启动（没网）也能把频道列出来
                 "live": {"groups": live.live_groups(), "items": live.live_list()},
                 # 音乐聚合接口也随配置走：接口换域名/失效时改环境变量重发配置就行，
-                # 不必等一个 APK 版本。App 端保留内置默认，NAS 不在时音乐照常能听。
-                "music": {"api": MUSICBOX_API, "referer": MUSICBOX_REFERER},
+                # 不必等一个 APK 版本。没配就是空串，App 端据此显示「未配置」。
+                "music": {"api": musicbox.api_base(), "referer": musicbox.referer()},
             }
             ver = hashlib.sha1(
                 json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")

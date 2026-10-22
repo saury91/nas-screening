@@ -62,39 +62,39 @@ object ConfigStore {
     }
 
     /**
-     * 首启播种：APK 里内置一份配置包（`assets/config/bundle.json`）。
+     * 首启播种：把 APK 里的 `assets/config/bundle.json` 落盘。
      *
-     * 本地还没有配置时把它落盘，并把「连 NAS」标记成已跳过 —— 装完就能直接看片，
-     * 不需要先有一台开机的 NAS。用户之后在设置里填地址，从 NAS 拉到的新配置
-     * 会正常覆盖这份内置的（体积、字段完全一致，来源不同而已）。
+     * 仓库里这份是**空壳**（没有片源、没有频道、没有音乐接口），落盘只是为了
+     * 让本地有一份「合法的空配置」，UI 不必处理 null。真正的配置由使用者
+     * 自己填，或从自己的 NAS / 配置包导入。
+     *
+     * 空壳不标记「已跳过连 NAS」：首启仍然去连 NAS，拉到用户的配置就覆盖它。
      */
     fun seedFromAssets(ctx: Context): Boolean {
         if (read(ctx) != null) return false
-        val ok = runCatching {
-            ctx.assets.open(ASSET).bufferedReader().use { r ->
-                // 走 ConfigWire：线上格式的直播台是 items，直接解 ConfigBundle 会全丢
-                val bundle = ConfigWire.decode(r.readText())
-                require(bundle.sources.isNotEmpty()) { "内置配置没有片源" }
-                save(ctx, bundle)
-            }
-        }.isSuccess
-        if (ok) NasStore.setSkipped(ctx, true)
-        return ok
+        val bundle = runCatching {
+            // 走 ConfigWire：线上格式的直播台是 items，直接解 ConfigBundle 会全丢
+            ctx.assets.open(ASSET).bufferedReader().use { ConfigWire.decode(it.readText()) }
+        }.getOrNull() ?: return false
+        save(ctx, bundle)
+        // 只有内置配置真的有内容时才算「不连 NAS 也能用」
+        if (bundle.sources.isNotEmpty()) NasStore.setSkipped(ctx, true)
+        return true
     }
 
     /**
-     * 设置里的「恢复内置配置」：**不看**本地现状，直接用 APK 里那份覆盖。
+     * 设置里的「恢复出厂配置」：**不看**本地现状，直接用 APK 里那份覆盖。
      *
      * 和首启播种只差一个判断，但用途不同：播种是「本地空着才补」，
      * 这里是「本地被改坏了（导错包、填错地址拉到空配置）要退回出厂」。
+     * 出厂是空壳，所以这一步等价于清空配置。
      * 旧文件会由 [save] 自动留成 `.bak`，恢复错了还能手工找回来。
      */
     fun importBuiltIn(ctx: Context): Boolean {
         val bundle = runCatching {
             ctx.assets.open(ASSET).bufferedReader().use { ConfigWire.decode(it.readText()) }
-        }.getOrNull()?.takeIf { it.sources.isNotEmpty() } ?: return false
+        }.getOrNull() ?: return false
         save(ctx, bundle)
-        NasStore.setSkipped(ctx, true)
         return true
     }
 

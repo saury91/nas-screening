@@ -7,6 +7,7 @@ Turn the NAS in your closet into a private cinema: films, TV channels and music 
 Search a title → open it → press play. The home screen is content only; sources and downloads live in the admin console.
 
 - Version **0.13.0** (Android TV / Phone / Web, one codebase)
+- **No bundled content sources**: no film sources, channel lists or music APIs ship with it — you get an empty shell and bring your own config
 - No build step for the frontend: `python3 app.py` and you're done. No pip, no Node, no bundling
 - The apps keep searching, browsing and playing even when the NAS is off
 
@@ -26,6 +27,8 @@ Search a title → open it → press play. The home screen is content only; sour
 - [Screenshots](#screenshots)
 - [Architecture](#architecture)
 - [Getting started](#getting-started)
+  - [First launch: the empty shell is expected](#first-launch-the-empty-shell-is-expected)
+  - [Bring your own sources](#bring-your-own-sources)
 - [Environment variables](#environment-variables)
 - [Project layout](#project-layout)
 - [Development and tests](#development-and-tests)
@@ -334,12 +337,41 @@ docker run -d --name projection-room --restart unless-stopped --network host \
   projection-room
 ```
 
-### Four things to do on first launch
+### First launch: the empty shell is expected
+
+**Nothing is bundled.** No film sources, no channels, no music API, no magnet site.
+You get an empty shell and a "no sources yet" screen — that is by design, not a broken install.
+
+Until you configure sources it will not contact any third party. Order of operations:
 
 1. **Do not expose port 8899 to the internet.** There is no authentication by default; it is a LAN service. Put a real auth layer in front if you need remote access.
-2. **Add sources** — Console → Sources. Paste a TVBox config URL to import in bulk, or hit "discover sources".
-3. **Add live TV** — Console → Live sources. Enter a few candidate URLs; they are re-fetched and filtered daily.
-4. **Add music** (optional) — online playlists work without it; point it at a NAS music folder or a Navidrome instance to hear your own library.
+2. **Import sources** — Console → Sources. Paste a TVBox config URL to import in bulk (see "Bring your own sources" below).
+3. **Import live TV** — Console → Live sources. Enter candidate URLs; they are re-fetched, merged and health-checked daily.
+4. **Add music** (optional) — a local folder or Navidrome / Airsonic / Gonic; online playlists and online search need an endpoint you provide.
+
+### Bring your own sources
+
+The repository contains no scraping-site addresses, no channel lists and no music endpoints. Three ways to load your own:
+
+| Method | How | When |
+|---|---|---|
+| Config bundle | Console → Backup → Import a JSON | Moving from another machine |
+| Manually | Add sources one by one, or paste a TVBox config URL | Just a few |
+| seed file | Drop an exported `seed.json` at `data/seed.json` and start | Whole setup at once |
+
+`data/seed.json` is the first-launch seed file, in the same format as a config bundle:
+
+```bash
+# Export from the current database (contains real addresses — keep it local)
+python3 tools/export-seed.py                 # → data/seed.json
+
+# Another machine: copy it over, same path, and it is written on startup
+DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
+```
+
+The whole `data/` directory is in `.gitignore`, so nothing you export gets committed. Use `SEED_FILE` to point elsewhere.
+
+Seeding only happens when the file exists **and** the matching table is empty; after that the database is the only truth, and a source you deleted never comes back on restart.
 
 ### Installing on a TV or phone
 
@@ -364,10 +396,20 @@ On the TV, allow "install unknown apps" the first time. Some TV ROMs show an unv
 |---|---|---|
 | `PORT` | `8899` | Listen port |
 | `DB_PATH` | `./data/media.db` | Database location; point it at a volume in containers |
+| `SEED_FILE` | `./data/seed.json` | First-launch seed file; absent means an empty start |
+| `LIVE_SEEDS` | empty | Candidate live sources, comma separated, used by the daily refresh |
+| `CMS_SEEDS` | empty | Source "resource catalogs", comma separated, used by auto-discovery |
+| `MUSIC_ONLINE` | `0` | Set to `1` to enable online song search (third-party music API) |
+| `MUSICBOX_API` | empty | Online playlist/stream endpoint; empty disables online music |
+| `MUSICBOX_REFERER` | empty | Referer that endpoint requires |
+| `MAGNET_SITE` | empty | Magnet search site; empty disables magnet search |
 | `MUSIC_DIR` | empty | Local music folder (can also be set in the UI) |
 | `QBT_URL` | `http://127.0.0.1:8080` | qBittorrent address |
 | `QBT_USER` / `QBT_PASS` | empty | Environment only; no credentials are baked into the code |
 | `NO_AUTH` | `1` | Set to `0` to enable multi-account mode (per-person history and favorites) |
+
+The entries marked "empty disables" are content entry points: leave them empty and no
+request is ever made to any third-party service.
 
 > This is a **LAN** setup: no password, no HTTPS. Never expose 8899 directly to the internet; if you need remote access, put it behind a reverse proxy with real authentication.
 
@@ -473,10 +515,14 @@ Font license texts and provenance are in `static/fonts/README.md`. Every fronten
 
 ### Content copyright
 
-**This project holds, provides and distributes no audio or video content.**
+**This project holds, provides and distributes no audio or video content, and points at no content provider.**
 
-- Film, series and channel **playback URLs** come from third-party public APIs;
-- Music comes from a Navidrome / Airsonic / Gonic server you run, or from third-party playlist APIs;
+- The repository contains **no** scraping-site addresses, CMS endpoint lists, channel lists,
+  music APIs or magnet domains — those live in local files covered by `.gitignore` and are
+  supplied by the user;
+- The config bundle bundled in the APK (`assets/config/bundle.json`) is an empty shell with no addresses;
+- Film, series and channel **playback URLs** are returned by endpoints you configured yourself;
+- Music comes from a Navidrome / Airsonic / Gonic server you run, or an endpoint you provide;
 - The repository contains no media files and no playback URL lists.
 
 All content remains the property of its respective rights holders. What you play and where you play it from is your decision and your responsibility.

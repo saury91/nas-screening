@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""BT 磁力资源：66ss 搜索 + 详情页磁力提取 + 做种数探测。"""
+"""BT 磁力资源：站点搜索 + 详情页磁力提取 + 做种数探测。
+
+站点地址来自 MAGNET_SITE 环境变量，仓库不预置任何 BT 资源站；
+没配就整块关闭（搜索直接返回空数组，不访问任何上游）。
+"""
 import base64
 import concurrent.futures
 import html as html_mod
@@ -8,7 +12,7 @@ import re
 import urllib.parse
 import urllib.request
 
-from ..config import MAX_DETAIL, TIMEOUT, TRACKERS, UA
+from ..config import MAGNET_SITE, MAX_DETAIL, TIMEOUT, TRACKERS, UA
 from ..net import http_get
 
 
@@ -145,8 +149,10 @@ def guess_category(title):
 
 
 # ───────────────────────── 站点 ─────────────────────────
-def search_66ss(kw):
-    base = "https://disabled.invalid"
+def search_site(kw):
+    base = MAGNET_SITE
+    if not base:
+        return []
     form = urllib.parse.urlencode({
         "show": "title", "tempid": "1", "tbname": "article",
         "mid": "1", "dopost": "search", "keyboard": kw, "submit": "",
@@ -164,17 +170,17 @@ def search_66ss(kw):
         seen.add(l)
         if len(seen) > MAX_DETAIL:
             break
-        out.append({"url": base + l, "source": "新版6v"})
+        out.append({"url": base + l, "source": "磁力站"})
     return out
 
 
-SITES = [{"name": "新版6v", "fn": search_66ss}]
+SITES = [{"name": "磁力站", "fn": search_site}] if MAGNET_SITE else []
 
 
 def enrich(item):
     """抓详情页 → 抽出全部磁力（保留原始的 dn 文件名与 tr tracker）"""
     try:
-        html = http_get(item["url"], referer="https://disabled.invalid/")
+        html = http_get(item["url"], referer=MAGNET_SITE + "/")
     except Exception as e:
         item["error"] = str(e)[:50]
         item["torrents"] = []
