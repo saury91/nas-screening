@@ -44,26 +44,32 @@ LIVE_PRUNE_HITS = int(os.environ.get("LIVE_PRUNE_HITS", "3"))
 
 # 每日自动汇总的候选源：可以理解成「订阅列表」，每天全部拉一遍再合并去重。
 # 用逗号分隔覆盖：LIVE_SEEDS="https://a/x.m3u,https://b/y.txt"
-LIVE_SEEDS = [u.strip() for u in os.environ.get("LIVE_SEEDS", "").split(",") if u.strip()] or [
-    "https://disabled.invalid/iptv-api/result.m3u",
-    "https://source.example.invalid/YueChan/Live/main/GNTV.m3u",
-    "https://disabled.invalid/source.example.invalid/Supprise0901/TVBox_live/main/live.txt",
-]
+# **默认空**：仓库不内置任何直播源，没配就不抓。
+LIVE_SEEDS = [u.strip() for u in os.environ.get("LIVE_SEEDS", "").split(",") if u.strip()]
 # 一次汇总最多探测多少条地址：太多会拖很久，超出的留给下一次
 LIVE_PROBE_LIMIT = int(os.environ.get("LIVE_PROBE_LIMIT", "1500"))
 
-# 点播源自动发现：资源目录（JSON），默认用 awesome-zhuiju-free 的精选列表
-CMS_SEEDS = [u.strip() for u in os.environ.get("CMS_SEEDS", "").split(",") if u.strip()] or [
-    "https://source.example.invalid/laoma528/awesome-zhuiju-free/main/resources/resources.json",
-]
+# 点播源自动发现：资源目录（JSON）。
+# **默认空**：不指定目录就不去「发现」，片源只能手动加或导入配置包。
+CMS_SEEDS = [u.strip() for u in os.environ.get("CMS_SEEDS", "").split(",") if u.strip()]
 CMS_AUTO_DAYS = int(os.environ.get("CMS_AUTO_DAYS", "7"))
 
 # ── 在线音乐 ──────────────────────────────────────────────────
-# 歌单推荐用的公开接口（上游聚合）。只读第三方公开接口：不下载、不落盘。
+# 歌单推荐用的聚合接口。**默认空**：不填就不请求任何在线音乐服务，
+# 音乐页只剩本地目录与 Subsonic。
 # 接口对 Referer 有校验，转发音频时必须带上站点的 Referer。
-MUSICBOX_API = os.environ.get("MUSICBOX_API", "https://disabled.invalid").rstrip("/")
-MUSICBOX_REFERER = os.environ.get("MUSICBOX_REFERER", "https://disabled.invalid/")
+MUSICBOX_API = os.environ.get("MUSICBOX_API", "").rstrip("/")
+MUSICBOX_REFERER = os.environ.get("MUSICBOX_REFERER", "")
 MUSICBOX_SERVER = os.environ.get("MUSICBOX_SERVER", "netease")
+
+# 在线搜歌（直连第三方音乐平台的公开接口）。默认关闭：
+# 仓库不自带、也不默认启用任何在线内容服务，需要就自己开。
+MUSIC_ONLINE = os.environ.get("MUSIC_ONLINE", "0") == "1"
+
+# ── BT 磁力搜索 ───────────────────────────────────────────────
+# 站点地址由使用者自己填（MAGNET_SITE=https://...）。默认空 = 关闭，
+# 仓库不指定、也不预置任何 BT 资源站。
+MAGNET_SITE = os.environ.get("MAGNET_SITE", "").rstrip("/")
 # 试听片段固定 30 秒、约 480KB；整曲最短也在 1.5MB 以上，用它来判「能不能完整播」
 MUSIC_FULL_MIN = int(os.environ.get("MUSIC_FULL_MIN", str(1200 * 1024)))
 
@@ -91,29 +97,13 @@ RECOMMEND_TTL = 1800      # 推荐缓存 30 分钟
 FALLBACK_HOT = ["沙丘", "流浪地球", "奥本海默", "繁花", "漫长的季节",
                 "狂飙", "三体", "宇宙探索编辑部", "怒海战记", "第二十条"]
 
-# ── 内置片源种子 ──────────────────────────────────────────────
-# 首次启动写入 sources 表；之后完全由用户在设置里增删改，代码不再回写。
-DEFAULT_ONLINE_SITES = [
-    {"name": "暴风资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 1},
-    {"name": "量子资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 2},
-    {"name": "最大资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 3},
-    {"name": "极速资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 4},
-    {"name": "360资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 5},
-    {"name": "猫眼资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 6},
-    {"name": "电影天堂", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 7},
-    {"name": "非凡资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 8},
-    {"name": "新浪资源", "api": "https://disabled.invalid/removed.php/provide/vod/", "pri": 9},
-    {"name": "光速资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 10},
-    {"name": "金鹰资源", "api": "https://disabled.invalid/provide/vod/", "pri": 11},
-    {"name": "红牛资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 12},
-    {"name": "虎牙资源", "api": "https://disabled.invalid/api.php/provide/vod/", "pri": 13},
-]
-
-# 直播源种子（运营商专网源在普通宽带不可达，所以只放公开聚合列表）
-DEFAULT_LIVE_SOURCES = [
-    ("gao/list.txt", "https://source.example.invalid/gaotianliuyun/gao/master/list.txt"),
-    ("YanG/Gather.m3u", "https://source.example.invalid/YanG-1989/m3u/main/Gather.m3u"),
-]
+# ── 片源种子：来自本地文件，不写死 ────────────────────────────
+# 仓库不内置任何采集站、直播列表或音乐接口。首启是空壳，
+# 由使用者自己在控制台里添加，或导入一份配置包。
+#
+# 想让自己已有的配置在新环境里自动装回去：用 tools/export-seed.py
+# 从旧库导出 data/seed.json（已被 .gitignore 忽略），放到新环境的同一位置即可。
+SEED_FILE = os.environ.get("SEED_FILE") or os.path.join(ROOT, "data", "seed.json")
 
 # 磁力站资源
 TRACKERS = [

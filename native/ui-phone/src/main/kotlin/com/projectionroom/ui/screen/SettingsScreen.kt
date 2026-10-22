@@ -191,9 +191,9 @@ fun SettingsScreen(
                     )
                     Divider()
                     SettingRow(
-                        title = "恢复内置配置",
+                        title = "清空并恢复出厂",
                         value = "",
-                        hint = "用安装包里自带的那份覆盖当前配置（导错包、拉到空配置时用）",
+                        hint = "安装包不带任何源：这一步会把本地配置清空，回到刚装好的状态",
                         action = if (state.busy) "恢复中" else "恢复",
                         enabled = !state.busy,
                         onClick = onImportBuiltIn,

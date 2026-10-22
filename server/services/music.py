@@ -16,6 +16,7 @@ import threading
 import time
 from urllib.parse import quote, urlencode
 
+from ..config import MUSIC_ONLINE
 from ..db import pref_json, pref_set_json
 from ..log import log
 import urllib.request
@@ -582,7 +583,12 @@ _UPSTREAM_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
 
 
 def online_search(kw, limit=30):
-    """在线搜歌，返回统一 track 结构（provider=online）。"""
+    """在线搜歌，返回统一 track 结构（provider=online）。
+
+    只在 MUSIC_ONLINE=1 时启用：仓库不自带、也不默认启用任何在线音源。
+    """
+    if not MUSIC_ONLINE:
+        return {"items": [], "disabled": True}
     kw = (kw or "").strip()
     if not kw:
         return {"items": []}
@@ -639,6 +645,8 @@ def online_url(rid, src="", use_cache=True):
         return ""
     if str(src or "").strip() in ("netease", "musicbox"):
         return "/api/music/online/stream?id=" + rid
+    if not MUSIC_ONLINE:
+        return ""
     if use_cache:
         hit = _URL_CACHE.get(rid)
         if hit and _t.time() - hit[0] < _URL_TTL:
@@ -914,7 +922,7 @@ def _lyrics_from_cover(title, artist):
         return []
     try:
         txt = http_get(musicbox.lrc_url(best["id"]), timeout=12,
-                       extra={"Referer": musicbox.REFERER, "User-Agent": _UPSTREAM_UA})
+                       extra={"Referer": musicbox.referer(), "User-Agent": _UPSTREAM_UA})
         return parse_lrc(txt)
     except Exception:
         return []
@@ -936,7 +944,7 @@ def lyrics(tid, src="", title="", artist=""):
         if src in ("netease", "musicbox"):
             from . import musicbox
             txt = http_get(musicbox.lrc_url(tid), timeout=12,
-                           extra={"Referer": musicbox.REFERER, "User-Agent": _UPSTREAM_UA})
+                           extra={"Referer": musicbox.referer(), "User-Agent": _UPSTREAM_UA})
             lines = parse_lrc(txt)
         elif src == "online":
             lines = _lyrics_from_cover(title, artist)

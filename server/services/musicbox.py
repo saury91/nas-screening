@@ -13,21 +13,41 @@ import json
 import urllib.parse
 
 from ..config import MUSICBOX_API, MUSICBOX_REFERER, MUSICBOX_SERVER, MUSIC_FULL_MIN, UA
+from ..db import pref_read
 from ..net import raw_get
 from . import proxy
 
-REFERER = MUSICBOX_REFERER
 _SERVER = MUSICBOX_SERVER
 _TIMEOUT = 15
 
 
+def api_base():
+    """聚合接口地址：设置/seed 里填过的优先，其次环境变量。
+
+    两者都没有就是「没配」——仓库不内置任何在线音乐服务。
+    """
+    return (pref_read("music.api") or MUSICBOX_API or "").rstrip("/")
+
+
+def referer():
+    """接口要求带的 Referer；没配就是空，调用方据此判断能不能用。"""
+    return pref_read("music.referer") or MUSICBOX_REFERER or ""
+
+
+def configured():
+    return bool(api_base())
+
+
 def _hdr():
     # 这个接口对 Referer 校验比较死，缺了直接 403
-    return {"Referer": REFERER, "User-Agent": UA, "Accept": "application/json,*/*"}
+    return {"Referer": referer(), "User-Agent": UA, "Accept": "application/json,*/*"}
 
 
 def _json(path, timeout=_TIMEOUT):
-    st, body, _, _ = raw_get(MUSICBOX_API + path, timeout=timeout, extra=_hdr())
+    base = api_base()
+    if not base:
+        raise RuntimeError("未配置在线音乐接口")
+    st, body, _, _ = raw_get(base + path, timeout=timeout, extra=_hdr())
     if st >= 400:
         raise RuntimeError("上游 %d" % st)
     return json.loads(body.decode("utf-8", "replace"))
@@ -70,6 +90,8 @@ def recommend(limit=10):
     """推荐歌单：[{id,name,cover,count,play}]（缓存 15 分钟，首屏直接读）"""
     import time as _t
 
+    if not configured():
+        return []
     now = _t.time()
     hit = _REC["data"]
     if hit and now - _REC["at"] < 900 and len(hit) >= min(limit, 10):
@@ -105,6 +127,10 @@ def categories():
     """分类树：[{name, subs:[{name,id}]}]"""
     import time as _t
 
+    # 没配接口时不给分类树：首页音乐区应当明确显示「未配置」，而不是
+    # 摆一堆点了没反应的分类。_FALLBACK_CATS 只在上游临时挂掉时兜底用。
+    if not configured():
+        return []
     now = _t.time()
     if _CATS["data"] and now - _CATS["at"] < _CATS_TTL:
         return _CATS["data"]
@@ -133,7 +159,7 @@ def category_playlists(cat, limit=24, fresh=False):
     import time as _t
 
     cat = (cat or "").strip()
-    if not cat:
+    if not cat or not configured():
         return []
     key = (cat, limit)
     hit = _CAT_PL.get(key)
@@ -158,6 +184,9 @@ def category_playlists(cat, limit=24, fresh=False):
 
 def playlist(pid, limit=None):
     """歌单详情：{name, cover, tags, desc, count, play, tracks:[...]}"""
+    if not configured():
+        return {"id": str(pid), "name": "", "cover": "", "desc": "", "play": 0,
+                "count": 0, "creator": "", "tags": [], "tracks": []}
     d = _json("/meting/?server=%s&type=playlist&id=%s" % (_SERVER, urllib.parse.quote(str(pid))))
     tracks, seen = [], set()
     for t in (d.get("tracks") or [])[:limit or 400]:
@@ -176,6 +205,8 @@ def playlist(pid, limit=None):
 
 def search(kw, limit=8):
     """按关键词搜歌（给「第三方音源曲目反查歌词」用）。"""
+    if not configured():
+        return []
     d = _json("/%s/search/song/?keywords=%s&pn=1&limit=%d"
               % (_SERVER, urllib.parse.quote(kw or ""), max(1, min(30, limit))))
     out, seen = [], set()
@@ -190,17 +221,19 @@ def search(kw, limit=8):
 def stream_target(sid):
     """返回上游播放地址（302 到上游 CDN），由 api 层带 Referer 转发。"""
     sid = str(sid or "").strip()
-    if not sid.isdigit():
+    base = api_base()
+    if not sid.isdigit() or not base:
         return ""
-    return "%s/meting/?server=%s&type=url&id=%s" % (MUSICBOX_API, _SERVER, sid)
+    return "%s/meting/?server=%s&type=url&id=%s" % (base, _SERVER, sid)
 
 
 def lrc_url(sid):
     """歌词地址：直接返回 LRC 文本，不是 302。"""
     sid = str(sid or "").strip()
-    if not sid.isdigit():
+    base = api_base()
+    if not sid.isdigit() or not base:
         return ""
-    return "%s/meting/?server=%s&type=lrc&id=%s" % (MUSICBOX_API, _SERVER, sid)
+    return "%s/meting/?server=%s&type=lrc&id=%s" % (base, _SERVER, sid)
 
 
 _SIZE_CACHE = {}          # sid -> (时间戳, 字节数)；一首歌是否完整几乎不变，可长缓存

@@ -73,9 +73,11 @@ export async function render(root, ctx) {
     kwClear.hidden = !on;
   };
 
+  // 没启用在线搜歌时说「未启用」，不要骗用户去换关键词
+  let onlineTip = '在线音源没有找到，换个关键词试试';
   const paintOnline = () => {
     if (!onlineTracks.length) {
-      listEl.innerHTML = `<p class="hint" style="margin:0 0 4px">在线音源没有找到，换个关键词试试</p>`;
+      listEl.innerHTML = `<p class="hint" style="margin:0 0 4px">${onlineTip}</p>`;
       return;
     }
     listEl.innerHTML = `<div class="tracklist">${onlineTracks.map((t, i) => `
@@ -128,8 +130,13 @@ export async function render(root, ctx) {
         const d = await api.musicOnline(k);
         if (oToken !== onlineSeq || token !== seq) return;
         onlineTracks = d.items || [];
+        onlineTip = d.disabled && !onlineTracks.length
+          ? '在线搜歌未启用：服务端没有配置在线音乐源'
+          : '在线音源没有找到，换个关键词试试';
         paintOnline();
-        tipEl.textContent = onlineTracks.length ? `在线 ${onlineTracks.length} 首 · 标了时长的多为完整版` : '';
+        tipEl.textContent = d.disabled
+          ? ''
+          : onlineTracks.length ? `在线 ${onlineTracks.length} 首 · 标了时长的多为完整版` : '';
       } catch (e) {
         if (oToken !== onlineSeq) return;
         onlineTracks = [];

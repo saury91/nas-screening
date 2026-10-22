@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""点播源自动发现。
+"""点播源自动发现（可选功能）。
 
-思路来自 awesome-zhuiju-free（人工精选 + 每日检测）：
-它提供一份资源目录，里面有一批「影视仓配置地址」。这些配置本质上就是
-TVBox 的 JSON，里面 `sites` 就是一家家 CMS 采集接口。
+给一个「资源目录」地址（CMS_SEEDS）——目录里列着一批影视仓配置地址，
+配置本身是 TVBox 的 JSON，`sites` 就是一家家 CMS 采集接口。
 
 我们做的事：
   目录 → 配置 → 抽出直连 CMS 接口 → 逐个发一次真实搜索验证 → 只把能用的入库。
+
+仓库不自带任何目录，CMS_SEEDS 为空时这里一步都不跑。
 
 和直播自动汇总的区别：直播是「每天重建」，点播源是「只增不减」——
 因为删源会影响用户的收藏和观看记录，宁可留着让用户手动停用。
@@ -124,7 +125,7 @@ def discover(max_configs=10, max_new=8, workers=8, timeout=8):
     added = []
     for api, s, n in alive[:max_new]:
         name = (s.get("name") or api)[:30]
-        # 重名会覆盖已有片源（包括内置源），加来源后缀区分
+        # 重名会覆盖已有片源，加来源后缀区分
         if name in existing_names:
             name = ("%s · %s" % (name, s.get("_from") or "发现"))[:36]
         existing_names.add(name)
