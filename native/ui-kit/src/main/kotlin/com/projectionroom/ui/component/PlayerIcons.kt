@@ -176,6 +176,14 @@ object PlayerIcons {
         circle(16.6f, 16.4f, 2.0f)
     }
 
+    /** 播放信息：圆圈里一个 i */
+    val Info: ImageVector = outline("info") {
+        circle(12f, 12f, 8f)
+        // 竖画 + 上面的点（0.05 长的线段配圆头，画出来就是一个圆点）
+        moveTo(12f, 11f); lineTo(12f, 16.8f)
+        moveTo(12f, 7.6f); lineTo(12f, 7.65f)
+    }
+
     // ── 构造 ──────────────────────────────────────────────
     private fun filled(name: String, block: PathBuilder.() -> Unit): ImageVector =
         build(name, filled = true, block)
