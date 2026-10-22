@@ -155,6 +155,12 @@ The detail screen shows synopsis, director, cast, rating and the quality of each
 
 ![Detail](docs/screenshot-detail.png)
 
+The phone runs the same logic reflowed for portrait; a trending term is one tap away:
+
+<p>
+<img src="docs/screenshot-app-phone-search.png" width="240" alt="Phone search">
+</p>
+
 ### Player
 
 Tap to pause, double-tap for fullscreen; buffering shows a blurred poster, dots and live bitrate.
@@ -167,17 +173,41 @@ Imported feeds are grouped automatically, health-checked in one tap, and refresh
 
 ![Live](docs/screenshot-live.png)
 
+The phone and the TV eat the same channel table: three wide columns on the phone (409 channels · 40 groups), focus-friendly tiles on the TV.
+
+<p>
+<img src="docs/screenshot-app-phone-live.png" width="240" alt="Phone live TV">
+<img src="docs/screenshot-app-tv-live.png" width="480" alt="TV live TV">
+</p>
+
 ### Music
+
+All three share one library — the same "recommended + browsable by theme / language / style / mood" structure, with a player fitted to each screen.
+
+**PC**: a recommended playlist opens as its own screen with a "play all" button; the bottom bar carries waveform progress, repeat mode and the queue, and expands into the full player with a 10-band EQ and 8 presets.
 
 ![Music](docs/screenshot-music.png)
 
-A recommended playlist opens as its own screen with a "play all" button.
-
 ![Playlist](docs/screenshot-playlist.png)
 
-The bottom bar has waveform progress, repeat mode and the queue; expand it for the full player with a 10-band EQ and 8 presets.
-
 ![Music player](docs/screenshot-music-player.png)
+
+**Phone**: a spinning record with line-by-line lyrics, and the mini player stays pinned under every tab — switching to live TV does not stop the music.
+
+<p>
+<img src="docs/screenshot-app-phone-music.png" width="240" alt="Phone music">
+<img src="docs/screenshot-app-phone-playlist.png" width="240" alt="Phone playlist">
+<img src="docs/screenshot-app-phone-music-player.png" width="240" alt="Phone music player">
+</p>
+
+**TV**: the 10-foot cut — record on the left, lyrics on the right, D-pad up/down to change track and left/right to seek; the EQ presets adapt to the device's own frequency bands instead of making you guess which slider to raise.
+
+<p>
+<img src="docs/screenshot-app-tv-music.png" width="380" alt="TV music">
+<img src="docs/screenshot-app-tv-music-player.png" width="380" alt="TV music player">
+</p>
+
+![EQ presets](docs/screenshot-app-tv-eq.png)
 
 ### Casting
 

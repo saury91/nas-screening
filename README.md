@@ -155,6 +155,12 @@
 
 ![详情页](docs/screenshot-detail.png)
 
+手机端是同一套逻辑竖屏重排，热门词一点即搜：
+
+<p>
+<img src="docs/screenshot-app-phone-search.png" width="240" alt="手机搜索">
+</p>
+
 ### 播放器
 
 单击画面暂停 / 播放，双击全屏；缓冲时是模糊海报 + 波点 + 实时网速。
@@ -167,17 +173,41 @@
 
 ![直播](docs/screenshot-live.png)
 
+手机与电视吃的是同一份频道表：手机上是三列大卡（409 个频道 · 40 组），电视上是遥控器直接能落焦的频道格。
+
+<p>
+<img src="docs/screenshot-app-phone-live.png" width="240" alt="手机直播">
+<img src="docs/screenshot-app-tv-live.png" width="480" alt="电视直播">
+</p>
+
 ### 音乐
+
+三端共用同一份曲库，「推荐歌单 + 分类歌单（主题 · 语种 · 风格 · 场景 · 情感）」结构一致，播放器各自适配屏幕。
+
+**PC**：推荐歌单点开是独立详情页，一键「播放全部」；底部播放条带波形进度、循环模式与队列，点开是完整播放器，10 段均衡器 + 8 组预设。
 
 ![音乐](docs/screenshot-music.png)
 
-推荐歌单点开是独立详情页，一键「播放全部」。
-
 ![歌单详情](docs/screenshot-playlist.png)
 
-底部播放条带波形进度、循环模式与队列；点开是完整播放器，10 段均衡器 + 8 组预设。
-
 ![音乐播放器](docs/screenshot-music-player.png)
+
+**手机**：黑胶旋转 + 逐行歌词，播放条常驻在任意 tab 底部——切去直播看球也不打断音乐。
+
+<p>
+<img src="docs/screenshot-app-phone-music.png" width="240" alt="手机音乐">
+<img src="docs/screenshot-app-phone-playlist.png" width="240" alt="手机歌单">
+<img src="docs/screenshot-app-phone-music-player.png" width="240" alt="手机音乐播放器">
+</p>
+
+**电视**：10-foot 版，左边黑胶右边歌词，遥控器上下切歌、左右调进度；音效预设按设备频段自动适配，不用自己猜哪段该抬。
+
+<p>
+<img src="docs/screenshot-app-tv-music.png" width="380" alt="电视音乐">
+<img src="docs/screenshot-app-tv-music-player.png" width="380" alt="电视音乐播放器">
+</p>
+
+![音效预设](docs/screenshot-app-tv-eq.png)
 
 ### 投屏
 
