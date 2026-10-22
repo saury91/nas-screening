@@ -1,7 +1,9 @@
 /* ═══════════ 首页：全幅 Hero + 货架 ═══════════ */
 .hero{
   /* 别让 Hero 吃满整屏：留出下一块，首屏就能看到「有内容继续」 */
-  position:relative;min-height:min(52vh,520px);display:flex;align-items:flex-end;
+  /* 高度跟视口走：笔记本 900 高 ≈ 468，1080p ≈ 561，1440 高封顶 700。
+     原来固定 520 上限，在 27"/32" 上就是一条扁带子。 */
+  position:relative;min-height:clamp(360px,52vh,700px);display:flex;align-items:flex-end;
   padding:calc(var(--hdr) + 22px) var(--pad) 96px;overflow:hidden;isolation:isolate;
 }
 .hero-bg{position:absolute;top:-6%;right:-6%;bottom:-6%;left:-6%;z-index:-3;background-size:cover;background-position:center;
@@ -72,7 +74,7 @@
   max-width:560px;text-shadow:0 2px 16px rgba(0,0,0,.5)}
 .hero-actions{display:flex;gap:12px;flex-wrap:wrap}
 .hero-poster{
-  margin-left:auto;flex:none;width:clamp(180px,19vw,270px);aspect-ratio:2/3;border-radius:18px;
+  margin-left:auto;flex:none;width:clamp(160px,17vw,320px);aspect-ratio:2/3;border-radius:18px;
   overflow:hidden;box-shadow:0 40px 90px rgba(0,0,0,.72),0 0 0 1px rgba(255,255,255,.1);
   transform:rotate(.6deg);animation:posterIn .9s var(--ease) both .06s;
   position:relative;transition:opacity .45s var(--ease);opacity:1;
@@ -89,28 +91,12 @@
 .hero-skl{height:min(86vh,820px);display:flex;align-items:flex-end;padding:0 var(--pad) 60px}
 
 /* 继续观看：横向宽卡 */
-.continue-rail .card{width:clamp(220px,23vw,320px);aspect-ratio:16/9}
+.continue-rail .card{width:clamp(200px,22vw,380px);aspect-ratio:16/9}
+/* 手机上 220px 定宽只露得出 1.2 张卡；改成随屏宽走，右侧留出「还有下一张」的提示 */
+@media (max-width:760px){ .continue-rail .card{width:min(76vw,260px)} }
 .continue-rail .card-meta{padding:10px 2px 0}
 .continue-ep{position:absolute;left:10px;bottom:10px;z-index:2;font-size:11px;padding:3px 8px;
   border-radius:6px;background:rgba(0,0,0,.66);backdrop-filter:blur(6px)}
-
-/* 快捷入口 */
-.quick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;
-  padding:4px var(--pad) 0}
-.quick{
-  position:relative;border-radius:18px;padding:18px;overflow:hidden;min-height:112px;
-  border:1px solid var(--line);background:linear-gradient(140deg,rgba(255,255,255,.06),rgba(255,255,255,.02));
-  transition:transform .3s var(--ease),border-color .3s,box-shadow .3s;outline:none;display:block;
-}
-.quick:hover{transform:translateY(-4px);border-color:rgba(255,207,122,.35)}
-.quick.focused{box-shadow:0 0 0 2px var(--accent),0 20px 50px rgba(0,0,0,.55);transform:translateY(-4px)}
-.quick h4{margin:0 0 6px;font-size:16px;font-weight:620}
-.quick p{margin:0;color:#8a919e;font-size:12.5px;line-height:1.6;max-width:76%}
-.quick .q-ico{position:absolute;right:14px;bottom:8px;opacity:.2}
-.quick .q-ico svg{width:74px;height:74px;fill:none;stroke:currentColor;stroke-width:1}
-.quick.live{background:linear-gradient(140deg,rgba(255,92,92,.16),rgba(255,255,255,.02))}
-.quick.music{background:linear-gradient(140deg,rgba(120,96,255,.18),rgba(255,255,255,.02))}
-.quick.sources{background:linear-gradient(140deg,rgba(255,207,122,.14),rgba(255,255,255,.02))}
 
 /* 口味标签 */
 .taste-row{display:flex;gap:8px;flex-wrap:wrap;padding:0 var(--pad);
@@ -126,10 +112,11 @@
   .hero-dots{bottom:12px}
 }
 
-/* 超宽屏：Hero 内容不要贴着两端，收在一个居中的版心里 */
+/* 16 寸以上：文案区跟着放大，标题用 clamp 平滑过渡，不做台阶式跳变 */
 @media (min-width:1600px){
-  .hero-copy{max-width:min(720px,52vw)}
-  .hero-title{font-size:clamp(54px,4.6vw,88px)}
+  .hero-copy{max-width:min(820px,54vw)}
+  .hero-title{font-size:clamp(54px,4.4vw,92px)}
+  .hero-desc{max-width:640px;font-size:15px}
 }
 
 /* 手机端：底部圆点和「立即观看/详情」按钮会撞在一起，
@@ -150,4 +137,17 @@
 .page.bleed > .hero{
   margin-top:0;
   padding-top:calc(var(--hdr) + var(--safe-top) + 22px);
+}
+
+/* 2K / 4K / 8K：Hero 跟着版心一起长高，否则在 2560 上是一条扁带子 */
+@media (min-width:2160px){
+  /* 2K 屏高 1440，56vh 会占掉一半以上，文案贴底留一大片空；压到 50vh */
+  .hero{min-height:clamp(520px,50vh,760px)}
+  .hero-copy{max-width:min(900px,52vw)}
+  .hero-desc{max-width:720px}
+}
+@media (min-width:2880px){
+  /* 4K/8K 屏普遍更高，但也不需要满屏，52vh 封顶 820 */
+  .hero{min-height:clamp(560px,52vh,820px)}
+  .hero-copy{max-width:1000px}
 }

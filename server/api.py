@@ -655,7 +655,10 @@ class Handler(BaseHTTPRequestHandler):
             if not kw:
                 return _json({"items": []})
             note_search(kw)
-            return _json({"items": catalog.search_online(kw)})
+            # sites/responded 让前端能区分「没这部片」和「片源全挂了」
+            items, meta = catalog.search_online_stat(kw)
+            return _json({"items": items, "sites": meta["sites"],
+                          "responded": meta["responded"]})
         if path in ("/api/magnets",):
             kw = (qs.get("kw") or "").strip()
             if not kw:
@@ -795,7 +798,12 @@ class Handler(BaseHTTPRequestHandler):
                 from .cache import cache_valid
                 if cache_valid(ck, 6 * 3600):
                     return _json(cached)
-        items = catalog.search_online(name)
+        items, meta = catalog.search_online_stat(name)
+        if not meta["responded"]:
+            # 一个源都没回来，不是「没这部片」：别让用户以为片子不存在
+            return _json({"ok": False, "code": "sources_down", "sources_down": True,
+                          "error": "片源都没响应，检查下网络再试",
+                          "sites": meta["sites"]}, 503)
         KEY = catalog._norm_key(name)
         hit = None
         same = [x for x in items if catalog._norm_key(x["name"]) == KEY]
@@ -835,6 +843,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._reset_auth()
         path = urllib.parse.urlparse(self.path).path
+        # 无账户模式（NO_AUTH=1）下 me() 恒为本机管理员，这里等于放行；
+        # NO_AUTH=0 时才是真正的权限边界 —— 之前这两个符号定义了却没人调用，
+        # 改成多账户后所有写接口依然对任何登录用户开放。
+        if path.startswith(_ADMIN_PREFIX) and not self._is_admin():
+            return self._deny(403, "forbidden", "需要管理员权限")
         try:
             b = self._body()
             return self._api_post(path, b)

@@ -9,8 +9,8 @@ import urllib.error
 import urllib.request
 
 from ..cache import cache_age, cache_peek, cache_put, cache_valid
-from ..config import (BROWSE_SITES, CAT_ORDER, CATMAP_TTL, FALLBACK_HOT,
-                      RECOMMEND_TTL, SEARCH_DEADLINE, TIMEOUT)
+from ..config import (BROWSE_DEADLINE, BROWSE_SITES, CAT_ORDER, CATMAP_TTL,
+                      FALLBACK_HOT, RECOMMEND_TTL, SEARCH_DEADLINE, TIMEOUT)
 from ..db import dbrun, pref_json, pref_set_json
 from ..log import log
 from ..net import http_get, raw_get
@@ -22,8 +22,13 @@ from ..text import (_desc_better, _norm_key, _relevance, _score_max,
 
 # 全局搜索池：以前每次搜索都新建 13 个线程再 shutdown(wait=False)，
 # 连续搜几次就有一堆线程还在跑。复用池子能自然形成背压。
+# 源有 70+ 个，worker 少于源数就要排队：16 个 worker 跑 70 个源，光排队
+# 就吃掉好几秒，「到点返回」也等着最慢那一轮。放宽到 32，基本一轮打完。
 _SEARCH_POOL = concurrent.futures.ThreadPoolExecutor(
-    max_workers=16, thread_name_prefix="cms-search")
+    max_workers=32, thread_name_prefix="cms-search")
+# 浏览单独一个池：搜索和翻页互不挤占，慢站也不会把搜索的 worker 占满
+_BROWSE_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=10, thread_name_prefix="cms-browse")
 
 
 def _taste():
@@ -384,7 +389,8 @@ def catmap_warm():
         list(ex.map(one, sites))
 
 
-def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None):
+def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
+                   deadline=BROWSE_DEADLINE):
     """按大类 / 年份 / 地区浏览片库。
 
     做法：用每一站自己的分类 ID 拉一页（pg 直接透传给采集站），
@@ -418,9 +424,15 @@ def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None):
             return []
 
     if tasks:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-            for part in ex.map(fetch, tasks):
-                out.extend(part)
+        # 原来用 ex.map + with：离开 with 要等所有任务结束，最慢那个站卡到
+        # TIMEOUT(20s) 才返回，翻页就一直是骨架。现在到点取已回来的。
+        futs = [_BROWSE_POOL.submit(fetch, t) for t in tasks]
+        done, _ = concurrent.futures.wait(futs, timeout=deadline)
+        for f in done:
+            try:
+                out.extend(f.result())
+            except Exception:
+                pass
 
     if year:
         out = [x for x in out if str(x.get("year") or "").startswith(year)]
@@ -490,16 +502,16 @@ def get_recommend(fresh=False):
 
 # 全部经 NAS 实测 UDP 可达；注入磁力能明显提高找到 peer 的成功率
 
-def search_online(kw, deadline=None):
+def search_online_stat(kw, deadline=SEARCH_DEADLINE):
     """并发查所有采集站，按片名合并，每部片列出所有可用源
 
-    deadline：整体限时（秒）。十几个站里总有几个慢的，
-    原来用 ex.map 会等最慢那个站超时才返回，实测能卡十几秒。
-    现在到点就把已经回来的站先用上，不等了。
+    deadline：整体限时（秒）。十几个站里总有几个慢的，到点就把已经回来的站
+    先用上。默认取 SEARCH_DEADLINE —— 以前默认 None 等于 futures.wait 无限等，
+    api 层两个调用点都没传，于是「搜索」会一直挂到最慢的源自己超时（TIMEOUT=20s）。
     """
     kws = (kw or "").strip()
     if not kws:
-        return []
+        return [], {"sites": 0, "responded": 0}
     KEY = _norm_key(kws)
 
     def one(site):
@@ -534,12 +546,17 @@ def search_online(kw, deadline=None):
         return out
 
     rows = []
-    futs = [_SEARCH_POOL.submit(one, s) for s in active_sites()]
+    sites = active_sites()
+    futs = [_SEARCH_POOL.submit(one, s) for s in sites]
+    responded = 0
     try:
+        # wait 只等 deadline；没回来的源留在池里自己收尾（结果丢弃），
+        # 不能 cancel —— 阻塞在 socket 读上的线程不响应取消
         done, _ = concurrent.futures.wait(futs, timeout=deadline)
         for f in done:
             try:
                 rows.extend(f.result())
+                responded += 1
             except Exception:
                 pass
     except Exception:
@@ -590,7 +607,12 @@ def search_online(kw, deadline=None):
         it["rel"] = _relevance(it["name"], kws)
     # 相关度优先，其次源多、集数全
     items.sort(key=lambda x: (-x["rel"], -x["site_count"], -x["ep_count"]))
-    return items[:60]
+    return items[:60], {"sites": len(sites), "responded": responded}
+
+
+def search_online(kw, deadline=SEARCH_DEADLINE):
+    """只要结果列表的旧签名（推荐流等后台任务用）"""
+    return search_online_stat(kw, deadline)[0]
 
 
 def get_play_url(url):
