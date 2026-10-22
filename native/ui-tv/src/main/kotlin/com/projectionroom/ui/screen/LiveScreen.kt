@@ -393,7 +393,8 @@ private fun LiveChip(label: String, on: Boolean, onClick: () -> Unit) {
 private fun ChannelCard(ch: NasApi.LiveChannel, showGroup: Boolean, onClick: () -> Unit) {
     // 台标块 + 名字 + 分组，和「我的」里的收藏/记录共用同一个组件
     ChannelTile(
-        name = ch.name,
+        // 源里有些台的名字就是个数字（"3"、"4"），补个前缀才读得出是台
+        name = displayName(ch.name),
         subtitle = if (showGroup) plainLabel(ch.group).ifBlank { "未分组" } else "",
         logo = ch.logo,
         // 多线路是可用性信号（这条挂了换下一条），单线路就不用标了
@@ -577,4 +578,10 @@ private object LiveCache {
         mark = kotlin.time.TimeSource.Monotonic.markNow()
         return f
     }
+}
+
+/** 台名只有数字时补「频道」前缀，避免列表上出现光秃秃一个数 */
+private fun displayName(raw: String): String {
+    val n = raw.trim()
+    return if (n.isNotEmpty() && n.all { it.isDigit() }) "频道 $n" else n
 }

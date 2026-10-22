@@ -134,7 +134,7 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
                 Box(
-                    Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
+                    Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onBack),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(TabIcons.Back, "返回", tint = ProomColor.text, modifier = Modifier.size(22.dp))

@@ -288,7 +288,7 @@ private fun LiveHeader(
             }
             Spacer(Modifier.weight(1f))
                 Box(
-                    Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onOpenSearch),
+                    Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onOpenSearch),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -346,7 +346,7 @@ private fun SearchField(
             },
         )
         Box(
-            Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onClose),
+            Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -374,7 +374,8 @@ private fun GroupRail(
         LazyRow(
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().height(44.dp),
+            // 和 chip 同高：行比 chip 矮会把 48dp 的热区裁回 44dp
+            modifier = Modifier.fillMaxWidth().height(48.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             item {
@@ -389,7 +390,7 @@ private fun GroupRail(
             Modifier
                 .align(Alignment.CenterEnd)
                 .width(28.dp)
-                .height(44.dp)
+                .height(48.dp)
                 .background(
                     Brush.horizontalGradient(
                         listOf(Color.Transparent, ProomColor.bg)
@@ -405,8 +406,9 @@ private fun LiveChip(label: String, on: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
     Box(
         Modifier
-            // 44dp 高：低于 48dp 的触控目标手指一定会点错
-            .height(34.dp)
+            // 48dp：低于它的触控目标手指一定会点错，而分组是横着排的一行，
+            // 高度差 14dp 只影响这一行，不会挤掉下面的台标
+            .height(48.dp)
             .clip(shape)
             .background(if (on) ProomColor.accentSoft else ProomColor.surface)
             .then(
@@ -434,11 +436,20 @@ private fun LiveChip(label: String, on: Boolean, onClick: () -> Unit) {
 
 /* ───────────────────────── 频道卡 ───────────────────────── */
 
+/**
+ * 源里有些台的名字就是个数字（"3"、"4"），列表上看就是光秃秃一个数，
+ * 用户不知道点进去是什么。补个「频道」前缀，至少读得出这是个台。
+ */
+private fun displayName(raw: String): String {
+    val n = raw.trim()
+    return if (n.isNotEmpty() && n.all { it.isDigit() }) "频道 $n" else n
+}
+
 @Composable
 private fun ChannelCard(ch: NasApi.LiveChannel, showGroup: Boolean, onClick: () -> Unit) {
     // 台标块 + 名字 + 分组，和「我的」里的收藏/记录共用同一个组件
     ChannelTile(
-        name = ch.name,
+        name = displayName(ch.name),
         subtitle = if (showGroup) plainLabel(ch.group).ifBlank { "未分组" } else "",
         logo = ch.logo,
         // 多线路是可用性信号（这条挂了换下一条），单线路就不用标了

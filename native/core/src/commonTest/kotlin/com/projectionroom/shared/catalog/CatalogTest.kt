@@ -3,11 +3,14 @@ package com.projectionroom.shared.catalog
 import com.projectionroom.shared.model.Quality
 import com.projectionroom.shared.model.Source
 import com.projectionroom.shared.net.Http
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -27,6 +30,20 @@ class CatalogTest {
             val hit = routes.entries.firstOrNull { url.contains(it.key) }
                 ?: throw IllegalStateException("没有为这个地址准备响应：$url")
             if (hit.value.first > 0) delay(hit.value.first)
+            return hit.value.second
+        }
+    }
+
+    /**
+     * 慢源用 NonCancellable 包裹：真实世界的慢源是**阻塞在 `execute()` 上**，
+     * 协程取消掐不断它。普通 `delay` 可取消，用它模拟会让「等慢源」这个 bug
+     * 在测试里表现不出来。
+     */
+    private class StubbornHttp(private val routes: Map<String, Pair<Long, String>>) : Http {
+        override suspend fun get(url: String, referer: String?): String {
+            val hit = routes.entries.firstOrNull { url.contains(it.key) }
+                ?: throw IllegalStateException("没有为这个地址准备响应：$url")
+            if (hit.value.first > 0) withContext(NonCancellable) { delay(hit.value.first) }
             return hit.value.second
         }
     }
@@ -176,6 +193,51 @@ class CatalogTest {
         )
         assertEquals(1, result.size)
         assertEquals("好的", result.first().lines.first().site)
+    }
+
+    /**
+     * 到点就返回，不等慢源。
+     *
+     * 这条是回归测试：`search` 原来用 `coroutineScope + awaitAll`，离开作用域时会
+     * **等所有子协程结束**；而慢源卡在阻塞的 `execute()` 上、协程取消掐不断，
+     * 于是「12 秒 deadline」实际是 12 秒 + callTimeout(10 秒) —— 用户看到的就是
+     * 「搜索转了二十多秒」。现在超时后直接读已完成的槽位返回。
+     */
+    @Test
+    fun `慢源不会把 deadline 往后拖`() = runTest {
+        val http = StubbornHttp(
+            mapOf(
+                "fast" to (0L to """{"list":[{"vod_name":"沙丘","vod_play_url":"第01集${'$'}https://a/1.m3u8"}]}"""),
+                "slow" to (30_000L to """{"list":[{"vod_name":"沙丘2","vod_play_url":"第01集${'$'}https://b/1.m3u8"}]}"""),
+            )
+        )
+        val sources = listOf(Source("快", "http://fast/api"), Source("慢", "http://slow/api"))
+
+        val start = testScheduler.currentTime
+        val result = Catalog(http).search("沙丘", sources, deadlineMs = 3_000)
+        val spent = testScheduler.currentTime - start
+
+        assertEquals(1, result.size, "只应该有快源那一条")
+        assertEquals("快", result.first().lines.first().site)
+        assertTrue(spent <= 3_000, "到点就返回，不能等慢源：实际 $spent ms")
+    }
+
+    /** 慢源全都拖过 deadline 时，仍然要报「源没响应」而不是返回空 */
+    @Test
+    fun `全部源都超时才算没响应`() = runTest {
+        val http = StubbornHttp(
+            mapOf(
+                "slow1" to (30_000L to """{"list":[]}"""),
+                "slow2" to (30_000L to """{"list":[]}"""),
+            )
+        )
+        assertFailsWith<Catalog.SourcesUnavailable> {
+            Catalog(http).search(
+                "沙丘",
+                listOf(Source("慢1", "http://slow1/api"), Source("慢2", "http://slow2/api")),
+                deadlineMs = 2_000,
+            )
+        }
     }
 
     /**

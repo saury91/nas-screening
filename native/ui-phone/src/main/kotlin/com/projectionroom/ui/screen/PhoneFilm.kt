@@ -218,9 +218,9 @@ private fun FilmTopBar(onSearch: () -> Unit) {
         )
         Spacer(Modifier.weight(1f))
 
-        // 搜索统一成一个图标 + 40dp 圆底，不再用文字按钮
+        // 搜索统一成一个图标 + 48dp 圆底，不再用文字按钮
         Box(
-            Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onSearch),
+            Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onSearch),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

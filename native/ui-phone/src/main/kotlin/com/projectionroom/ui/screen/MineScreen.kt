@@ -352,10 +352,11 @@ private fun HeaderIcon(
     onClick: () -> Unit,
 ) {
     Box(
-        Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onClick),
+        // 48dp：顶栏图标钮是这页最常点的两个，40dp 在长屏上要瞄
+        Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = desc, tint = ProomColor.text, modifier = Modifier.size(21.dp))
+        Icon(icon, contentDescription = desc, tint = ProomColor.text, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -397,10 +398,10 @@ private fun MineSearchField(
             },
         )
         Box(
-            Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClose),
+            Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(TabIcons.Close, "关闭搜索", tint = ProomColor.muted, modifier = Modifier.size(18.dp))
+            Icon(TabIcons.Close, "关闭搜索", tint = ProomColor.muted, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -704,7 +705,8 @@ private fun PercentText(p: Float) {
 @Composable
 private fun PlayButton(desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(34.dp).clip(CircleShape).background(ProomColor.accent).clickable(onClick = onClick),
+        // 记录卡片右侧的播放键：34dp 太小，手指会落到卡片本身而不是播放
+        Modifier.size(48.dp).clip(CircleShape).background(ProomColor.accent).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

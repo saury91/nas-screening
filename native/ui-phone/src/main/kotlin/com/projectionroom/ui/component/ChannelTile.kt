@@ -158,6 +158,9 @@ internal fun channelMark(name: String): String {
     val n = name.trim()
     if (n.isEmpty()) return "·"
     CCTV_MARK.find(n)?.let { return it.groupValues[1] }
+    // 「频道 3」是给裸数字台名补的展示名，台标块里要的还是那个 3 ——
+    // 否则整块占位变成「频道」两个字，和被替换掉的裸数字一样认不出来
+    FALLBACK_MARK.find(n)?.let { return it.groupValues[1] }
 
     val first = n[0]
     if (first.code < 128 && first.isLetterOrDigit()) {
@@ -176,3 +179,6 @@ internal fun markSize(mark: String) = when {
 }
 
 private val CCTV_MARK = Regex("^CCTV[-\\s]?(\\d{1,2}\\+?)$", RegexOption.IGNORE_CASE)
+
+/** 直播页给裸数字台名补的展示名：「频道 3」 */
+private val FALLBACK_MARK = Regex("^频道\\s*(\\d+)$")

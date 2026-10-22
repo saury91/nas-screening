@@ -19,6 +19,11 @@ class OkHttpHttp(
     private val client = OkHttpClient.Builder()
         .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
         .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
+        // callTimeout 是「一次请求从发出到读完整包」的总预算，connect/read 只管单段。
+        // 没有它的时候，源站慢速吐字节能让一个请求拖几十秒；而上层的
+        // withTimeoutOrNull 取消协程掐不断阻塞的 execute()，搜索页的骨架屏就一直转
+        // （实测 47 秒还在转）。设了它，最慢一个源也在这个点断掉。
+        .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 

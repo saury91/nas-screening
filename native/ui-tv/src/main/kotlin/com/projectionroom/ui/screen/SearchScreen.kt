@@ -234,7 +234,15 @@ fun SearchScreen(
                 err != null -> {
                     // 取一次再判断：err 是 Compose state，两次读之间可能被置空
                     val e = err.orEmpty()
-                    Center(if (e.contains("NAS", true)) "连不上 NAS" else e)
+                    // 「源都没响应」和「没这部片」不是一句话，别混着说
+                    Center(
+                        when {
+                            e.contains("没响应") || e.contains("SourcesUnavailable") ->
+                                "片源都没响应，检查下网络再试"
+                            e.contains("NAS", true) -> "连不上 NAS"
+                            else -> e
+                        },
+                    )
                 }
 
                 searched && results.isEmpty() -> Center("没找到「$committed」，换个片名试试")

@@ -6,18 +6,22 @@ import com.projectionroom.shared.model.Quality
 import com.projectionroom.shared.model.Source
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.shared.net.Http
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.last
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.coroutineContext
 import kotlin.time.TimeSource
 
 /**
@@ -62,7 +66,18 @@ class Catalog(
     }
 
     /**
+     * 一个源都没查到东西。
+     *
+     * 和「搜不到这部片」是两回事：前者该提示「片源没响应，重试」，
+     * 后者才是「换个片名」。上层靠这个异常分开这两句话。
+     */
+    class SourcesUnavailable(message: String) : Exception(message)
+
+    /**
      * @param deadlineMs 整体限时。总有源会超时，到点先用已经回来的，不等慢的。
+     *
+     * @throws SourcesUnavailable 所有源都失败（连不上/超时），一个都没回来。
+     *     注意：源回来了但没这部片，返回空列表、不抛异常。
      */
     suspend fun search(
         keyword: String,
@@ -73,17 +88,43 @@ class Catalog(
         if (kw.isBlank() || sources.isEmpty()) return emptyList()
         val key = normKey(kw)
 
-        val hits = withTimeoutOrNull(deadlineMs) {
-            coroutineScope {
-                sources.map { src ->
-                    async {
-                        runCatching { fetchOne(src, kw, key) }.getOrDefault(emptyList())
-                    }
-                }.awaitAll()
-            }
-        } ?: return emptyList()
+        // 结果先落到「每个源自己的槽位」上，而不是共享的 MutableList：
+        // deadline 一到就读已完成的那批立刻返回，此时慢源还在后台跑，
+        // 共享 List 会被并发写（JVM 上是数据竞争，native 上更糟）。
+        val slots = sources.map { src ->
+            src to CompletableDeferred<List<Pair<Source, MacCms.Raw>>?>()
+        }
 
-        return merge(hits.flatten(), kw)
+        // 不用 coroutineScope：它离开作用域时会**等所有子协程结束**，而慢源卡在
+        // 阻塞的 execute() 上、取消掐不断，于是「12 秒 deadline」实际要等到
+        // 12 秒 + callTimeout(10 秒)。这里用独立 scope：到点读快照、cancel、
+        // 马上返回，慢源在后台自己收尾（结果丢弃）。
+        //
+        // 继承调用方的 dispatcher 而不是写死 Default：调用方（MainActivity 的
+        // doSearch）本来就在 withContext(Dispatchers.Default) 里；而虚拟时间的
+        // 单测里写死 Default 会让 launch 跑到测试调度器之外，deadline 直接判空。
+        val scope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val jobs = slots.map { (src, slot) ->
+                scope.launch {
+                    // 成功 = 拿到列表（哪怕空的）；失败 complete(null)，
+                    // 与「还没回来」一样不计入「源有响应」
+                    slot.complete(runCatching { fetchOne(src, kw, key) }.getOrNull())
+                }
+            }
+            withTimeoutOrNull(deadlineMs) { jobs.joinAll() }
+
+            val arrived = slots.mapNotNull { (_, slot) ->
+                if (slot.isCompleted) slot.getCompleted() else null
+            }
+            // 一个源都没回来 ≠ 搜不到这部片：上层据此说「片源没响应，重试」
+            if (arrived.isEmpty()) {
+                throw SourcesUnavailable("${sources.size} 个源都没响应")
+            }
+            return merge(arrived.flatten(), kw)
+        } finally {
+            scope.cancel()
+        }
     }
 
     /**
@@ -100,7 +141,9 @@ class Catalog(
         deadlineMs: Long = 10_000,
     ): Vod? {
         if (name.isBlank()) return null
-        val list = search(name, sources, deadlineMs)
+        // 详情页不该因为「源全挂了」而崩：这里把 SourcesUnavailable 也当空处理，
+        // 让调用方照常显示空态（详情是资源加载，不再向 NAS 兜底）
+        val list = runCatching { search(name, sources, deadlineMs) }.getOrDefault(emptyList())
         if (list.isEmpty()) return null
         val key = normKey(name)
         return list.firstOrNull { normKey(it.name) == key && year.isNotBlank() && it.year == year }

@@ -149,6 +149,28 @@ private fun Context.findActivity(): Activity? {
     return null
 }
 
+/**
+ * 沉浸式开关：贴着屏幕边缘画，把状态栏和导航条藏掉。
+ *
+ * 没用 WindowInsetsController —— 那套是 API 30 起才有的，而这个 App 的 minSdk 是 21。
+ * 老的 systemUiVisibility 在 21～34 上都有效，缺的只是新 API 的便利。
+ * IMMERSIVE_STICKY 的语义是「从边缘划一下能临时唤出，过一会儿自己退回去」，
+ * 正好是看片时要的：不挡画面，但想调亮度时条还在。
+ */
+@Suppress("DEPRECATION")
+private fun android.view.View.applyImmersive(on: Boolean) {
+    systemUiVisibility = if (on) {
+        android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+    } else {
+        0
+    }
+}
+
 /** 屏幕亮度：0.05~1，退出播放器要还原，否则整个 App 会一直暗着 */
 private fun applyBrightness(activity: Activity?, v: Float) {
     val w = activity?.window ?: return
@@ -280,10 +302,18 @@ fun PlayerScreen(
     DisposableEffect(rotateLandscape) {
         val act = context.findActivity()
         if (OrientationMemory.initial == null) OrientationMemory.initial = act?.requestedOrientation
+        // 播放时藏掉状态栏和导航条：横屏看片时顶部那条「时间 / 电量」和底部白条
+        // 都在偷画面，而且状态栏底色和视频黑边不是一个黑，看着像没全屏。
+        // 用 IMMERSIVE_STICKY：从边缘划一下能临时唤出，一会儿自己退回去。
+        val bars = runCatching {
+            act?.window?.decorView?.apply { applyImmersive(true) }
+        }.getOrNull()
         onDispose {
             // 手机上直接锁回竖屏：比"还原 UNSPECIFIED"确定得多——
             // 系统旋转被锁住时 UNSPECIFIED 不会自己转回来，界面就卡在横屏
             if (rotateLandscape) act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            // 状态栏还得还给后面的页面，不然整个 App 都没状态栏了
+            runCatching { bars?.applyImmersive(false) }
             // 退出播放器把亮度交回系统，不然整个 App 会一直停在播放时调暗的值
             runCatching {
                 val w = (act ?: activity)?.window ?: return@runCatching
@@ -2205,13 +2235,13 @@ private fun SideChip(
 
 /* ─────────────────────── 小组件 ─────────────────────── */
 
-/** 玻璃条里的文字键：不画底色，只留 40dp 触摸高度，避免又长出一条灰胶囊 */
+/** 玻璃条里的文字键：不画底色，只留 48dp 触摸高度，避免又长出一条灰胶囊 */
 @Composable
 private fun CastTextButton(text: String, onClick: () -> Unit) {
     Box(
         Modifier
-            .height(40.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .height(48.dp)
+            .clip(RoundedCornerShape(24.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
@@ -2231,8 +2261,11 @@ private fun CircleIcon(
     val tv = LocalProomTv.current
     Box(
         Modifier
-            .size(if (tv) 56.dp else 40.dp)
+            // 手机侧原来是 40dp 的裸图标：热区不够，且压在亮画面上（星空、白底字幕）
+            // 几乎看不见。48dp + 一层半透明底，和电视侧一样有「这是个按钮」的样子
+            .size(if (tv) 56.dp else 48.dp)
             .clip(CircleShape)
+            .background(Color.Black.copy(alpha = if (enabled) 0.32f else 0.16f))
             .tvFocusRing(CircleShape)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -2241,7 +2274,7 @@ private fun CircleIcon(
             imageVector = icon,
             contentDescription = label,
             tint = Color.White.copy(alpha = if (enabled) 0.92f else 0.28f),
-            modifier = Modifier.size(if (tv) 28.dp else 21.dp),
+            modifier = Modifier.size(if (tv) 28.dp else 24.dp),
         )
     }
 }
@@ -2491,12 +2524,13 @@ private fun CastSheet(
                 }
                 Box(
                     Modifier
-                        .size(34.dp)
+                        // 和旁边的扫码/填地址同一档热区，不然「关面板」是最难点的那个
+                        .size(48.dp)
                         .clip(CircleShape)
                         .clickable(onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("✕", color = Color.White.copy(alpha = 0.65f), fontSize = ProomSp(15.sp))
+                    Text("✕", color = Color.White.copy(alpha = 0.65f), fontSize = ProomSp(17.sp))
                 }
             }
 
@@ -2760,7 +2794,11 @@ private fun CastSheet(
 private val IconTint = Color.White.copy(alpha = 0.65f)
 
 /**
- * 面板头部的小图标按钮：和「✕」一样的 32dp 点击区，没有底色，只有图标。
+ * 面板头部的小图标按钮：和「✕」一样的点击区，没有底色，只有图标。
+ *
+ * 点击区从 32dp 提到 48dp：这是个只靠图标表达的工具按钮，手指压不准就会
+ * 点到旁边的「输入电视地址」上去，而两者行为完全不同（一个是开相机）。
+ * 视觉尺寸没变，多出来的部分靠 padding 撑，不占额外版面。
  *
  * 图标不带文字，所以必须给 [label]：读屏用户只靠它知道这是「扫码」还是「填地址」，
  * 顺带也让自动化测试点得中（没有 text 的节点只能靠坐标猜）。
@@ -2773,7 +2811,7 @@ private fun CastIconButton(
 ) {
     Box(
         Modifier
-            .size(32.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .semantics { contentDescription = label }
             .clickable(onClick = onClick),
