@@ -497,6 +497,8 @@ fun PlayerScreen(
     // 遥控器按键才继续走 onPreviewKeyEvent（详见下面 clearFocus 那段的注释）
     val rootFocus = remember { FocusRequester() }
     var focusTick by remember { mutableIntStateOf(0) }
+    /** 跳过片头按完自增一次：触发下面的还焦（按钮本身随即消失） */
+    var refocusPlay by remember { mutableIntStateOf(0) }
 
     fun seekBy(deltaMs: Long) {
         if (live) return
@@ -1083,6 +1085,17 @@ fun PlayerScreen(
         }
     }
 
+    // 跳过片头按完，那个按钮就跟着片头区间一起没了：焦点留在被移除的节点上，
+    // 遥控器会静默到下次唤出控制层。还回播放键，和唤出控制层时的落点一致。
+    LaunchedEffect(refocusPlay) {
+        if (refocusPlay == 0 || !isTv) return@LaunchedEffect
+        // 节点移除和重新组合不在同一帧，多请求几次，最后一发一定落在重建完的树上
+        repeat(3) {
+            delay(80)
+            runCatching { playFocus.requestFocus() }
+        }
+    }
+
     // 抽屉关掉后焦点得有个主人：留在刚被移除的节点上，遥控器会静默几秒，
     // 表现就是「按了没反应」。还回播放键，和唤出控制层时的落点一致。
     LaunchedEffect(sidePanel) {
@@ -1591,6 +1604,18 @@ fun PlayerScreen(
                             refreshTracks()
                             trackOpen = true
                         },
+                        // 电视专用：药丸在遥控器上落不了焦，必须有个在焦点树里的入口。
+                        // 手机不加 —— 底栏右侧已经 5 个按钮，360dp 会挤出去
+                        onSkipIntro = if (isTv && SkipRule.shouldShowIntro(position, skipMark.introMs, live)) {
+                            {
+                                seekTo(skipMark.introMs)
+                                // 按钮会因为「已经过了片头」当场消失，焦点跟着节点一起没了，
+                                // 遥控器就再也进不到根节点的预览事件。先把焦点还给播放键
+                                refocusPlay++
+                            }
+                        } else {
+                            null
+                        },
                     )
                 }
 
@@ -1748,7 +1773,9 @@ fun PlayerScreen(
                 SkipRule.shouldShowOutro(position, duration, skipMark.outroMs, hasNext, live)
             when {
                 // 片头优先：两者理论上不会同时成立，但边界上（超短片尾）留个次序更安全
-                SkipRule.shouldShowIntro(position, skipMark.introMs, live) -> SkipPill(
+                // 电视端不出这颗药丸：遥控器落不上去（它不是焦点目标），
+                // 那边的入口是底栏的「跳过片头」按钮。留着它就只好看摸不到了
+                !isTv && SkipRule.shouldShowIntro(position, skipMark.introMs, live) -> SkipPill(
                     text = "跳过片头",
                     onClick = { seekTo(skipMark.introMs) },
                     modifier = Modifier
@@ -1997,6 +2024,13 @@ private fun PlayerBottomBar(
     /** 字幕开着时圆钮变金：否则「字幕有没有开」只能点进去才知道 */
     subtitleOn: Boolean = false,
     onTracks: () -> Unit = {},
+    /**
+     * 片头区间内才传入：电视端唯一能落焦的「跳过片头」入口。
+     *
+     * 右下那颗药丸是纯触摸件，遥控器到不了它上面（focusable 也进不了焦点树）。
+     * 手机不传 —— 药丸摸得到，底栏右侧已经 5 个按钮，再加会挤出 360dp。
+     */
+    onSkipIntro: (() -> Unit)? = null,
 ) {
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
@@ -2201,6 +2235,8 @@ private fun PlayerBottomBar(
                     horizontalArrangement = Arrangement.spacedBy(if (tv) 20.dp else 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // 放最左：从下一集按右键第一下就落到它上面，不用一路数到行尾
+                    onSkipIntro?.let { SkipIntroChip(it) }
                     // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
                     if (!live) {
                         CircleTextChip(speedLabel(speed), onSpeed)
@@ -2375,6 +2411,38 @@ private fun CircleTextChip(text: String, onClick: () -> Unit) {
             text,
             color = Color.White.copy(alpha = 0.92f),
             fontSize = if (tv) 18.sp else ProomSp(12.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 底栏里的「跳过片头」：只在片头区间内出现，只在电视端出现。
+ *
+ * 文字直接写在按钮上，不做图标 —— 「三角 + 竖线」那套跳段图形和旁边的
+ * 下一集长得一模一样，3 米外分不出谁是谁。
+ */
+@Composable
+private fun SkipIntroChip(onClick: () -> Unit) {
+    val tv = LocalProomTv.current
+    Box(
+        Modifier
+            .height(if (tv) 56.dp else 48.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.42f))
+            // 常驻一道淡金边：不然它和旁边那排黑圆钮混成一片，
+            // 「这里是能直接跳的」看不出来
+            .border(1.dp, ProomColor.accent.copy(alpha = 0.55f), CircleShape)
+            .tvFocusRing(CircleShape, color = ProomColor.accent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (tv) 22.dp else 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "跳过片头",
+            color = Color.White,
+            fontSize = if (tv) 18.sp else ProomSp(12.sp),
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
         )
     }
