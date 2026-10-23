@@ -71,39 +71,8 @@ object LibrarySync {
         val nasHist = runCatching { api.history() }.getOrNull()
         if (nasFavs == null && nasHist == null) return lib
 
-        val byName = lib.items.associateBy { it.name }.toMutableMap()
-        val now = System.currentTimeMillis()
-
-        nasFavs.orEmpty().forEach { v ->
-            val old = byName[v.name]
-            when {
-                old == null -> byName[v.name] = LibItem(
-                    name = v.name, pic = v.pic, type = v.type, year = v.year,
-                    fav = true, at = now,
-                )
-                // 本机有未推送的改动就以本机为准
-                old.pendingFav -> Unit
-                !old.fav -> byName[v.name] = old.copy(fav = true)
-            }
-        }
-
-        nasHist.orEmpty().forEach { v ->
-            val old = byName[v.name]
-            when {
-                old == null -> byName[v.name] = LibItem(
-                    name = v.name, pic = v.pic, year = v.year, type = v.type,
-                    position = (v.progress * 10000).toLong(), duration = 10000L, at = now,
-                )
-                old.pendingHis -> Unit
-                // 本机没在播这个，就用 NAS 上的位置（别端可能看到更后面）
-                old.position == 0L -> byName[v.name] = old.copy(
-                    position = (v.progress * 10000).toLong(), duration = 10000L,
-                    pic = old.pic.ifBlank { v.pic }, at = now,
-                )
-            }
-        }
-
-        val merged = LibFile(byName.values.toList())
+        // 合并规则本身在 LibraryMerge（纯函数、有单测）；这里只管网络与落盘
+        val merged = LibraryMerge.pull(lib, nasFavs, nasHist, System.currentTimeMillis())
         return LibraryStore.replace(ctx, merged)
     }
 }

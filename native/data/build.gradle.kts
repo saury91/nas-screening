@@ -45,4 +45,9 @@ dependencies {
 
     // 配对二维码
     implementation("com.google.zxing:core:3.5.3")
+
+    // 只测纯逻辑：合并/归一化/熔断状态机/文件原子写。
+    // 刻意不引 Robolectric —— 它首次运行要联网下 android-all，会把「离线也能跑测试」这个前提废掉
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

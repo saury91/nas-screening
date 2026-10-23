@@ -67,30 +67,68 @@ object LibraryStore {
 
     private const val FILE = "library.json"
 
+    fun load(ctx: Context): LibFile = LibraryJsonFile.read(File(ctx.filesDir, FILE))
+
+    fun save(ctx: Context, lib: LibFile) = LibraryJsonFile.write(File(ctx.filesDir, FILE), lib)
+
+    /** 本地切换收藏，返回新库；`pendingFav` 留给同步器清 */
+    fun toggleFav(ctx: Context, vod: Vod): LibFile =
+        LibraryOps.toggleFav(load(ctx), vod, System.currentTimeMillis()).also { save(ctx, it) }
+
+    /** 播放进度落本地（播完/退出时调用），同样留 pending */
+    fun touchHistory(
+        ctx: Context,
+        vod: Vod,
+        ep: String,
+        position: Long,
+        duration: Long,
+    ): LibFile = LibraryOps
+        .touchHistory(load(ctx), vod, ep, position, duration, System.currentTimeMillis())
+        .also { save(ctx, it) }
+
+    /** 同步器用：标记某些条目的某类改动已经送达 */
+    fun markSynced(ctx: Context, lib: LibFile, names: Set<String>, fav: Boolean, his: Boolean): LibFile =
+        LibraryOps.markSynced(lib, names, fav, his).also { save(ctx, it) }
+
+    fun replace(ctx: Context, lib: LibFile): LibFile =
+        lib.also { save(ctx, it) }
+}
+
+/**
+ * `library.json` 的纯读写：不碰 Context，测试可以直接对着临时目录跑。
+ */
+internal object LibraryJsonFile {
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
     }
 
-    fun load(ctx: Context): LibFile {
-        val f = File(ctx.filesDir, FILE)
+    fun read(f: File): LibFile {
         if (!f.exists()) return LibFile()
         return runCatching { json.decodeFromString<LibFile>(f.readText()) }.getOrDefault(LibFile())
     }
 
-    fun save(ctx: Context, lib: LibFile) {
+    fun write(f: File, lib: LibFile) {
         runCatching {
-            val tmp = File(ctx.filesDir, "$FILE.tmp")
+            // 先写 .tmp 再改名：写一半被杀不会把主库留成半截 JSON
+            val tmp = File(f.parentFile ?: File("."), f.name + ".tmp")
             tmp.writeText(json.encodeToString(lib))
-            tmp.renameTo(File(ctx.filesDir, FILE))
+            tmp.renameTo(f)
         }
     }
+}
 
-    /** 本地切换收藏，返回新库；`pendingFav` 留给同步器清 */
-    fun toggleFav(ctx: Context, vod: Vod): LibFile {
-        val lib = load(ctx)
-        val now = System.currentTimeMillis()
+/**
+ * 收藏 / 记录的计算本体。
+ *
+ * 从 [LibraryStore] 抽出来只为可测：这里全是「哪一条该覆盖哪一条」的判断，
+ * store 那层只负责读文件、算完写回去。
+ */
+internal object LibraryOps {
+
+    fun toggleFav(lib: LibFile, vod: Vod, now: Long): LibFile {
         val old = lib.find(vod.name)
         val next = if (old != null) {
             old.copy(fav = !old.fav, pendingFav = true, at = now)
@@ -102,19 +140,17 @@ object LibraryStore {
         }
         val items = if (old != null) lib.items.map { if (it.name == vod.name) next else it }
         else lib.items + next
-        return LibFile(items).also { save(ctx, it) }
+        return LibFile(items)
     }
 
-    /** 播放进度落本地（播完/退出时调用），同样留 pending */
     fun touchHistory(
-        ctx: Context,
+        lib: LibFile,
         vod: Vod,
         ep: String,
         position: Long,
         duration: Long,
+        now: Long,
     ): LibFile {
-        val lib = load(ctx)
-        val now = System.currentTimeMillis()
         val old = lib.find(vod.name)
         val base = old ?: LibItem(name = vod.name, pic = vod.pic, type = vod.type, year = vod.year)
         val next = base.copy(
@@ -128,11 +164,10 @@ object LibraryStore {
         )
         val items = if (old != null) lib.items.map { if (it.name == vod.name) next else it }
         else lib.items + next
-        return LibFile(items).also { save(ctx, it) }
+        return LibFile(items)
     }
 
-    /** 同步器用：标记某些条目的某类改动已经送达 */
-    fun markSynced(ctx: Context, lib: LibFile, names: Set<String>, fav: Boolean, his: Boolean): LibFile {
+    fun markSynced(lib: LibFile, names: Set<String>, fav: Boolean, his: Boolean): LibFile {
         val items = lib.items.map {
             if (it.name in names) {
                 it.copy(
@@ -141,9 +176,6 @@ object LibraryStore {
                 )
             } else it
         }
-        return LibFile(items).also { save(ctx, it) }
+        return LibFile(items)
     }
-
-    fun replace(ctx: Context, lib: LibFile): LibFile =
-        lib.also { save(ctx, it) }
 }

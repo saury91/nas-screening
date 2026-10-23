@@ -26,11 +26,22 @@ object SearchStore {
             ?: emptyList()
 
     fun add(ctx: Context, kw: String): List<String> {
-        val k = kw.trim()
-        if (k.isEmpty()) return list(ctx)
-        val next = (listOf(k) + list(ctx).filter { it != k }).take(MAX)
-        save(ctx, next)
+        val cur = list(ctx)
+        val next = merged(cur, kw, MAX)
+        if (next != cur) save(ctx, next)
         return next
+    }
+
+    /**
+     * 新词插到最前、去重、截断到 [max] 条。
+     *
+     * 抽成纯函数是为了能测：上限和去重顺序是这个功能全部的行为，
+     * 而它们在 SharedPreferences 后面没法单独验证。
+     */
+    internal fun merged(cur: List<String>, kw: String, max: Int = MAX): List<String> {
+        val k = kw.trim()
+        if (k.isEmpty()) return cur
+        return (listOf(k) + cur.filter { it != k }).take(max)
     }
 
     fun remove(ctx: Context, kw: String): List<String> {

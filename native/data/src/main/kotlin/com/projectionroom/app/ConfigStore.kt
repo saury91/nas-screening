@@ -18,48 +18,12 @@ import java.io.File
  */
 object ConfigStore {
 
-    private const val FILE = "config/bundle.json"
-
     /** APK 里那份内置配置（和 NAS 下发的是同一种文件） */
     private const val ASSET = "config/bundle.json"
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-        encodeDefaults = true
-        // NAS 里的源是网页后台手工填的，字段缺一半是常态：
-        // 实测导出的配置包里有 `"cat": null`，而模型里 cat 是非空且带默认值的，
-        // 不开这两个开关会直接抛 JsonDecodingException —— 整个配置包都读不出来。
-        coerceInputValues = true
-        explicitNulls = false
-    }
+    fun read(ctx: Context): ConfigBundle? = ConfigFile.read(ctx.filesDir)
 
-    fun read(ctx: Context): ConfigBundle? {
-        // 先读正式文件，坏掉再读备份 —— 这份文件没了，整个 App 就没片源了，
-        // 而它的来源（NAS）可能永远不会再开机，所以必须留一手
-        parse(File(ctx.filesDir, FILE))?.let { return it }
-        return parse(File(ctx.filesDir, "$FILE.bak"))
-    }
-
-    private fun parse(f: File): ConfigBundle? {
-        if (!f.exists()) return null
-        return runCatching { json.decodeFromString<ConfigBundle>(f.readText()) }
-            .getOrNull()
-            ?.takeIf { it.sources.isNotEmpty() }
-    }
-
-    fun save(ctx: Context, bundle: ConfigBundle) {
-        runCatching {
-            val f = File(ctx.filesDir, FILE)
-            f.parentFile?.mkdirs()
-            // 旧的那份先留成备份：新文件写坏了还能退回去
-            if (f.exists()) runCatching { f.copyTo(File(ctx.filesDir, "$FILE.bak"), overwrite = true) }
-            // 先写临时文件再改名：中途被杀不会留下半截 JSON
-            val tmp = File(ctx.filesDir, "$FILE.tmp")
-            tmp.writeText(json.encodeToString(bundle))
-            tmp.renameTo(f)
-        }
-    }
+    fun save(ctx: Context, bundle: ConfigBundle) = ConfigFile.save(ctx.filesDir, bundle)
 
     /**
      * 首启播种：把 APK 里的 `assets/config/bundle.json` 落盘。
@@ -100,4 +64,55 @@ object ConfigStore {
 
     /** 版本号只用来判断「要不要更新」，不代表能不能用 */
     fun versionOf(bundle: ConfigBundle?): String = bundle?.version.orEmpty()
+}
+
+/**
+ * 配置包的落盘细节：`.bak` 备份 + `.tmp` 改名。
+ *
+ * 抽成不依赖 Context 的 `dir` 版本，测试才能用临时目录验证
+ * 「主文件坏了回退备份」「半截写入不留残骸」这两条 —— 而这两条正是
+ * 配置丢过一次之后加上的。
+ */
+internal object ConfigFile {
+
+    private const val NAME = "config/bundle.json"
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = true
+        // NAS 里的源是网页后台手工填的，字段缺一半是常态：
+        // 实测导出的配置包里有 `"cat": null`，而模型里 cat 是非空且带默认值的，
+        // 不开这两个开关会直接抛 JsonDecodingException —— 整个配置包都读不出来。
+        coerceInputValues = true
+        explicitNulls = false
+    }
+
+    fun read(dir: File): ConfigBundle? {
+        // 先读正式文件，坏掉再读备份 —— 这份文件没了，整个 App 就没片源了，
+        // 而它的来源（NAS）可能永远不会再开机，所以必须留一手
+        parse(File(dir, NAME))?.let { return it }
+        return parse(File(dir, "$NAME.bak"))
+    }
+
+    fun save(dir: File, bundle: ConfigBundle) {
+        runCatching {
+            val f = File(dir, NAME)
+            f.parentFile?.mkdirs()
+            // 旧的那份先留成备份：新文件写坏了还能退回去
+            if (f.exists()) runCatching { f.copyTo(File(dir, "$NAME.bak"), overwrite = true) }
+            // 先写临时文件再改名：中途被杀不会留下半截 JSON
+            val tmp = File(dir, "$NAME.tmp")
+            tmp.writeText(json.encodeToString(bundle))
+            tmp.renameTo(f)
+        }
+    }
+
+    private fun parse(f: File): ConfigBundle? {
+        if (!f.exists()) return null
+        return runCatching { json.decodeFromString<ConfigBundle>(f.readText()) }
+            .getOrNull()
+            // 没有片源的配置等于没配置，别拿它盖掉能用的那份
+            ?.takeIf { it.sources.isNotEmpty() }
+    }
 }
