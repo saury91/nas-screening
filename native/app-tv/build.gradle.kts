@@ -19,7 +19,7 @@ android {
         targetSdk = 35
         // 发版时由 CI/脚本注入（tag 里解析），本地构建用默认值
         versionCode = System.getenv("PROOM_VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("PROOM_VERSION_NAME") ?: "0.13.0"
+        versionName = System.getenv("PROOM_VERSION_NAME") ?: "0.15.0"
     }
 
     buildFeatures { compose = true }
