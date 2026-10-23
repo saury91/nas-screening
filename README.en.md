@@ -2,7 +2,7 @@
 
 [中文](README.md) · **English**
 
-Version **0.13.0** · One codebase for Web / Android phone / Android TV
+Version **0.15.0** · One codebase for Web / Android phone / Android TV
 
 > **An empty-shell player.** No sources, no channels, no music endpoints, no bundled configuration.
 > The repository contains no media files and no content addresses. A blank first launch is by design,
@@ -79,6 +79,8 @@ Version **0.13.0** · One codebase for Web / Android phone / Android TV
 | Resume | Progress saved every few seconds; picks up where you stopped |
 | Buffering state | Blurred poster, three bouncing dots, live bitrate — never a spinner |
 | Picture-in-picture | Browse, search and switch titles in a small window; closing it ends playback |
+| Subtitles | App only: toggle and switch embedded tracks, attach local SRT / VTT / ASS / TTML; remembered per title + episode; four size steps |
+| Audio tracks | App only: pick between multiple audio tracks (dual-language commentary, dub vs. original); defaults to automatic |
 
 ### 2.5 Casting
 
@@ -133,13 +135,14 @@ Everything else is resource loading and goes from the client straight to the sou
 | Favorites and history | ✅ | ✅ | ✅ |
 | Music | ✅ full | ✅ full | ✅ full (with EQ presets) |
 | Casting | Receiver controls | ✅ sender | Receiver |
-| Sources / live feeds / downloads / backup | ✅ everywhere | ❌ not offered | ❌ not offered |
+| Sources / live feeds | ✅ everywhere | ✅ subscription sources + config import/export | ✅ same as phone |
+| Downloads / scheduled backup | ✅ everywhere | ❌ not offered | ❌ not offered |
 
 | Client | Constraints |
 |---|---|
 | Desktop | `http://<nas>:8899` is always the latest build; adaptive layout from 375 to 3840 |
-| Phone | Four tabs: Films / Live / Music / Mine; no configuration management — use the desktop console |
-| TV | BACK is the only way back, no focusable back button; initial focus on the first actionable item; no lock screen, PiP or casting entry |
+| Phone | Four tabs: Films / Live / Music / Mine; configuration is limited to subscription sources and config import/export — source probing, downloads and scheduled backup stay on the desktop console |
+| TV | BACK is the only way back, no focusable back button; initial focus on the first actionable item; no lock screen, PiP or casting entry; no system file picker, so local subtitles must be picked on the phone |
 
 ---
 
