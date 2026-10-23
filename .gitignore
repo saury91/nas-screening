@@ -25,6 +25,11 @@ deploy.sh
 *.tmp
 *.log
 
+# ── 截图：只纳入不含内容源信息的界面图（本地可留全量，不进仓库）──
+docs/screenshot-*.png
+!docs/screenshot-backup.png
+!docs/screenshot-app-tv-pair.png
+
 # ── Python ──
 __pycache__/
 *.py[cod]
