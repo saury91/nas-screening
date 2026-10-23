@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.projectionroom.shared.playback.SkipRule
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
@@ -514,6 +515,51 @@ private fun PlaybackSetting() {
                     label = PlaybackPrefs.label(ms),
                     on = PlaybackPrefs.doubleTapMs == ms,
                     onClick = { PlaybackPrefs.setDoubleTapMs(ctx, ms) },
+                )
+            }
+        }
+
+        // 新剧的默认值；某部剧在播放页单独调过之后就跟那部剧走
+        Text(
+            "跳过片头",
+            style = ProomType.cardTitle,
+            color = ProomColor.text,
+            modifier = Modifier.padding(top = 22.dp),
+        )
+        Text(
+            "播放到片头区间时右下角浮出按钮，按 OK 才跳。已单独设过的剧不受这里影响",
+            style = ProomType.label,
+            color = ProomColor.muted,
+            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SkipRule.introOptions.forEach { ms ->
+                SeekChip(
+                    label = if (ms == 0L) "关" else "${ms / 1000}",
+                    on = PlaybackPrefs.introMs == ms,
+                    onClick = { PlaybackPrefs.setIntroMs(ctx, ms) },
+                )
+            }
+        }
+
+        Text(
+            "片尾提示",
+            style = ProomType.cardTitle,
+            color = ProomColor.text,
+            modifier = Modifier.padding(top = 22.dp),
+        )
+        Text(
+            "最后这段时间里允许按「下一集」，设「关」就不提示",
+            style = ProomType.label,
+            color = ProomColor.muted,
+            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SkipRule.outroOptions.forEach { ms ->
+                SeekChip(
+                    label = if (ms == 0L) "关" else "${ms / 1000}",
+                    on = PlaybackPrefs.outroMs == ms,
+                    onClick = { PlaybackPrefs.setOutroMs(ctx, ms) },
                 )
             }
         }
