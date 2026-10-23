@@ -187,6 +187,22 @@
 .pl-side .line-chip.on i{color:rgba(27,18,6,.6)}
 .pl-side .line-chip.focused{box-shadow:inset 0 0 0 2px var(--accent)}
 
+/* 字幕块：文件名可能很长（Release.2024.1080p.zh-CN.srt），别把侧栏撑开 */
+.pl-side .sub-name{
+  display:inline-block;max-width:132px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;vertical-align:bottom;font-style:normal;
+}
+.pl-side .sub-sizes{margin-top:7px}
+.pl-side .sub-sizes .line-chip{min-width:44px;justify-content:center;padding:0 8px}
+
+/* 字幕字号：JS 往 .pl-stage 挂 --pl-sub-size，四档 17/20/25/30px */
+.pl-stage .art-subtitle{
+  font-size:var(--pl-sub-size,20px)!important;
+  line-height:1.45;
+  text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 8px rgba(0,0,0,.75);
+  padding:0 6%;
+}
+
 /* ArtPlayer 皮肤微调 */
 .artplayer{--art-theme:var(--accent)}
 .art-video-player .art-bottom .art-progress .art-progress-indicator{background:var(--accent)}
