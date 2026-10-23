@@ -141,13 +141,20 @@ cd native
 
 ## 为什么是 KMP 而不是纯 Android
 
-`core` 里全是纯 Kotlin，没有任何 Android 依赖：Android 直接引用，
-以后真要上 iOS 也是同一份 `core` 出 framework。UI 才分平台写——
-TV 要 D-pad 焦点、手机要手势转场，共用一套响应式布局两边都会别扭，
-所以现在干脆是两个 App、两套页面。
+`core` 的 `commonMain` 是纯 Kotlin，没有任何 Android 依赖：模型、NAS 接口、
+采集站协议、投屏协议的组装与解析都在这一层，也是单测覆盖最厚的地方。
+平台差异收在 `androidMain` 的四个实现里（`OkHttpHttp`、`ImageHttp`、
+`DlnaClient`、`LanCastClient`）。UI 才分平台写——TV 要 D-pad 焦点、
+手机要手势转场，共用一套响应式布局两边都会别扭，所以是两个 App、两套页面。
 
-iOS 端目前不做：自建环境下签名与安装链路走不通，出了包也装不上，
-投入产出不成正比。KMP 的结构留着，是为了不把路堵死，不是为了现在就走。
+iOS 端不做：自建环境下签名与安装链路走不通，出了包也装不上，投入产出不成正比。
+
+`core/build.gradle.kts` 里**不再声明 iOS target**。以前声明过
+`iosArm64()` / `iosSimulatorArm64()`，但没有 `iosMain` 源集，Kotlin/Native
+工具链从未下载，一次都没编译过——那个声明除了让人以为「已经支持 iOS」，
+没有任何作用。真要上 iOS 时再加回来，代价是：补四个平台实现
+（`Http` 用 NSURLSession、`ImageHttp`、`DlnaClient` 的 SSDP、`LanCastClient` 的 TCP），
+并在 Info.plist 里配本地网络权限说明。注意 `androidMain` 里的 okhttp 在 iOS 上没有对应物。
 
 ## 换 NAS 地址
 
