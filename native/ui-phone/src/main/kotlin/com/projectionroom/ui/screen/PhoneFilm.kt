@@ -1,17 +1,30 @@
 package com.projectionroom.ui.screen
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,6 +35,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,37 +43,53 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.PhoneHero
 import com.projectionroom.ui.component.PosterCard
 import com.projectionroom.ui.component.PosterSkeleton
+import com.projectionroom.ui.component.ProomPullRefresh
 import com.projectionroom.ui.component.SkeletonBlock
 import com.projectionroom.ui.component.WideSkeleton
 import com.projectionroom.ui.component.TabIcons
@@ -91,6 +121,22 @@ private val FILM_TABS = listOf(
 
 private val TopBarH = 56.dp
 private val TabBarH = 42.dp
+// 年份、地区各占一行，行高压到 34dp，两行一共 68dp
+private val FilterBarH = 68.dp
+private val FilterRowH = 34.dp
+
+/**
+ * 筛选条的两组值。
+ *
+ * 年份只列近若干年：数据层是按 `startsWith` 比年份的，写「2024」可靠，
+ * 写「2020 年代」一条也匹配不上。地区用短名即可 —— `Catalog.areaMatches` 做的是
+ * contains + 别名（「香港」同时命中「香港」和「中国香港」，「内地」还会命中「大陆」），
+ * 各采集站叫法不统一这件事在数据层已经处理掉了。
+ */
+private val FILTER_YEARS = listOf("", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019")
+// 地区用短名：areaMatches 是 contains 比对的，「香港」能同时命中「香港」和「中国香港」，
+// 写全称只会在一条横滑里白白多占 4 个字的位置
+private val FILTER_AREAS = listOf("", "内地", "香港", "台湾", "美国", "日本", "韩国", "英国")
 
 /**
  * 影视页的「现场」：二级 tab + 首页滚动位置。
@@ -103,6 +149,15 @@ private object FilmUiState {
     var tab: Int = 0
     var homeIndex: Int = 0
     var homeOffset: Int = 0
+
+    /**
+     * 各分类页的筛选条件（slug → 年份 to 地区）。
+     *
+     * 和 tab 一样要放在进程里：进详情再返回时 `remember` 全没了，
+     * 条件一旦跟着丢，缓存的列表就和筛选项对不上（显示着「2024」的按钮，
+     * 列表却是全部）—— 所以两边必须一起记住。
+     */
+    val filters = HashMap<String, Pair<String, String>>()
 }
 
 @Composable
@@ -126,26 +181,48 @@ fun PhoneFilm(
     onOpenSettings: () -> Unit = {},
 ) {
     var tab by remember { mutableIntStateOf(FilmUiState.tab) }
-    var refreshing by remember { mutableStateOf(false) }
+    // 刷新记在「发起下拉的那一页」上：拖到一半切走，新 tab 不该顶着别人的转圈
+    var refreshingTab by remember { mutableIntStateOf(-1) }
+    val refreshing = refreshingTab == tab
     var refreshTick by remember { mutableIntStateOf(0) }
     var homeScrolled by remember { mutableStateOf(FilmUiState.homeIndex > 0) }
     val scope = rememberCoroutineScope()
 
+    // 每个分类各自记住自己选过的年份/地区：切走再回来、进详情再返回都保持原样
+    var filterYear by remember(tab) { mutableStateOf(FilmUiState.filters[FILM_TABS[tab].second]?.first.orEmpty()) }
+    var filterArea by remember(tab) { mutableStateOf(FilmUiState.filters[FILM_TABS[tab].second]?.second.orEmpty()) }
+    LaunchedEffect(tab, filterYear, filterArea) {
+        FilmUiState.filters[FILM_TABS[tab].second] = filterYear to filterArea
+    }
+
     // 二级 tab 也记到进程里：从详情返回时还停在原来那个 tab 上
     LaunchedEffect(tab) { FilmUiState.tab = tab }
 
+    // 刷新代数：每次下拉都递增，旧的 800ms 计时器认不出自己已经被顶掉
+    var pullGen by remember { mutableIntStateOf(0) }
+
     fun pull() {
-        if (refreshing) return
-        refreshing = true
+        // 不再拦「刷新中再拉」：拦掉的话 refreshTick 不变，分类页那一侧
+        // 开的转圈就再没人负责关，指示器会永远停在那儿
+        pullGen += 1
+        val gen = pullGen
+        refreshingTab = tab
         // 下拉 = 明确要最新数据，让缓存层这次跳过本地
         com.projectionroom.shared.net.HttpCache.forceNext = true
         refreshTick += 1
         onRefresh()
         scope.launch {
             delay(800)
-            refreshing = false
+            if (pullGen == gen) refreshingTab = -1
         }
     }
+
+    // 顶栏（状态栏 + 品牌行 + tab 行 [+ 筛选条]）的总高度。
+    // 下拉指示器默认画在整棵树的 y=0，正好被这层顶栏盖住：首页顶栏是半透明渐变
+    // 还能透出一点，分类页是实底，指示器等于完全看不见 —— 于是拖起来「毫无反应」，
+    // 手感就成了「不跟手、还很难触发」。往下挪到 tab 行下面即可。
+    // 首页没有筛选条，分类页有，高度跟着变 —— 指示器与网格的让位都读这一个值。
+    val headerH = statusInset + TopBarH + TabBarH + if (tab == 0) 0.dp else FilterBarH
 
     val solid = tab != 0 || homeScrolled
 
@@ -163,6 +240,7 @@ fun PhoneFilm(
                     if (i > 0) tab = i
                 },
                 statusInset = statusInset,
+                indicatorTop = headerH,
                 onScrolled = { homeScrolled = it },
                 onOpenSettings = onOpenSettings,
             )
@@ -171,9 +249,11 @@ fun PhoneFilm(
                 loadBrowse = loadBrowse,
                 slug = FILM_TABS[tab].second,
                 name = FILM_TABS[tab].first,
+                year = filterYear,
+                area = filterArea,
                 refreshTick = refreshTick,
-                refreshing = refreshing,
                 topInset = statusInset,
+                indicatorTop = headerH,
                 onRefresh = ::pull,
                 onOpen = onOpen,
             )
@@ -193,7 +273,27 @@ fun PhoneFilm(
                 .padding(top = statusInset, bottom = if (solid) 0.dp else 8.dp),
         ) {
             FilmTopBar(onSearch)
-            FilmTabRow(current = tab, onSelect = { tab = it })
+            FilmTabRow(
+                current = tab,
+                onSelect = { next ->
+                    if (next != tab) {
+                        // 刷新代数归零：留着的话切走再切回来（或切到别的分类）会
+                        // 「接着上一次下拉」再请求一遍，且这一遍没有任何刷新标志，
+                        // 看起来就像切 tab 偷偷刷新了。
+                        refreshTick = 0
+                        tab = next
+                    }
+                },
+            )
+            // 筛选条只属于分类页：首页本来就是一屏推荐，没有「筛」这回事
+            if (tab != 0) {
+                FilterBar(
+                    year = filterYear,
+                    area = filterArea,
+                    onYear = { filterYear = it },
+                    onArea = { filterArea = it },
+                )
+            }
         }
     }
 }
@@ -273,7 +373,110 @@ private fun FilmTabRow(current: Int, onSelect: (Int) -> Unit) {
     }
 }
 
+/**
+ * 分类筛选条：年份、地区各一行，标签固定在左侧、右侧胶囊各自横滑。
+ *
+ * 两行而不是挤成一行横滑：一行里两组接在一起时，第一屏只看得到「年份」，
+ * 没人知道右边还藏着「地区」—— 同一个筛选条里要求用户去发现，成本太高。
+ * 分两行后两组一眼都在，行高压到 34dp，两行也才 68dp。
+ *
+ * 视觉上刻意做轻：11sp 灰标签 + 12sp 胶囊，未选中无底色，选中只压一层很淡的金底
+ * 并把文字转金 —— 比上面的 tab 行（15sp + 金色下划线）轻一档，不跟 tab 抢层级。
+ */
+@Composable
+private fun FilterBar(
+    year: String,
+    area: String,
+    onYear: (String) -> Unit,
+    onArea: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().height(FilterBarH)) {
+        FilterRow("年份", FILTER_YEARS, year, onYear)
+        FilterRow("地区", FILTER_AREAS, area, onArea)
+    }
+}
+
+@Composable
+private fun FilterRow(
+    label: String,
+    values: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    val listState = rememberLazyListState()
+    val idx = values.indexOf(selected)
+    LaunchedEffect(idx) {
+        // 把选中的滑回视野：从详情返回时整页会重新组合，LazyRow 的滚动位置
+        // 跟着归位到最左，一排全是未选中态 —— 用户会当成「筛选被清掉了」。
+        if (idx > 0) listState.scrollToItem((idx - 1).coerceAtLeast(0))
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().height(FilterRowH),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 标签固定不跟着滑：滑到年份中段时还得知道自己在筛什么
+        Text(
+            text = label,
+            style = ProomType.label,
+            color = ProomColor.muted,
+            modifier = Modifier.padding(start = 20.dp).width(36.dp),
+            maxLines = 1,
+        )
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            LazyRow(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                // 右边留 20dp 给渐隐，滑到底时最后一个胶囊正好露在渐隐区外
+                contentPadding = PaddingValues(end = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(values) { v ->
+                    FilterPill(
+                        text = v.ifBlank { "全部" },
+                        on = v == selected,
+                        onClick = { onSelect(v) },
+                    )
+                }
+            }
+            // 右缘渐隐：提示这一行还能往右滑
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(20.dp)
+                    .background(
+                        Brush.horizontalGradient(listOf(Color.Transparent, ProomColor.bg)),
+                    ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterPill(text: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            // 未选中完全透明：一排 12 个灰底胶囊会把顶栏压得很重
+            .background(if (on) ProomColor.accentSoft else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text = text,
+            style = ProomType.label,
+            // 未选中比 tab 行再暗一档：这一行是工具，不该和 tab 一个分量
+            color = if (on) ProomColor.accent else ProomColor.muted,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
 /* ───────────────────────── 首页 ───────────────────────── */
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -282,6 +485,8 @@ private fun HomePane(
     loading: Boolean,
     refreshing: Boolean,
     statusInset: Dp,
+    /** 下拉指示器相对屏幕顶部的偏移：让开固定顶栏，不然拖半天看不到任何反馈 */
+    indicatorTop: Dp,
     onRefresh: () -> Unit,
     onOpen: (Vod) -> Unit,
     onPlay: (Vod) -> Unit,
@@ -324,10 +529,10 @@ private fun HomePane(
         }
     }
 
-    PullToRefreshBox(
-        isRefreshing = refreshing,
+    ProomPullRefresh(
+        refreshing = refreshing,
+        indicatorTop = indicatorTop,
         onRefresh = onRefresh,
-        modifier = Modifier.fillMaxSize(),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // 62% 太占屏：一张就吃掉大半行高，改成 46%（约 180dp）
@@ -486,23 +691,33 @@ private fun CategoryPane(
     loadBrowse: (cat: String, page: Int, year: String, area: String) -> Flow<NasApi.BrowsePage>,
     slug: String,
     name: String,
+    /** 筛选条件由外层（顶栏那条筛选条）持有，这里只负责按它取数 */
+    year: String,
+    area: String,
     refreshTick: Int,
-    refreshing: Boolean,
     topInset: Dp,
+    /** 同 HomePane：指示器要画在固定顶栏下面才看得见 */
+    indicatorTop: Dp,
     onRefresh: () -> Unit,
     onOpen: (Vod) -> Unit,
 ) {
-    // 从详情/播放返回时用上次的快照原样复原，不重拉（见 BrowseCache 注释）
-    val cached = remember(slug) { com.projectionroom.ui.state.BrowseCache.get(slug) }
-    var items by remember(slug) { mutableStateOf(cached?.items ?: emptyList()) }
-    var page by remember(slug) { mutableIntStateOf(cached?.page ?: 1) }
-    var more by remember(slug) { mutableStateOf(cached?.more ?: false) }
-    var loading by remember(slug) { mutableStateOf(cached == null) }
-    var loadingMore by remember(slug) { mutableStateOf(false) }
-    var err by remember(slug) { mutableStateOf<String?>(null) }
-    var sites by remember(slug) { mutableIntStateOf(0) }
+    // 从详情/播放返回时用上次的快照原样复原，不重拉（见 BrowseCache 注释）。
+    // 快照只有和当前筛选条件对得上才能用：否则会「按钮显示 2024、列表是全部」。
+    val cached = remember(slug, year, area) {
+        com.projectionroom.ui.state.BrowseCache.get(slug)?.takeIf { it.year == year && it.area == area }
+    }
+    var items by remember(slug, year, area) { mutableStateOf(cached?.items ?: emptyList()) }
+    var page by remember(slug, year, area) { mutableIntStateOf(cached?.page ?: 1) }
+    var more by remember(slug, year, area) { mutableStateOf(cached?.more ?: false) }
+    var loading by remember(slug, year, area) { mutableStateOf(cached == null) }
+    var loadingMore by remember(slug, year, area) { mutableStateOf(false) }
+    var err by remember(slug, year, area) { mutableStateOf<String?>(null) }
+    var sites by remember(slug, year, area) { mutableIntStateOf(0) }
     // 复原滚动位置那一下不许触底加载：scrollToItem 会把 lastIndex 推到末尾
-    var allowMore by remember(slug) { mutableStateOf(cached == null) }
+    var allowMore by remember(slug, year, area) { mutableStateOf(cached == null) }
+    // 下拉触发的刷新：转圈一直留到这一轮请求真的落地，
+    // 不用「固定 800ms」去猜 —— 猜短了数据还没回来标志就没了，看着就像没刷新
+    var pullRefreshing by remember(slug) { mutableStateOf(false) }
 
     suspend fun load(p: Int, append: Boolean) {
         if (append) loadingMore = true else loading = true
@@ -511,7 +726,7 @@ private fun CategoryPane(
         // 完整快照，直接在 items 上累加会出现整份重复
         val base = if (append) items else emptyList()
         runCatching {
-            loadBrowse(slug, p, "", "").collect { d ->
+            loadBrowse(slug, p, year, area).collect { d ->
                 items = if (append) (base + d.items).distinctBy { it.name } else d.items
                 more = d.more
                 sites = d.sites
@@ -525,30 +740,40 @@ private fun CategoryPane(
         loadingMore = false
     }
 
-    LaunchedEffect(slug, refreshTick) {
+    LaunchedEffect(slug, refreshTick, year, area) {
         // refreshTick > 0 是下拉刷新；否则有快照就是「从详情返回」，不重拉
         if (refreshTick == 0 && cached != null) {
             loading = false
             return@LaunchedEffect
         }
+        pullRefreshing = refreshTick > 0
+        val started = System.currentTimeMillis()
         load(1, append = false)
+        if (refreshTick > 0) {
+            // 命中本地快照时 load 会「瞬间」返回，转圈还没画出来就收回去，
+            // 手感就是「拉下来立刻弹回去」。留一个最短可见时长。
+            val rest = 700 - (System.currentTimeMillis() - started)
+            if (rest > 0) kotlinx.coroutines.delay(rest)
+        }
+        pullRefreshing = false
     }
 
     val state = rememberLazyGridState()
-    LaunchedEffect(slug) {
+    LaunchedEffect(slug, year, area) {
         allowMore = false
-        val target = cached?.scroll ?: 0
-        if (target > 0) state.scrollToItem(target)
+        // 换筛选条件必须回顶：不复位的话新条件的结果从「上次滚到的地方」开始显示，
+        // 上半屏是空的，看着像没数据
+        state.scrollToItem(cached?.scroll ?: 0)
         if (cached != null) kotlinx.coroutines.delay(800)
         allowMore = true
     }
-    DisposableEffect(slug) {
+    DisposableEffect(slug, year, area) {
         onDispose {
             com.projectionroom.ui.state.BrowseCache.put(
                 slug,
                 com.projectionroom.ui.state.BrowseCache.Snapshot(
-                    year = "",
-                    area = "",
+                    year = year,
+                    area = area,
                     items = items,
                     page = page,
                     more = more,
@@ -557,7 +782,7 @@ private fun CategoryPane(
             )
         }
     }
-    LaunchedEffect(state, items.size, more) {
+    LaunchedEffect(state, items.size, more, year, area) {
         snapshotFlow { state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .collect { last ->
                 if (!allowMore) return@collect
@@ -567,10 +792,15 @@ private fun CategoryPane(
             }
     }
 
-    PullToRefreshBox(
-        isRefreshing = refreshing,
-        onRefresh = onRefresh,
-        modifier = Modifier.fillMaxSize(),
+    ProomPullRefresh(
+        refreshing = pullRefreshing,
+        indicatorTop = indicatorTop,
+        onRefresh = {
+            // 松手的那一帧就要进「转圈」：交给 LaunchedEffect 会晚一帧，
+            // 那一帧指示器停在阈值处、isRefreshing 还是 false —— 看着就是不转、卡住
+            pullRefreshing = true
+            onRefresh()
+        },
     ) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
@@ -578,7 +808,9 @@ private fun CategoryPane(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 20.dp, end = 20.dp,
-                top = TopBarH + TabBarH + 8.dp + topInset,
+                // 让位给顶栏 + 筛选条：indicatorTop 就是这个总高度，
+                // 以后再加/减一条工具行，只改一处
+                top = indicatorTop + 12.dp,
                 bottom = 28.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -620,7 +852,8 @@ private fun CategoryPane(
                             Modifier
                                 .clip(RoundedCornerShape(ProomShape.sm))
                                 .background(ProomColor.surface)
-                                .clickable { }
+                                // 之前是空 clickable：点了什么都不发生，改成真的重拉
+                                .clickable { onRefresh() }
                                 .padding(horizontal = 18.dp, vertical = 10.dp),
                         ) { Text("下拉重试", style = ProomType.meta, color = ProomColor.text) }
                     }
@@ -643,15 +876,25 @@ private fun CategoryPane(
                         Spacer(Modifier.height(14.dp))
                         // sites = 0：这一类没有参与聚合的片源，提示去配片源而不是「刷新试试」
                         val noSources = sites == 0
+                        // 空结果有三种来源，别一律说「暂时没有内容」：
+                        // 没片源 / 筛选条件太窄 / 这类真的空
+                        val filtered = year.isNotBlank() || area.isNotBlank()
                         Text(
-                            if (noSources) "还没有片源" else "「$name」暂时没有内容",
+                            when {
+                                noSources -> "还没有片源"
+                                filtered -> "这个筛选下没有内容"
+                                else -> "「$name」暂时没有内容"
+                            },
                             style = ProomType.body,
                             color = ProomColor.dim,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            if (noSources) "在设置里导入配置包，或连上 NAS 同步一次。"
-                            else "下拉可以重新拉取，或者回首页看看推荐",
+                            when {
+                                noSources -> "在设置里导入配置包，或连上 NAS 同步一次。"
+                                filtered -> "把年份或地区放宽一点再看看"
+                                else -> "下拉可以重新拉取，或者回首页看看推荐"
+                            },
                             style = ProomType.label,
                             color = ProomColor.muted,
                         )
