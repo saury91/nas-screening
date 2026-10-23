@@ -1,7 +1,7 @@
 name: release
 
 # 打一个 tag（或手动点一次），就把两个带签名的 APK 挂到 GitHub Release。
-# 版本号从 tag 解析（v0.13.0 → 0.13.0），versionCode 用 run_number 递增，
+# 版本号从 tag 解析（v0.15.0 → 0.15.0），versionCode 用 run_number 递增，
 # 不需要手工改 build.gradle.kts 里的数字。
 on:
   push:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "版本号，如 v0.13.0；留空则用当前提交短 SHA"
+        description: "版本号，如 v0.15.0；留空则用当前提交短 SHA"
         required: false
         default: ""
 
