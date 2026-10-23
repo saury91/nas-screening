@@ -12,7 +12,7 @@ WebView 版的下一步：用 Compose 重写 UI，业务层用 Kotlin Multiplatf
 | `data` | Android 侧存储、NAS 闸门、库同步、配对、DLNA、通知栏服务 |
 | `ui-tv` / `app-tv` | 📺 电视端独立 App：`com.projectionroom.tv` |
 | `ui-phone` / `app-phone` | 📱 手机端独立 App：`com.projectionroom.app` |
-| `app-ios` | 待建（只出代码，不联调） |
+| `app-ios` | 不做：签名与安装链路在自建环境里走不通，出了包也装不上，暂不投入 |
 
 ### 为什么拆成两个 App
 
@@ -142,9 +142,12 @@ cd native
 ## 为什么是 KMP 而不是纯 Android
 
 `core` 里全是纯 Kotlin，没有任何 Android 依赖：Android 直接引用，
-将来 iOS 出 framework 也是同一份代码。UI 才分平台写——
+以后真要上 iOS 也是同一份 `core` 出 framework。UI 才分平台写——
 TV 要 D-pad 焦点、手机要手势转场，共用一套响应式布局两边都会别扭，
 所以现在干脆是两个 App、两套页面。
+
+iOS 端目前不做：自建环境下签名与安装链路走不通，出了包也装不上，
+投入产出不成正比。KMP 的结构留着，是为了不把路堵死，不是为了现在就走。
 
 ## 换 NAS 地址
 
