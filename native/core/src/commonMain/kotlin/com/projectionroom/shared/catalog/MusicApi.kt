@@ -157,11 +157,18 @@ class MusicApi(
         return Lrc.parse(d.lrc?.lyric.orEmpty())
     }
 
-    /** 判断是不是「试听片段」：整曲基本都在 1.2MB 以上，片段约 480KB */
+    /**
+     * 判断是不是「试听片段」：整曲基本都在 1.2MB 以上，片段约 480KB。
+     *
+     * **拿不到长度时一律当完整曲目放行**。HEAD 被拒（405）、CDN 走 chunked
+     * 都会让 [Http.contentLength] 返回 0，若把 0 也当成片段，整张歌单会被
+     * 误判成「全部不可播」而逐首跳过 —— 宁可偶尔放过一首 30 秒的，
+     * 也不能把正常曲目拦掉。
+     */
     suspend fun isFullTrack(cdnUrl: String): Boolean {
-        if (!ready) return false
+        if (!ready) return true
         val size = http.contentLength(cdnUrl)
-        return size >= FULL_MIN
+        return size <= 0L || size >= FULL_MIN
     }
 
     // ── 上游 JSON ─────────────────────────────────────────────
