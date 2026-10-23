@@ -49,9 +49,11 @@ jobs:
         with:
           gradle-version: wrapper
 
-      # 纯 Kotlin，不碰 Android，几十秒出结果 —— 先失败先暴露
+      # core 是纯 Kotlin，几十秒出结果；data 需要 Android 运行时，稍慢。
+      # 两个都必须跑：data 里的合并/原子写/熔断是「改一处坏一片」的逻辑，
+      # 只在本地跑等于没有闸门。
       - name: 数据层单测
-        run: ./gradlew :core:jvmTest --no-daemon
+        run: ./gradlew :core:jvmTest :data:testDebugUnitTest --no-daemon
 
       - name: 编译 debug APK
         run: ./gradlew :app-tv:assembleDebug :app-phone:assembleDebug --no-daemon
