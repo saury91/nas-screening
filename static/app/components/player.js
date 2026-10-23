@@ -21,6 +21,140 @@ let booting = true;
 
 const layer = () => $('#playerlayer');
 
+// ── 字幕（外挂，用户自己选的文件）──────────────────────────
+// 浏览器只能读用户手动选的文件，blob URL 在刷新/重新进播放器后即失效，
+// 所以不做跨会话记忆（和原生端按集记忆不同）；这里只记「本次播放内挂过什么」，
+// 切集时清掉，避免把上一集的字幕串到下一集。
+const SUB_SIZES = [0.85, 1, 1.25, 1.5];
+const SUB_SIZE_NAMES = ['小', '中', '大', '特大'];
+const SUB_BASE_PX = 20;   // 字号档 1.0 的字幕像素，其余按倍率缩放
+const SUB_MAX_BYTES = 2 * 1024 * 1024;
+let subState = { name: '', type: '', blob: '', show: false, size: 1 };
+
+/** 扩展名 → ArtPlayer 认的字幕类型；不认识的返回空串表示拒收 */
+function subTypeOf(fileName) {
+  const ext = String(fileName || '').split('.').pop().toLowerCase();
+  if (ext === 'srt') return 'srt';
+  if (ext === 'vtt') return 'vtt';
+  if (ext === 'ass' || ext === 'ssa') return 'ass';
+  return '';
+}
+
+/** 字号存在 .pl-stage 上，由 CSS 变量喂给 .art-subtitle */
+function applySubSize() {
+  const stage = $('.pl-stage');
+  if (stage) stage.style.setProperty('--pl-sub-size', `${(SUB_BASE_PX * subState.size).toFixed(1)}px`);
+}
+
+function clearSubtitle(redraw = true) {
+  if (subState.blob) URL.revokeObjectURL(subState.blob);
+  subState = { name: '', type: '', blob: '', show: false, size: subState.size };
+  try { if (art) art.subtitle.show = false; } catch (e) {}
+  if (redraw) redrawSub(null);
+}
+
+/**
+ * 把字幕文本交给 ArtPlayer。
+ * 走 blob URL 而不是 data URI：data URI 在几十 KB 的 ass 上会让 URL 长得离谱。
+ */
+function applySubtitle(name, text, type) {
+  if (!art) { toast('播放器还没准备好', 'err'); return; }
+  if (subState.blob) URL.revokeObjectURL(subState.blob);
+  const blob = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  // switch 内部走的是异步拉取 + 转换，解析失败不会同步抛：得挂 catch，
+  // 否则界面上会显示「已加载」但画面里一个字没有
+  const fail = () => {
+    URL.revokeObjectURL(blob);
+    if (subState.blob === blob) subState = { ...subState, name: '', type: '', blob: '', show: false };
+    toast('字幕解析失败，换个文件试试', 'err');
+    redrawSub(null);
+  };
+  subState = { ...subState, name, type, blob, show: true };
+  try {
+    // 1) style 必须给个对象：artplayer 内部会对 option.style 逐个 key 调 style[k]=v，
+    //    传 undefined 会往元素的 style 上塞一个 "undefined" 键
+    // 2) 不传 name：传了它会弹一条英文 notice（Switch Subtitle: xxx），
+    //    和下面的中文 toast 叠在一起
+    const r = art.subtitle.switch(blob, { type, style: {} });
+    if (r && typeof r.then === 'function') r.catch(fail);
+    art.subtitle.show = true;
+    applySubSize();
+  } catch (e) {
+    fail();
+    return;
+  }
+  toast('字幕已加载 · ' + name);
+  redrawSub(null);
+}
+
+function readFileBuffer(file) {
+  if (typeof file.arrayBuffer === 'function') return file.arrayBuffer();
+  return new Promise(resolve => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => resolve(new ArrayBuffer(0));
+    fr.readAsArrayBuffer(file);
+  });
+}
+
+/**
+ * 读字幕文本。中文 srt 有相当比例是 GBK（从字幕站下的老片尤其），
+ * 直接按 UTF-8 解会整篇乱码，所以先 UTF-8 试解，出现替换符再用 GBK 重解。
+ * 传进 ArtPlayer 的内容统一是 UTF-8，它内部再按 type 转 vtt。
+ */
+async function readSubtitleText(file) {
+  const buf = await readFileBuffer(file);
+  let text = new TextDecoder('utf-8').decode(buf);
+  if (text.includes('\uFFFD')) {
+    try {
+      const gbk = new TextDecoder('gbk').decode(buf);
+      if (!gbk.includes('\uFFFD')) text = gbk;
+    } catch (e) {}
+  }
+  // 中文 srt 十有八九带 BOM，留着会让第一条时间轴的解析错位
+  return text.replace(/^\uFEFF/, '');
+}
+
+/** 选本地字幕：input[type=file] 必须挂在用户手势里点，不能延时调用 */
+function pickSubtitle() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.srt,.vtt,.ass,.ssa,text/vtt,text/plain';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.onchange = async () => {
+    const f = input.files && input.files[0];
+    input.remove();
+    if (!f) return;
+    const type = subTypeOf(f.name);
+    if (!type) { toast('只支持 srt / vtt / ass 字幕', 'err'); return; }
+    if (f.size > SUB_MAX_BYTES) { toast('字幕文件太大（超过 2MB）', 'err'); return; }
+    let text = '';
+    try { text = await readSubtitleText(f); } catch (e) {}
+    if (!text.trim()) { toast('这个字幕文件是空的', 'err'); return; }
+    applySubtitle(f.name, text, type);
+  };
+  input.click();
+}
+
+function onSubAction(action) {
+  if (action === 'off') {
+    clearSubtitle();
+    // 重绘会把按钮换掉，遥控器用户的焦点得还回去
+    const b = $('#pl-sub-blk [data-sub="off"]');
+    if (b) setFocus(b, false);
+    return;
+  }
+  if (action === 'pick') pickSubtitle();
+}
+
+function setSubSize(v) {
+  subState.size = v;
+  applySubSize();
+  // 字号只影响显示，不需要重载字幕；但要让高亮跟手
+  redrawSub(`[data-sub-size="${v}"]`);
+}
+
 // ArtPlayer + hls.js 合计 540KB。以前放在 index.html 里同步加载，
 // 首屏白等它们解析完；现在只有真的进播放器才拉。
 let libsPromise = null;
@@ -258,11 +392,42 @@ function sideHTML() {
           <b>${esc(s.site)}</b>${s.q ? `<u>${esc(s.q)}</u>` : ''}<i>${s.count || (s.eps ? s.eps.length : '')} 集</i>
         </button>`).join('')}</div>
     </div>
+    <div class="blk" id="pl-sub-blk">${subHTML()}</div>
     ${src.eps.length > 1 ? `<div class="blk">
       <h5>选集 <span class="count">${src.eps.length}</span></h5>
       <div class="ep-grid">${src.eps.map((e, i) => `
         <button class="ep ${i === state.ei ? 'on' : ''}" data-ei="${i}" data-focus>${esc(e.name)}</button>`).join('')}</div>
     </div>` : ''}`;
+}
+
+/** 字幕块内容：只重绘这一块，别动选集（重建会把滚动位置和焦点一起清掉） */
+function subHTML() {
+  const on = !!subState.show && !!subState.name;
+  return `
+    <h5>字幕 <span class="count">${on ? `<i class="sub-name">${esc(subState.name)}</i>` : '未加载'}</span></h5>
+    <div class="line-chips">
+      <button class="line-chip ${on ? '' : 'on'}" data-sub="off" data-focus>关闭</button>
+      <button class="line-chip" data-sub="pick" data-focus><b>选择本地字幕</b><u>srt/vtt/ass</u></button>
+    </div>
+    <div class="line-chips sub-sizes">
+      ${SUB_SIZES.map((v, i) => `<button class="line-chip ${subState.size === v ? 'on' : ''}"
+        data-sub-size="${v}" data-focus>${SUB_SIZE_NAMES[i]}</button>`).join('')}
+    </div>`;
+}
+
+/**
+ * 只替换字幕块的 DOM。
+ * [focusSel] 传入重绘前该拿焦点的那个按钮（比如刚点过的字号档），
+ * 否则遥控器用户改完字号焦点会掉到页面开头。
+ */
+function redrawSub(focusSel) {
+  const box = $('#pl-sub-blk');
+  if (!box) return;
+  box.innerHTML = subHTML();
+  if (focusSel) {
+    const b = box.querySelector(focusSel);
+    if (b) setFocus(b, false);
+  }
 }
 
 function bindUI() {
@@ -272,8 +437,13 @@ function bindUI() {
   const side = $('#pl-side-body');
   side.onclick = e => {
     const line = e.target.closest('[data-si]');
-    if (line) { switchLine(+line.dataset.si); }
-    else {
+    if (line) {
+      switchLine(+line.dataset.si);
+    } else if (e.target.closest('[data-sub]')) {
+      onSubAction(e.target.closest('[data-sub]').dataset.sub);
+    } else if (e.target.closest('[data-sub-size]')) {
+      setSubSize(+e.target.closest('[data-sub-size]').dataset.subSize);
+    } else {
       const ep = e.target.closest('[data-ei]');
       if (ep) switchEp(+ep.dataset.ei);
     }
@@ -518,6 +688,9 @@ function switchEp(ei) {
   saveProgress(true);
   state.ei = next;
   state.position = 0;
+  // 外挂字幕是按「这一集」选的，换集必须摘掉：同一部剧两集的字幕时间轴不同，
+  // 留着只会「有字幕但全错位」，比没有更糟
+  clearSubtitle();
   const ep = src.eps[next];
   syncSide();
   playUrl(ep.url, 0);
@@ -536,6 +709,8 @@ function switchLine(si, keepEp = false) {
   // 自动降级时保留当前集；手动换线路仍从第 1 集开始
   state.ei = keepEp ? Math.min(prevEi, src.eps.length - 1) : 0;
   state.position = 0;
+  // 换到别的集就把外挂字幕摘掉（同一集降级换线路则保留，字幕还能用）
+  if (state.ei !== prevEi) clearSubtitle(false);
   const ep = src.eps[state.ei] || src.eps[0];
   if (body) {
     body.innerHTML = sideHTML();
@@ -668,6 +843,8 @@ function mountArt(url, position) {
   addControls();
   wirePip();
   wireClickGesture(host);
+  // 字号是跨片保留的偏好，但 DOM 是新建的：变量得重新挂到新的 .pl-stage 上
+  applySubSize();
 
   // 真实分辨率：videoHeight 是解码出来的实际值，比备注里写的靠谱
   const showRes = () => {
@@ -1069,6 +1246,8 @@ function destroyArt() {
   endSwitch();
   stopStallWatch();
   if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+  // 播放器实例没了，字幕的 blob URL 就该释放：不释放会在内存里留到刷新页面
+  clearSubtitle(false);
   try { art && art.destroy(false); } catch (e) {}
   art = null;
   waitState = false;
@@ -1084,6 +1263,7 @@ function showError(title, desc) {
   const buf = $('#pl-buffer');
   if (buf) buf.hidden = true;
   // 停掉 ArtPlayer 自带的加载动画与音频，避免错误页上还转着圈
+  clearSubtitle(false);
   try { art && art.destroy(false); } catch (e) {}
   art = null;
   clearInterval(saveTimer);
