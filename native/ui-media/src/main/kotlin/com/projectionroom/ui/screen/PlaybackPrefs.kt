@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.projectionroom.shared.playback.SkipRule
 
 /**
  * 解码方式。
@@ -36,6 +37,8 @@ object PlaybackPrefs {
     private const val K_DECODER = "decoder_mode"
     private const val K_SUB_ON = "subtitle_on"
     private const val K_SUB_SCALE = "subtitle_scale"
+    private const val K_INTRO = "skip_intro_ms"
+    private const val K_OUTRO = "skip_outro_ms"
 
     /** 可选的步长：5 秒适合精确定位，30 秒适合快进跳过片头 */
     val steps: List<Long> = listOf(5_000L, 10_000L, 30_000L)
@@ -65,6 +68,19 @@ object PlaybackPrefs {
         private set
 
     /**
+     * 片头时长（全局默认，毫秒）。
+     *
+     * 只是「新剧第一次播时用什么」：一旦某部剧单独调过，就记在
+     * [com.projectionroom.ui.playback.SkipStore] 里，不再跟这个值走。
+     */
+    var introMs by mutableLongStateOf(SkipRule.DEFAULT_INTRO)
+        private set
+
+    /** 片尾提示时长（全局默认，毫秒）。0 表示不提示下一集 */
+    var outroMs by mutableLongStateOf(SkipRule.DEFAULT_OUTRO)
+        private set
+
+    /**
      * 每次读都回读一次 SharedPreferences：它本身有内存缓存，代价可以忽略，
      * 但省掉了「谁先 init、改完谁去同步」的顺序问题。
      */
@@ -78,6 +94,30 @@ object PlaybackPrefs {
             subtitleOn = sp.getBoolean(K_SUB_ON, false)
             val scale = sp.getFloat(K_SUB_SCALE, 1f)
             subtitleScale = if (scale in subtitleScales) scale else 1f
+            val intro = sp.getLong(K_INTRO, SkipRule.DEFAULT_INTRO)
+            introMs = if (intro in SkipRule.introOptions) intro else SkipRule.DEFAULT_INTRO
+            val outro = sp.getLong(K_OUTRO, SkipRule.DEFAULT_OUTRO)
+            outroMs = if (outro in SkipRule.outroOptions) outro else SkipRule.DEFAULT_OUTRO
+        }
+    }
+
+    fun setIntroMs(context: Context, ms: Long) {
+        if (ms !in SkipRule.introOptions) return
+        introMs = ms
+        runCatching {
+            context.applicationContext
+                .getSharedPreferences(FILE, Context.MODE_PRIVATE)
+                .edit().putLong(K_INTRO, ms).apply()
+        }
+    }
+
+    fun setOutroMs(context: Context, ms: Long) {
+        if (ms !in SkipRule.outroOptions) return
+        outroMs = ms
+        runCatching {
+            context.applicationContext
+                .getSharedPreferences(FILE, Context.MODE_PRIVATE)
+                .edit().putLong(K_OUTRO, ms).apply()
         }
     }
 
