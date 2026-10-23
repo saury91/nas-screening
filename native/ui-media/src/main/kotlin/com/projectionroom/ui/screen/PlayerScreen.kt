@@ -7,10 +7,15 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Rational
+import android.util.TypedValue
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.projectionroom.shared.cast.CastApi
 import com.projectionroom.shared.cast.CastHub
 import androidx.compose.animation.AnimatedVisibility
@@ -95,21 +100,28 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.playback.MediaStats
 import com.projectionroom.ui.playback.MediaStatsTracker
 import com.projectionroom.ui.playback.PlaybackEngine
+import com.projectionroom.ui.playback.SideSubtitle
+import com.projectionroom.ui.playback.SubtitleStore
+import com.projectionroom.ui.playback.TrackOption
+import com.projectionroom.ui.playback.TrackPicker
 import com.projectionroom.ui.component.BufferDots
 import com.projectionroom.ui.component.PlayerIcons
 import com.projectionroom.ui.component.TabIcons
@@ -148,6 +160,12 @@ internal const val PLAYER_UA =
 private object OrientationMemory {
     var initial: Int? = null
 }
+
+/** 从 SAF 的 URI 上取显示名（用来判断字幕格式）；拿不到就退回 URI 本身 */
+private fun displayNameOf(context: Context, uri: Uri): String? = runCatching {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+}.getOrNull()
 
 private fun Context.findActivity(): Activity? {
     var c: Context? = this
@@ -386,12 +404,70 @@ fun PlayerScreen(
     var sleepOpen by remember { mutableStateOf(false) }
     // 「播放信息」：分辨率/码率/速度/解码器，排查卡顿用
     var infoOpen by remember { mutableStateOf(false) }
+    // ── 字幕与音轨 ──
+    var trackOpen by remember { mutableStateOf(false) }
+    // 轨道列表只在打开面板时取一次快照：放进每秒 tick 里会让整页每秒重组
+    var textTracks by remember { mutableStateOf<List<TrackOption>>(emptyList()) }
+    var audioTracks by remember { mutableStateOf<List<TrackOption>>(emptyList()) }
+    // 外挂字幕按「片名 + 第几集」记：换集不串，重进同一集自动带出
+    val subKey = if (live) "" else vod.name + "\u0001" + epIndex
+    var sideSub by remember(subKey) {
+        mutableStateOf(if (live) null else SubtitleStore.get(context, vod.name, epIndex))
+    }
+    // 挂/换/去字幕都要重建 MediaItem：重建会走 onDispose，那里默认会写一条观看记录。
+    // 用一次性开关抑制掉，否则「换个字幕」在记录里就多出一条 pendingHis 推给 NAS
+    val skipHistory = remember { BooleanArray(1) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var speed by remember { mutableFloatStateOf(1f) }
     var hint by remember { mutableStateOf<String?>(null) }
     /** 长按临时 2 倍速：按住加速、松手还原（直播禁用） */
     var boost by remember { mutableStateOf(false) }
+
+    /** 面板打开时现取一次轨道快照（选完再取一次，高亮才跟得上） */
+    fun refreshTracks() {
+        textTracks = TrackPicker.textTracks(exo)
+        audioTracks = TrackPicker.audioTracks(exo)
+    }
+
+    /**
+     * 挂/去外挂字幕。
+     *
+     * 重建 MediaItem 会让 onDispose 跑一次：先把位置存进 resumeAt，再打上「不写观看记录」标记，
+     * 否则用户每换一次字幕，本地记录就多一条要推给 NAS 的 pendingHis。
+     */
+    fun applySideSub(sub: SideSubtitle?) {
+        // 重选同一个文件不会触发重建（状态值相等），此时别把 skipHistory 立起来，
+        // 否则它会被下一次真正的重建（比如退出播放页）消费掉，白丢一条观看记录
+        if (sub?.uri == sideSub?.uri) return
+        resumeAt[0] = exo.currentPosition
+        skipHistory[0] = true
+        sideSub = sub
+    }
+
+    // 系统文件选择器：电视上没有这个入口（面板里换成一行说明）
+    val subPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val picked = displayNameOf(context, uri).orEmpty()
+            // 很多文件管理器把 srt 报成 application/octet-stream，只能靠扩展名判断
+            val mime = TrackPicker.subtitleMime(picked.ifBlank { uri.toString() })
+            if (mime == null) {
+                hint = "只支持 SRT / VTT / ASS / TTML 字幕"
+            } else {
+                // 只拿一次读权限：下次进这一集不用再选一遍文件
+                runCatching {
+                    context.contentResolver
+                        .takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val label = picked.ifBlank { "外挂字幕" }
+                val sub = SideSubtitle(uri.toString(), mime, label)
+                SubtitleStore.remember(context, vod.name, epIndex, sub)
+                PlaybackPrefs.setSubtitleOn(context, true)
+                applySideSub(sub)
+                hint = "已加载字幕：$label"
+            }
+        }
+    }
 
     // ── 遥控器 ──
     // 电视上的一切都靠焦点：控制层出现时把焦点送到主按钮，
@@ -728,8 +804,9 @@ fun PlayerScreen(
     val brightness = remember { mutableFloatStateOf(currentBrightness(activity)) }
     val volume = remember { mutableFloatStateOf(currentVolume(context)) }
 
-    // 换集/换线路：重新准备，有进度就从上次位置续播
-    DisposableEffect(playUrl, decoderMode) {
+    // 换集/换线路/换字幕：重新准备，有进度就从上次位置续播
+    // 字幕配置进 MediaItem（不可变），所以换/去外挂字幕只能重建；内嵌轨切换走参数，不重建
+    DisposableEffect(playUrl, decoderMode, sideSub?.uri) {
         val url = playUrl
         if (!url.isNullOrBlank()) {
             // 直播不读续播点：上次记的「位置」对直播流没有意义，
@@ -737,12 +814,22 @@ fun PlayerScreen(
             // 换解码器重建播放器时，位置从 resumeAt 带过来（读完即消费，别留到下一次换集）
             val carried = resumeAt[0].also { resumeAt[0] = 0L }
             val saved = if (live) 0L else if (carried > 0L) carried else prefs.getLong(url, 0L)
-            // 走代理后路径是 /api/proxy?u=…，没有 .m3u8 后缀，
-            // ExoPlayer 只能靠 MIME 判断是 HLS —— 不显式指定会当普通文件解析，永远起不来。
+            // 采集站偶尔给出没有 .m3u8 后缀的 HLS 地址，ExoPlayer 只能靠 MIME 判断，
+            // 不显式指定会当普通文件解析，永远起不来。
             val isHls = url.contains(".m3u8", ignoreCase = true)
             val item = MediaItem.Builder()
                 .setUri(resolveUrl(url))
-                .apply { if (isHls) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8) }
+                .apply {
+                    if (isHls) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+                    // 外挂字幕（SAF content://）挂在这里；解析失败就当没挂，别让整集播不出来
+                    sideSub?.let { sub ->
+                        runCatching {
+                            setSubtitleConfigurations(
+                                listOf(TrackPicker.sideSubtitle(Uri.parse(sub.uri), sub.mime, sub.label))
+                            )
+                        }
+                    }
+                }
                 .build()
             // 直连源站：采集站的 m3u8 大多校验 Referer/UA，不带头会 403。
             // 以前靠 NAS 的 /api/proxy 代补，现在播放器自己带 —— NAS 关机也能播。
@@ -758,8 +845,15 @@ fun PlayerScreen(
                         if (origin.isNotBlank()) put("Referer", origin)
                     }
                 )
-            val source = DefaultMediaSourceFactory(factory).createMediaSource(item)
+            // 外挂字幕来自 SAF 的 content://，DefaultHttpDataSource 读不了；
+            // 用 DefaultDataSource 包一层：http(s) 仍走上面那套 UA/Referer，content/file 走本地分支。
+            // 只包这一层，视频请求的行为完全不变。
+            val dataSource = DefaultDataSource.Factory(context, factory)
+            val source = DefaultMediaSourceFactory(dataSource).createMediaSource(item)
             exo.setMediaSource(source, if (saved > 5_000L) saved else 0L)
+            // 字幕默认关：内嵌轨不会自己跳出来（海外片源自带英文字幕的概率很高）。
+            // 必须在 prepare 之前设，等 STATE_READY 再设会先闪一下字幕。
+            if (!PlaybackPrefs.subtitleOn) TrackPicker.disableText(exo)
             exo.prepare()
             exo.playWhenReady = true
             // 视频也吃同一套音效：对白听不清时开「人声」比调大音量有效
@@ -767,6 +861,10 @@ fun PlayerScreen(
             AudioFx.attach(exo.audioSessionId)
         }
         onDispose {
+            // 换字幕也会走到这里：这时位置已由调用方存进 resumeAt，
+            // 进度表照写，但**不写观看记录** —— 否则每换一次字幕就多一条 pendingHis 推给 NAS
+            val skip = skipHistory[0]
+            skipHistory[0] = false
             // 直播不记进度、不写观看记录：看完一个台不该出现在「继续观看」里
             if (!live && !url.isNullOrBlank() && exo.currentPosition > 5_000L) {
                 // 这张表是「每个 URL 一条」，看几百集后会有几千条；
@@ -774,8 +872,10 @@ fun PlayerScreen(
                 if (prefs.all.size > 400) prefs.edit().clear().apply()
                 prefs.edit().putLong(url, exo.currentPosition).apply()
                 // 顺手喂给本地记录库：NAS 关机也记得看到哪了
-                runCatching {
-                    onProgress(episode?.name.orEmpty(), exo.currentPosition, exo.duration)
+                if (!skip) {
+                    runCatching {
+                        onProgress(episode?.name.orEmpty(), exo.currentPosition, exo.duration)
+                    }
                 }
             }
         }
@@ -787,6 +887,7 @@ fun PlayerScreen(
     val curEps by rememberUpdatedState(line?.episodes.orEmpty())
     val curSrcs by rememberUpdatedState(sources)
     val curSrc by rememberUpdatedState(srcIndex)
+    val curSideSub by rememberUpdatedState(sideSub)
 
     DisposableEffect(exo) {
         val listener = object : Player.Listener {
@@ -817,6 +918,14 @@ fun PlayerScreen(
                     readyOnce = true
                     // 会话 id 在 prepare 之后才真正建出来，这里补绑一次才保证音效生效
                     AudioFx.attach(exo.audioSessionId)
+                    // 偏好是「字幕开」时自动挑一条：轨道要等 READY 才枚举得到，
+                    // 所以这一步不能和 disableText 一起放在 prepare 之前
+                    if (PlaybackPrefs.subtitleOn && curSideSub == null) {
+                        val opts = TrackPicker.textTracks(exo)
+                        if (opts.isNotEmpty() && opts.none { it.selected }) {
+                            TrackPicker.selectText(exo, TrackPicker.preferredText(opts))
+                        }
+                    }
                 }
                 // 直播流结束多半是源断了，自动跳下一个台会让人莫名其妙
                 if (state == Player.STATE_ENDED && !live) {
@@ -909,8 +1018,8 @@ fun PlayerScreen(
     // 无操作自动收起（锁定时只留锁图标）
     // key 必须带上 sidePanel：否则打开抽屉时计时器还在跑，几秒后照样把整个控制层（含抽屉）一起收掉。
     // 电视上再带上 focusTick：遥控器每动一下都重新计时，否则用户正在选集时整块会消失。
-    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen, focusTick, sleepOpen, infoOpen) {
-        if (controlsVisible && !locked && panel == Panel.None && !sidePanel && !castOpen && !sleepOpen && !infoOpen) {
+    LaunchedEffect(controlsVisible, locked, panel, sidePanel, castOpen, focusTick, sleepOpen, infoOpen, trackOpen) {
+        if (controlsVisible && !locked && panel == Panel.None && !sidePanel && !castOpen && !sleepOpen && !infoOpen && !trackOpen) {
             delay(if (isTv) 8_000 else 5_000)
             controlsVisible = false
         }
@@ -996,6 +1105,7 @@ fun PlayerScreen(
     // 用户只是想退出「播放设置」
     BackHandler(enabled = !locked) {
         when {
+            trackOpen -> trackOpen = false
             infoOpen -> infoOpen = false
             sidePanel -> sidePanel = false
             panel != Panel.None -> panel = Panel.None
@@ -1033,6 +1143,7 @@ fun PlayerScreen(
                     // 返回键走预览事件：抽屉里点着格子时 BackHandler 收不到
                     // （实测按 BACK 一次完全没反应，得按两次），在根节点先截住
                     Key.Back -> when {
+                        trackOpen -> { trackOpen = false; true }
                         infoOpen -> { infoOpen = false; true }
                         sidePanel -> { sidePanel = false; true }
                         panel != Panel.None -> { panel = Panel.None; true }
@@ -1083,10 +1194,33 @@ fun PlayerScreen(
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                     keepScreenOn = true
+                    // 字幕走 PlayerView 内建的 SubtitleView：白字 + 黑描边，
+                    // 亮场景（雪景、白墙）下也能看清；字号由偏好控制，见 update
+                    // 这里要的是 android.graphics 的 ARGB int，不是 Compose 的 Color
+                    subtitleView?.setStyle(
+                        CaptionStyleCompat(
+                            android.graphics.Color.WHITE,
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                            android.graphics.Color.BLACK,
+                            null,
+                        )
+                    )
+                    // 内嵌样式保留（ASS 的定位/颜色/卡拉OK都在这儿），
+                    // 但字号不让片源说了算，否则「特大」档按了没反应
+                    subtitleView?.setApplyEmbeddedFontSizes(false)
                 }
             },
             // factory 只跑一次：换解码器会造出新的 exo，不在这里重绑画面就永远停在旧实例上
-            update = { it.player = exo },
+            update = { view ->
+                view.player = exo
+                // 字号四档在播放中改也要立刻生效，所以放在 update 而不是 factory
+                view.subtitleView?.setFixedTextSize(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    16f * PlaybackPrefs.subtitleScale,
+                )
+            },
         )
 
         // ── 上下滑：亮度（左半屏）/ 音量（右半屏）──
@@ -1271,7 +1405,7 @@ fun PlayerScreen(
             ) {
                 // 面板展开时把上下两条栏收起来：右侧抽屉直接压在片名和进度按钮上，
                 // 「播放设置」和「狠狠骗我 · 第 1 集」叠字、暂停键被切一半
-                val overlayOpen = sidePanel || panel != Panel.None
+                val overlayOpen = sidePanel || panel != Panel.None || trackOpen
                 if (!locked && !overlayOpen) {
                     PlayerTopBar(
                         // 直播时标题放到左下角：电视台的台标几乎都在左上角，
@@ -1434,6 +1568,11 @@ fun PlayerScreen(
                         onSettings = { sidePanel = true },
                         onSleep = { sleepOpen = true },
                         onInfo = { infoOpen = true },
+                        subtitleOn = PlaybackPrefs.subtitleOn,
+                        onTracks = {
+                            refreshTracks()
+                            trackOpen = true
+                        },
                     )
                 }
 
@@ -1526,6 +1665,40 @@ fun PlayerScreen(
                             }
                         },
                         onClose = { infoOpen = false },
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
+
+                // 字幕与音轨：内嵌轨即时切换，不重建、不丢进度；
+                // 外挂字幕要重建媒体项，位置由 resumeAt 带过去
+                if (trackOpen) {
+                    PlayerTrackSheet(
+                        textTracks = textTracks,
+                        audioTracks = audioTracks,
+                        subtitleOn = PlaybackPrefs.subtitleOn,
+                        subtitleScale = PlaybackPrefs.subtitleScale,
+                        sideSubLabel = sideSub?.label,
+                        live = live,
+                        isTv = isTv,
+                        onPickText = { opt ->
+                            PlaybackPrefs.setSubtitleOn(context, opt != null)
+                            TrackPicker.selectText(exo, opt)
+                            refreshTracks()
+                        },
+                        onPickAudio = { opt ->
+                            TrackPicker.selectAudio(exo, opt)
+                            refreshTracks()
+                        },
+                        onPickFile = {
+                            // 不收窄 MIME：不少文件管理器把 .srt 报成 octet-stream
+                            runCatching { subPicker.launch(arrayOf("*/*")) }
+                        },
+                        onRemoveFile = {
+                            SubtitleStore.clear(context, vod.name, epIndex)
+                            applySideSub(null)
+                        },
+                        onPickScale = { PlaybackPrefs.setSubtitleScale(context, it) },
+                        onClose = { trackOpen = false },
                         modifier = Modifier.align(Alignment.Center),
                     )
                 }
@@ -1754,6 +1927,9 @@ private fun PlayerBottomBar(
     onSettings: () -> Unit,
     onSleep: () -> Unit = {},
     onInfo: () -> Unit = {},
+    /** 字幕开着时圆钮变金：否则「字幕有没有开」只能点进去才知道 */
+    subtitleOn: Boolean = false,
+    onTracks: () -> Unit = {},
 ) {
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
@@ -1970,6 +2146,13 @@ private fun PlayerBottomBar(
                             tint = if (sleepOn) ProomColor.accent else null,
                         )
                     }
+                    // 直播也留这个入口：体育台的双语解说、赛事字幕都在音轨/字幕轨里
+                    CircleIcon(
+                        PlayerIcons.Subtitle,
+                        "字幕与音轨",
+                        onTracks,
+                        tint = if (subtitleOn) ProomColor.accent else null,
+                    )
                     // 直播也留这个入口：IPTV 卡不卡、码流多大，同样要能看见
                     CircleIcon(PlayerIcons.Info, "播放信息", onInfo)
                     CircleIcon(
@@ -2781,12 +2964,22 @@ private fun durationText(ms: Long): String =
     if (ms <= 0) "—" else "%.1f 秒".format(Locale.US, ms / 1000.0)
 
 @Composable
-private fun PanelRow(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun PanelRow(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    width: Dp = 150.dp,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
+            // 面板行原本在电视上完全看不出焦点：遥控器上下按，只有选中项在变色，
+            // 「光标现在停在哪儿」是隐形的。zoom 用 1f，避免整行放大后被面板裁边
+            .tvFocusRing(RoundedCornerShape(8.dp), zoom = 1f, color = ProomColor.accent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .then(modifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -2795,7 +2988,7 @@ private fun PanelRow(label: String, selected: Boolean, onClick: () -> Unit) {
             fontSize = ProomSp(13.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(150.dp),
+            modifier = Modifier.width(width),
         )
     }
 }

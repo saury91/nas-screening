@@ -176,6 +176,18 @@ object PlayerIcons {
         circle(16.6f, 16.4f, 2.0f)
     }
 
+    /**
+     * 字幕：一个圆角框 + 底部两行短横。
+     *
+     * 括号形的 CC 标记在 24dp 下容易糊成两个方块，这种「屏幕里两行字」
+     * 的形状在电视上 3 米外也认得出是字幕。
+     */
+    val Subtitle: ImageVector = outline("subtitle") {
+        roundRect(3f, 4.6f, 21f, 19.4f, 2.4f)
+        moveTo(6.4f, 13.2f); lineTo(13.6f, 13.2f)
+        moveTo(6.4f, 16.4f); lineTo(17.6f, 16.4f)
+    }
+
     /** 播放信息：圆圈里一个 i */
     val Info: ImageVector = outline("info") {
         circle(12f, 12f, 8f)
