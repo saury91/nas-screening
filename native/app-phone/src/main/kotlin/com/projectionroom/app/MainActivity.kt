@@ -637,7 +637,7 @@ class MainActivity : ComponentActivity() {
                         val ctx = this@MainActivity
                         val cached = withContext(Dispatchers.IO) { FeedCache.read(ctx, key, ser) }
                         if (cached != null) emit(cached.value)
-                        if (cached != null &&
+                        if (cached != null && !FeedCache.isForced() &&
                             FeedCache.isFresh(cached.at, FeedCache.FRESH_MS)
                         ) {
                             return@flow
@@ -658,7 +658,7 @@ class MainActivity : ComponentActivity() {
                         val ctx = this@MainActivity
                         val cached = withContext(Dispatchers.IO) { FeedCache.read(ctx, key, ser) }
                         if (cached != null) emit(cached.value)
-                        if (cached != null &&
+                        if (cached != null && !FeedCache.isForced() &&
                             FeedCache.isFresh(cached.at, FeedCache.FRESH_MS)
                         ) {
                             return@flow
@@ -719,7 +719,7 @@ class MainActivity : ComponentActivity() {
                             val ctx = this@MainActivity
                             val cached = withContext(Dispatchers.IO) { FeedCache.read(ctx, key, ser) }
                             cached?.value?.firstOrNull()?.let { emit(it) }
-                            if (cached != null &&
+                            if (cached != null && !FeedCache.isForced() &&
                                 FeedCache.isFresh(cached.at, FeedCache.FRESH_MS)
                             ) {
                                 return@flow
@@ -1129,6 +1129,8 @@ class MainActivity : ComponentActivity() {
                                 live = {
                                     LiveScreen(
                                         load = doLive,
+                                        // 下拉刷新：打开强制窗口，否则 10 分钟内的磁盘快照会直接顶回来
+                                        onForceRefresh = { FeedCache.force() },
                                         onPlay = { chs, idx ->
                                             // 播台就算一条「最近观看」，「我的」的直播页签靠它
                                             chs.getOrNull(idx)?.let {
@@ -1142,6 +1144,8 @@ class MainActivity : ComponentActivity() {
                                 music = {
                                     MusicScreen(
                                         loadCats = doMusicCats,
+                                        // 下拉刷新：三路请求都要绕过磁盘缓存的新鲜期
+                                        onForceRefresh = { FeedCache.force() },
                                         loadPlaylists = doMusicLists,
                                         onOpenPlaylist = { p -> screen = Screen.Playlist(p.id, s) },
                                         // 音乐页顶栏那颗放大镜搜的是歌，不是片：
@@ -1223,6 +1227,7 @@ class MainActivity : ComponentActivity() {
                         is Screen.Browse -> if (s.slug == "music") {
                             MusicScreen(
                                 loadCats = doMusicCats,
+                                onForceRefresh = { FeedCache.force() },
                                 loadPlaylists = doMusicLists,
                                 onOpenPlaylist = { p -> screen = Screen.Playlist(p.id, s) },
                                 searchTracks = { kw ->
@@ -1248,6 +1253,7 @@ class MainActivity : ComponentActivity() {
                         } else if (s.slug == "live") {
                             LiveScreen(
                                 load = doLive,
+                                onForceRefresh = { FeedCache.force() },
                                 onPlay = { chs, idx ->
                                     val lp = livePlay(chs, idx)
                                     screen = Screen.Play(lp.vod, 0, lp.index, s, lp.urls)

@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -90,20 +91,37 @@ fun PlaylistScreen(
     var d by remember(id) { mutableStateOf(PlaylistCache.get(id)) }
     var loading by remember(id) { mutableStateOf(d == null) }
     var err by remember(id) { mutableStateOf<String?>(null) }
+    // 重试代数：0 首时给一个「重新加载」的入口，不然用户只能退了再进
+    var retry by remember(id) { mutableIntStateOf(0) }
 
-    LaunchedEffect(id) {
+    LaunchedEffect(id, retry) {
         // 只有手里没东西时才亮骨架
         if (d == null) loading = true
         err = null
         runCatching { load(id) }
             .onSuccess {
-                // 拿回来的空壳（id 对、曲目 0 条）不覆盖已有内容
-                if (it.tracks.isNotEmpty() || d == null) {
+                // 空壳（id 对、曲目 0 条）不能当成「这个歌单是空的」：
+                // 上游偶尔会返回 trackCount=20 但 tracks 为空的响应（版权受限、抽风），
+                // 之前直接吃下就成了「外面 20 首、点进来 0 首」。
+                if (it.tracks.isNotEmpty()) {
                     d = it
                     PlaylistCache.put(id, it)
+                } else if (d == null) {
+                    // 连 name 都没有 = 这次请求本身没通（断网、上游 502），
+                    // 不能当成「歌单是空的」，更不能进失效名单 —— 否则网络抖一下，
+                    // 一个好歌单就被列表永久藏起来了。
+                    if (it.name.isBlank()) {
+                        err = "接口没连上，检查一下网络"
+                    } else {
+                        err = "这个歌单暂时取不到曲目"
+                        // 记一笔：回到列表后把它剔掉，别让人反复点进空页面
+                        PlaylistCache.markDead(id)
+                    }
                 }
             }
-            .onFailure { if (d == null) err = it.message }
+            .onFailure {
+                if (d == null) err = it.message ?: "网络有点问题"
+            }
         loading = false
     }
 
@@ -153,7 +171,11 @@ fun PlaylistScreen(
             when {
                 loading || detail == null -> {
                     if (err != null) {
-                        PlaylistError(err ?: "") { onBack() }
+                        PlaylistError(
+                            msg = err ?: "",
+                            onBack = onBack,
+                            onRetry = { retry += 1 },
+                        )
                     } else {
                         PlaylistSkeleton(topInset, BarH, padX, wide)
                     }
@@ -510,7 +532,7 @@ private fun PlaylistSkeleton(topInset: Dp, barH: Dp, padX: Dp, wide: Boolean) {
 }
 
 @Composable
-private fun PlaylistError(msg: String, onBack: () -> Unit) {
+private fun PlaylistError(msg: String, onBack: () -> Unit, onRetry: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -532,14 +554,26 @@ private fun PlaylistError(msg: String, onBack: () -> Unit) {
         Spacer(Modifier.height(6.dp))
         Text(msg, style = ProomType.label, color = ProomColor.muted, maxLines = 2)
         Spacer(Modifier.height(18.dp))
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(50))
-                .background(ProomColor.surface)
-                .clickable(onClick = onBack)
-                .padding(horizontal = 18.dp, vertical = 9.dp),
-        ) {
-            Text("返回", fontSize = 13.sp, color = ProomColor.text)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 重试放前面：多数情况是这一次没拉到，重下一遍就有了
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(ProomColor.accent)
+                    .clickable(onClick = onRetry)
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
+            ) {
+                Text("重试", fontSize = 13.sp, color = ProomColor.bg, fontWeight = FontWeight.Medium)
+            }
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(ProomColor.surface)
+                    .clickable(onClick = onBack)
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
+            ) {
+                Text("返回", fontSize = 13.sp, color = ProomColor.text)
+            }
         }
     }
 }

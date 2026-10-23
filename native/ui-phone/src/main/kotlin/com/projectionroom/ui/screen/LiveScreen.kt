@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.ui.component.ChannelTile
+import com.projectionroom.ui.component.ProomPullRefresh
 import com.projectionroom.ui.component.SkeletonBlock
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.theme.ProomColor
@@ -101,6 +102,11 @@ fun LiveScreen(
     onPlay: (channels: List<NasApi.LiveChannel>, index: Int) -> Unit,
     /** 返回。手机上从 tab 进来，电视上是遥控器 BACK 之外的兜底入口 */
     onBack: (() -> Unit)? = null,
+    /**
+     * 下拉刷新时通知壳：频道表走磁盘缓存 + 10 分钟新鲜期，
+     * 不打开强制窗口的话下拉只会把同一份内容再放一遍，圈转完什么都没变。
+     */
+    onForceRefresh: () -> Unit = {},
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     // 切 tab 会把整页销毁重建，没有缓存的话每次回来都要重新拉一遍频道表，
@@ -112,6 +118,7 @@ fun LiveScreen(
     var query by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(reload) {
         if (LiveCache.fresh() != null && reload == 0) {
@@ -120,8 +127,10 @@ fun LiveScreen(
             loading = false
             return@LaunchedEffect
         }
-        loading = true
+        // 手上有表就不要再整页骨架：下拉刷新只在顶部转圈，列表别跳一下
+        if (LiveCache.fresh() == null) loading = true
         err = null
+        val started = System.currentTimeMillis()
         runCatching {
             load().collect { f ->
                 // 先给磁盘缓存（秒出），源站结果到了再替换
@@ -129,7 +138,23 @@ fun LiveScreen(
                 loading = false
             }
         }.onFailure { err = it.message }
+        if (reload > 0) {
+            // 最短可见时长：命中快照时整条流程几十毫秒就走完，
+            // 圈还没画出来就收回去，手感就是「拉下来立刻弹回」
+            val rest = 700 - (System.currentTimeMillis() - started)
+            if (rest > 0) kotlinx.coroutines.delay(rest)
+        }
         loading = false
+        refreshing = false
+    }
+
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        // 进程内快照必须清掉，否则下面那个 if 会直接把旧表端回来
+        LiveCache.clear()
+        onForceRefresh()
+        reload += 1
     }
 
     val all = feed?.channels.orEmpty()
@@ -193,53 +218,61 @@ fun LiveScreen(
                 onSelect = { group = it },
             )
 
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                state = gridState,
+            ProomPullRefresh(
+                refreshing = refreshing,
+                onRefresh = ::refresh,
+                // 顶栏和分组行固定在容器外面，指示器直接画在网格顶上就看得见
+                indicatorTop = 14.dp,
                 modifier = Modifier.fillMaxSize().weight(1f),
-                contentPadding = PaddingValues(
-                    start = 20.dp, end = 20.dp, top = 14.dp, bottom = ProomSpace.xxl,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                when {
-                    loading && all.isEmpty() -> items(12) { ChannelSkeleton() }
-
-                    err != null && all.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                        LiveMessage(
-                            title = "频道表读取失败",
-                            desc = err ?: "",
-                            action = "重试",
-                            onAction = { reload += 1 },
-                        )
-                    }
-
-                    shown.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                        // all 为空是「一个频道都没有」，不是筛选筛空了，别让人去改关键词
-                        val noFeeds = all.isEmpty()
-                        LiveMessage(
-                            title = when {
-                                noFeeds -> "还没有片源"
-                                q.isNotBlank() -> "没有匹配「$q」的频道"
-                                else -> "这个分组还没有频道"
-                            },
-                            desc = when {
-                                noFeeds -> "在设置里导入直播源，或连上 NAS 同步一次。"
-                                q.isNotBlank() -> "换个关键词，或者看全部 ${all.size} 个频道"
-                                else -> "换个分组，或者看全部 ${all.size} 个频道"
-                            },
-                            action = if (noFeeds) "" else "清除筛选",
-                            onAction = {
-                                query = ""
-                                group = ""
-                            },
-                        )
-                    }
-
-                    else -> itemsIndexed(shown) { idx, ch ->
-                        // 已经在某个分组里时，每张卡再写一遍组名就是纯噪声
-                        ChannelCard(ch, showGroup = group.isBlank()) { onPlay(shown, idx) }
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    state = gridState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 20.dp, end = 20.dp, top = 14.dp, bottom = ProomSpace.xxl,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    when {
+                        loading && all.isEmpty() -> items(12) { ChannelSkeleton() }
+    
+                        err != null && all.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                            LiveMessage(
+                                title = "频道表读取失败",
+                                desc = err ?: "",
+                                action = "重试",
+                                onAction = { reload += 1 },
+                            )
+                        }
+    
+                        shown.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                            // all 为空是「一个频道都没有」，不是筛选筛空了，别让人去改关键词
+                            val noFeeds = all.isEmpty()
+                            LiveMessage(
+                                title = when {
+                                    noFeeds -> "还没有片源"
+                                    q.isNotBlank() -> "没有匹配「$q」的频道"
+                                    else -> "这个分组还没有频道"
+                                },
+                                desc = when {
+                                    noFeeds -> "在设置里导入直播源，或连上 NAS 同步一次。"
+                                    q.isNotBlank() -> "换个关键词，或者看全部 ${all.size} 个频道"
+                                    else -> "换个分组，或者看全部 ${all.size} 个频道"
+                                },
+                                action = if (noFeeds) "" else "清除筛选",
+                                onAction = {
+                                    query = ""
+                                    group = ""
+                                },
+                            )
+                        }
+    
+                        else -> itemsIndexed(shown) { idx, ch ->
+                            // 已经在某个分组里时，每张卡再写一遍组名就是纯噪声
+                            ChannelCard(ch, showGroup = group.isBlank()) { onPlay(shown, idx) }
+                        }
                     }
                 }
             }
@@ -644,5 +677,10 @@ private object LiveCache {
         feed = f
         mark = kotlin.time.TimeSource.Monotonic.markNow()
         return f
+    }
+
+    /** 下拉刷新时清掉：不清的话 fresh() 直接把旧表端回来，一秒钟就「刷新完成」了 */
+    fun clear() {
+        feed = null
     }
 }

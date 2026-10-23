@@ -32,6 +32,24 @@ object FeedCache {
     fun isFresh(at: Long, ttl: Long = FRESH_MS): Boolean =
         at > 0 && System.currentTimeMillis() - at < ttl
 
+    /**
+     * 「这一次别用缓存」的临时开关，下拉刷新时打开。
+     *
+     * 新鲜期是 10 分钟：不打开这个口子，下拉只会把磁盘上同一份内容再放一遍，
+     * 圈转完了屏上什么也没变 —— 用户会以为刷新坏了。
+     *
+     * 用时间窗而不是布尔位：音乐页一次刷新同时发三路（分类树、推荐、当前分类），
+     * 布尔位只有第一路吃得到，剩下两路照样走缓存，列表就只更新了一半。
+     */
+    @Volatile
+    private var forceUntil: Long = 0
+
+    fun force(ms: Long = 3000L) {
+        forceUntil = System.currentTimeMillis() + ms
+    }
+
+    fun isForced(): Boolean = System.currentTimeMillis() < forceUntil
+
     fun <T> read(ctx: Context, key: String, ser: KSerializer<List<T>>): Entry<T>? {
         val f = fileOf(ctx, key)
         if (!f.isFile) return null

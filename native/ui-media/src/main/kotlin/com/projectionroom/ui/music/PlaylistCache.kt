@@ -32,5 +32,25 @@ object PlaylistCache {
         // 空结果不写：一次网络抽风别把好好的缓存顶掉
         if (detail.tracks.isEmpty()) return
         map[id] = detail
+        dead.remove(id)
     }
+
+    /**
+     * 打开过、但一首曲目都拿不到的歌单。
+     *
+     * 上游对一部分歌单只给 `trackCount`、`tracks` 是空的（版权受限或歌单被删），
+     * 列表上写着「20 首」，点进去一片空白 —— 用户只能一个个试。
+     * 记录在进程内，列表渲染时把它们筛掉：点开过一次，下次就不再出现在列表里。
+     * 不落盘：换一次网络环境（或上游修好）可能就正常，重启后会重新试。
+     */
+    private val dead = HashSet<String>()
+
+    @Synchronized
+    fun markDead(id: String) {
+        dead.add(id)
+        map.remove(id)
+    }
+
+    @Synchronized
+    fun isDead(id: String): Boolean = id in dead
 }

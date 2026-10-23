@@ -26,18 +26,22 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,12 +57,18 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.catalog.NasApi
+import com.projectionroom.ui.component.ProomPullRefresh
 import com.projectionroom.ui.component.SkeletonBlock
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.music.PlaylistCache
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.minutes
 import com.projectionroom.ui.component.RemoteImage
 
@@ -86,6 +96,11 @@ fun MusicScreen(
     onPlayTracks: (List<NasApi.Track>, Int) -> Unit = { _, _ -> },
     /** 返回。手机上从 tab 进来，电视上是遥控器 BACK 之外的兜底入口 */
     onBack: (() -> Unit)? = null,
+    /**
+     * 下拉刷新时通知壳：数据层有 5 分钟新鲜期，
+     * 不打开强制窗口的话三路请求都会直接命中磁盘缓存，圈转完屏上什么都不变。
+     */
+    onForceRefresh: () -> Unit = {},
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     // 搜索态：整页换成「输入框 + 结果」，退出搜索回到歌单网格
@@ -110,21 +125,26 @@ fun MusicScreen(
     var cards by remember { mutableStateOf<List<NasApi.Playlist>>(emptyList()) }
     var listLoading by remember { mutableStateOf(false) }
     var listErr by remember { mutableStateOf<String?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
+    // 刷新代数：分类树、推荐、当前分类三路都要跟着重拉一遍
+    var reload by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     val group = cats.getOrNull(gi)
     val subs = group?.subs.orEmpty()
     val sub = subs.getOrNull(si)
 
-    LaunchedEffect(Unit) {
-        if (cats.isNotEmpty()) {
+    LaunchedEffect(reload) {
+        // reload > 0 是下拉刷新：缓存已被清掉，这里必须真的重拉
+        if (reload == 0 && cats.isNotEmpty()) {
             catsLoaded = true
             return@LaunchedEffect
         }
         runCatching { loadCats().collect { cats = MusicCache.putCats(it) } }
         catsLoaded = true
     }
-    LaunchedEffect(Unit) {
-        if (rec.isNotEmpty()) {
+    LaunchedEffect(reload) {
+        if (reload == 0 && rec.isNotEmpty()) {
             recLoaded = true
             return@LaunchedEffect
         }
@@ -132,16 +152,20 @@ fun MusicScreen(
         recLoaded = true
     }
     // 二级分类变化才重新拉。命中缓存立刻出内容，不闪骨架
-    LaunchedEffect(sub?.id) {
+    LaunchedEffect(sub?.id, reload) {
         val id = sub?.id ?: return@LaunchedEffect
         listErr = null
-        MusicCache.lists(id)?.let {
-            cards = it
-            listLoading = false
-            return@LaunchedEffect
+        if (reload == 0) {
+            MusicCache.lists(id)?.let {
+                cards = it
+                listLoading = false
+                return@LaunchedEffect
+            }
+            listLoading = true
+            cards = emptyList()
+        } else if (cards.isEmpty()) {
+            listLoading = true
         }
-        listLoading = true
-        cards = emptyList()
         runCatching {
             loadPlaylists(id).collect { p ->
                 // 第一发通常是磁盘缓存：立刻撤骨架，源站到了再替换
@@ -152,6 +176,46 @@ fun MusicScreen(
         listLoading = false
     }
 
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        // 进程内那份缓存必须清：不清的话三路都直接命中内存，一秒就「刷完了」
+        MusicCache.clear()
+        catsLoaded = false
+        recLoaded = false
+        onForceRefresh()
+        reload += 1
+        scope.launch {
+            // 三路都落地才收圈，只等其中一路的话另两路还在往屏上写
+            val started = System.currentTimeMillis()
+            while (System.currentTimeMillis() - started < 8000) {
+                val done = catsLoaded && recLoaded && (sub == null || !listLoading)
+                if (done && System.currentTimeMillis() - started >= 700) break
+                delay(60)
+            }
+            refreshing = false
+        }
+    }
+
+    // 页面是会重建的（进歌单详情再返回），滚动位置只能记在进程里，
+    // 不然滚到第八屏点开一张，返回时直接跳回顶部，等于让人重滚一遍
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(Unit) {
+        val target = MusicUiState.index
+        if (target <= 0) return@LaunchedEffect
+        // 等网格真的有这么多项再滚：数据在进程内缓存里，通常一两帧就够；
+        // 条目变少了（后端空了）就超时不动，回到顶部也比硬抖一下好
+        val ready = withTimeoutOrNull(2500) {
+            snapshotFlow { gridState.layoutInfo.totalItemsCount }.first { it > target }
+        }
+        if (ready != null) gridState.scrollToItem(target, MusicUiState.offset)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            MusicUiState.index = gridState.firstVisibleItemIndex
+            MusicUiState.offset = gridState.firstVisibleItemScrollOffset
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(ProomColor.bg)) {
         // 和影视页同一档：手机 3 列（每张约 111dp）、横距 10dp。
@@ -172,8 +236,16 @@ fun MusicScreen(
             return@BoxWithConstraints
         }
 
+        ProomPullRefresh(
+            refreshing = refreshing,
+            onRefresh = ::refresh,
+            // 顶栏是本页的第一行内容（跟着滚），指示器放在它上面那点留白里
+            indicatorTop = topInset + 6.dp,
+            modifier = Modifier.fillMaxSize(),
+        ) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
+            state = gridState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = ProomSpace.xxl),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -210,7 +282,9 @@ fun MusicScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.bleed(20.dp),
                         ) {
-                            items(rec) { p -> RecCard(p, recW) { onOpenPlaylist(p) } }
+                            items(rec.filter { !PlaylistCache.isDead(it.id) }) { p ->
+                                RecCard(p, recW) { onOpenPlaylist(p) }
+                            }
                         }
                     }
                 } else if (!recLoaded) {
@@ -239,20 +313,28 @@ fun MusicScreen(
                     }
                 }
 
+                // 0 首的、打开过一次却拿不到曲目的，一律不进列表：
+                // 前者点进去是空页，后者是「外面 20 首、进去 0 首」，纯浪费点击
+                val shown = cards.filter { it.count > 0 && !PlaylistCache.isDead(it.id) }
+
                 when {
                     listErr != null -> item(span = { GridItemSpan(maxLineSpan) }) {
                         ListHint("这个分类读取失败", listErr.orEmpty())
                     }
 
-                    listLoading && cards.isEmpty() -> items(count = 6) { PlSkeleton() }
+                    listLoading && shown.isEmpty() -> items(count = 6) { PlSkeleton() }
 
-                    cards.isEmpty() && subs.isNotEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                        ListHint("这个分类暂时没有歌单", "换一个分类看看")
+                    shown.isEmpty() && subs.isNotEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                        ListHint(
+                            "这个分类暂时没有歌单",
+                            if (cards.isEmpty()) "换一个分类看看" else "可用的歌单都被筛掉了，下拉刷新试试",
+                        )
                     }
 
-                    else -> items(cards) { p -> PlCard(p) { onOpenPlaylist(p) } }
+                    else -> items(shown, key = { it.id }) { p -> PlCard(p) { onOpenPlaylist(p) } }
                 }
             }
+        }
         }
     }
 }
@@ -659,4 +741,21 @@ private object MusicCache {
         lists[cat] = v to kotlin.time.TimeSource.Monotonic.markNow()
         return v
     }
+
+    /** 下拉刷新时清掉：不清的话三路全部命中内存，圈一闪就「刷完」了 */
+    fun clear() {
+        cats = emptyList()
+        lists.clear()
+    }
+}
+
+/**
+ * 音乐页的滚动位置（进程内）。
+ *
+ * 进歌单详情时整页会被销毁重建，`remember` 里的 `LazyGridState` 一起没了 ——
+ * 于是滚到第八屏点开一张，返回直接回到顶部，用户得重新滚一遍找刚才看到的位置。
+ */
+private object MusicUiState {
+    var index: Int = 0
+    var offset: Int = 0
 }
