@@ -16,8 +16,8 @@ import kotlin.test.assertTrue
  */
 class MusicConfigTest {
 
-    /** 只记最后一次请求，够断言 */
-    private class RecHttp(private val body: String = "[]") : Http {
+    /** 只记最后一次请求，够断言；[len] 模拟 HEAD 拿到的内容长度（0 = 拿不到） */
+    private class RecHttp(private val body: String = "[]", private val len: Long = 0L) : Http {
         var lastUrl: String = ""
         var lastReferer: String? = null
         var calls: Int = 0
@@ -27,6 +27,8 @@ class MusicConfigTest {
             lastReferer = referer
             return body
         }
+
+        override suspend fun contentLength(url: String, referer: String?): Long = len
     }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -87,7 +89,31 @@ class MusicConfigTest {
         assertTrue(api.search("x").isEmpty())
         assertEquals("", api.trackUrl("123"))
         assertTrue(api.lyric("123").isEmpty())
-        assertFalse(api.isFullTrack("http://cdn/a.mp3"))
+        // 没配接口时不做判断：判成「片段」会让播放器把整张歌单跳过
+        assertTrue(api.isFullTrack("http://cdn/a.mp3"))
         assertEquals(0, http.calls)
+    }
+
+    /**
+     * 试听片段判定：只有「明确拿到长度且小于阈值」才算片段。
+     *
+     * 反过来（拿不到长度就判片段）是这里最危险的写法：HEAD 被拒、CDN 走
+     * chunked 都会返回 0，那样整张歌单会被逐首跳过，用户看到的是「一首都不放」。
+     */
+    @Test
+    fun `只有明确拿到长度且小于阈值才算试听片段`() = runTest {
+        val base = "https://mu.example"
+        assertTrue(
+            MusicApi(RecHttp(len = 3L * 1024 * 1024), base = base).isFullTrack("http://cdn/a.mp3"),
+            "3MB 是正常整曲",
+        )
+        assertFalse(
+            MusicApi(RecHttp(len = 480L * 1024), base = base).isFullTrack("http://cdn/b.mp3"),
+            "480KB 是 30 秒片段",
+        )
+        assertTrue(
+            MusicApi(RecHttp(len = 0L), base = base).isFullTrack("http://cdn/c.mp3"),
+            "拿不到长度时必须放行，否则正常曲目会被误杀",
+        )
     }
 }

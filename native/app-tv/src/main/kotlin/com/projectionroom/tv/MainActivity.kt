@@ -715,6 +715,11 @@ class MainActivity : ComponentActivity() {
                     com.projectionroom.ui.music.MusicBox.install(
                         resolve = { id -> doTrackUrl(id) },
                         lyric = { id -> runCatching { musicApi.lyric(id) }.getOrDefault(emptyList()) },
+                        // 无版权曲目只给 30 秒片段，播到一半就断。这里判长度后跳过，
+                        // 判断失败时一律放行（见 MusicApi.isFullTrack 的注释）
+                        isFullTrack = { url ->
+                            runCatching { musicApi.isFullTrack(url) }.getOrDefault(true)
+                        },
                     )
                 }
 

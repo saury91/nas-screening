@@ -93,6 +93,8 @@ object MusicBox {
     private var exo: ExoPlayer? = null
     private var resolve: (suspend (String) -> String)? = null
     private var resolveLyric: (suspend (String) -> List<LrcLine>)? = null
+    /** 判「是不是完整曲目」；没注入就走 `{ true }`，等价于不判 */
+    private var resolveFullTrack: (suspend (String) -> Boolean)? = null
     private var lyricJob: Job? = null
     private var loadJob: Job? = null
     private var ticker: Job? = null
@@ -102,13 +104,21 @@ object MusicBox {
     /** 没装 resolver 之前的最后一次请求，装上后补播 */
     private var pending: Triple<Context, List<MusicTrack>, Int>? = null
 
-    /** 由壳注入「取播放地址 / 取歌词」的能力（要问外部接口，不能写死在 UI 层） */
+    /**
+     * 由壳注入「取播放地址 / 取歌词 / 判断是否完整曲目」的能力
+     * （要问外部接口，不能写死在 UI 层）。
+     *
+     * [isFullTrack] 缺省视为完整：只有在线音源才需要判片段，
+     * 本地曲库（Subsonic/ID3）不该为此多一次网络往返。
+     */
     fun install(
         resolve: suspend (String) -> String,
         lyric: suspend (String) -> List<LrcLine> = { emptyList() },
+        isFullTrack: suspend (String) -> Boolean = { true },
     ) {
         this.resolve = resolve
         this.resolveLyric = lyric
+        this.resolveFullTrack = isFullTrack
         pending?.let { (ctx, q, i) ->
             pending = null
             playAll(ctx, q, i)
@@ -226,6 +236,14 @@ object MusicBox {
                 skipOrStop("「${t.title}」没有可用音源，已跳过")
                 return@launch
             }
+            // 上游对无版权曲目只给 30 秒片段（约 480KB）：放下去就是「播一半突然断」，
+            // 不如和「没有音源」同样处理 —— 跳下一首，把原因说清楚。
+            // 判断本身失败时放行：宁可放过一首片段，也不要卡住整张歌单。
+            val full = runCatching { resolveFullTrack?.invoke(url) ?: true }.getOrDefault(true)
+            if (!full) {
+                skipOrStop("「${t.title}」只有试听片段，已跳过")
+                return@launch
+            }
             failStreak = 0
             val factory = DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
@@ -265,7 +283,8 @@ object MusicBox {
     private fun skipOrStop(msg: String) {
         failStreak += 1
         if (failStreak >= queue.size.coerceAtLeast(1)) {
-            error = "整个歌单都放不了，可能是接口限流"
+            // 收尾文案要同时容得下「没音源」和「只有试听片段」两种原因
+            error = "整个歌单都放不了：没有可用音源，或只有试听片段"
             loading = false
             exo?.pause()
             return
