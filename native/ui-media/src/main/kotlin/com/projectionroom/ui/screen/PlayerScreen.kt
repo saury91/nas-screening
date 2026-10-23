@@ -115,10 +115,13 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import com.projectionroom.shared.model.Vod
+import com.projectionroom.shared.playback.SkipMark
+import com.projectionroom.shared.playback.SkipRule
 import com.projectionroom.ui.playback.MediaStats
 import com.projectionroom.ui.playback.MediaStatsTracker
 import com.projectionroom.ui.playback.PlaybackEngine
 import com.projectionroom.ui.playback.SideSubtitle
+import com.projectionroom.ui.playback.SkipStore
 import com.projectionroom.ui.playback.SubtitleStore
 import com.projectionroom.ui.playback.TrackOption
 import com.projectionroom.ui.playback.TrackPicker
@@ -417,6 +420,18 @@ fun PlayerScreen(
     // 挂/换/去字幕都要重建 MediaItem：重建会走 onDispose，那里默认会写一条观看记录。
     // 用一次性开关抑制掉，否则「换个字幕」在记录里就多出一条 pendingHis 推给 NAS
     val skipHistory = remember { BooleanArray(1) }
+    // ── 片头 / 片尾 ──
+    // 按剧名记，不按集：同一部剧每集片头长度一致（Plex/Jellyfin 做片头检测也基于这个假设）。
+    // 没单独设过就用设置页的全局默认；直播不参与，直接置 0。
+    var skipMark by remember(vod.name) {
+        mutableStateOf(
+            if (live) SkipMark(0L, 0L)
+            else SkipStore.get(context, vod.name)
+                ?: SkipMark(PlaybackPrefs.introMs, PlaybackPrefs.outroMs)
+        )
+    }
+    // 本集手动关掉「下一集」提示后不再弹：片尾曲里反复冒按钮比不提示更烦
+    var outroDismissed by remember(playUrl) { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var speed by remember { mutableFloatStateOf(1f) }
@@ -1392,6 +1407,32 @@ fun PlayerScreen(
             }
         }
 
+        // 拖进度条和「跳过片头」都要走同一条分发：投屏中只改本机，
+        // 会出现「手机跳了电视没动」的诡异状态
+        fun seekTo(ms: Long) {
+            castTarget?.let { d ->
+                castScope.launch { dlna.seek(d, ms / 1000) }
+            }
+            castNas?.let { t ->
+                castScope.launch {
+                    CastHub.client?.send(
+                        t.id, CastHub.selfId,
+                        CastApi.Command(kind = "seek", position = ms),
+                    )
+                }
+                // 先按下的位置回填，不然要等下一轮轮询进度条才跟上
+                nasPos = ms
+            }
+            castLan?.let { t ->
+                castScope.launch {
+                    lanCast.send(t.base, CastApi.Command(kind = "seek", position = ms))
+                }
+                nasPos = ms
+            }
+            exo.seekTo(ms)
+            position = ms
+        }
+
         // ── 控制层 ──
         // 这里**不能**套 zIndex / graphicsLayer / AnimatedVisibility：
         // 试过三种，横屏下顶栏那两个按钮的命中区域都会和绘制位置错开
@@ -1464,6 +1505,7 @@ fun PlayerScreen(
                     // 投屏中换成电视的进度与播放态：手机这时候是个遥控器，
                     // 显示自己的位置既没用，也会让暂停键看起来「按了没反应」
                     val castingRemote = castNas != null || castLan != null
+
                     PlayerBottomBar(
                         position = if (castingRemote) nasPos else position,
                         duration = if (castingRemote) nasDur else duration,
@@ -1485,31 +1527,7 @@ fun PlayerScreen(
                         playFocus = playFocus,
                         seekFocused = seekMode,
                         onSeekFocus = { seekMode = it },
-                        onSeek = {
-                            // 投屏中把进度也发给电视：本机在放的是同一路流，
-                            // 只改本机会出现"手机跳了电视没动"的诡异状态
-                            castTarget?.let { d ->
-                                castScope.launch { dlna.seek(d, it / 1000) }
-                            }
-                            castNas?.let { t ->
-                                castScope.launch {
-                                    CastHub.client?.send(
-                                        t.id, CastHub.selfId,
-                                        CastApi.Command(kind = "seek", position = it),
-                                    )
-                                }
-                                // 先按下的位置回填，不然要等下一轮轮询进度条才跟上
-                                nasPos = it
-                            }
-                            castLan?.let { t ->
-                                castScope.launch {
-                                    lanCast.send(t.base, CastApi.Command(kind = "seek", position = it))
-                                }
-                                nasPos = it
-                            }
-                            exo.seekTo(it)
-                            position = it
-                        },
+                        onSeek = { seekTo(it) },
                         onPrev = { if (epIndex > 0) { epIndex -= 1; controlsVisible = true } },
                         onNext = {
                             if (epIndex + 1 < (line?.episodes?.size ?: 0)) {
@@ -1680,6 +1698,10 @@ fun PlayerScreen(
                         sideSubLabel = sideSub?.label,
                         live = live,
                         isTv = isTv,
+                        skipIntroMs = skipMark.introMs,
+                        skipOutroMs = skipMark.outroMs,
+                        // 直播没有片头片尾：整块换成一句说明，比给一排点了没反应的档位好
+                        canSkip = !live,
                         onPickText = { opt ->
                             PlaybackPrefs.setSubtitleOn(context, opt != null)
                             TrackPicker.selectText(exo, opt)
@@ -1698,10 +1720,55 @@ fun PlayerScreen(
                             applySideSub(null)
                         },
                         onPickScale = { PlaybackPrefs.setSubtitleScale(context, it) },
+                        onPickIntro = { ms ->
+                            val next = skipMark.copy(introMs = ms)
+                            skipMark = next
+                            SkipStore.remember(context, vod.name, next)
+                        },
+                        onPickOutro = { ms ->
+                            val next = skipMark.copy(outroMs = ms)
+                            skipMark = next
+                            // 改了片尾时长就重新允许提示：上一集点过的「✕」不该带到这一集
+                            outroDismissed = false
+                            SkipStore.remember(context, vod.name, next)
+                        },
                         onClose = { trackOpen = false },
                         modifier = Modifier.align(Alignment.Center),
                     )
                 }
+            }
+        }
+
+        // ── 片头 / 片尾药丸 ──
+        // 挂在控制层**外面**：最想按「跳过片头」的时候，控制层往往已经自动收起了。
+        // 锁屏和投屏面板打开时不出现 —— 前者防误触，后者要避免和面板抢屏。
+        if (!locked && !castOpen) {
+            val hasNext = epIndex + 1 < (line?.episodes?.size ?: 0)
+            val inOutro = !outroDismissed &&
+                SkipRule.shouldShowOutro(position, duration, skipMark.outroMs, hasNext, live)
+            when {
+                // 片头优先：两者理论上不会同时成立，但边界上（超短片尾）留个次序更安全
+                SkipRule.shouldShowIntro(position, skipMark.introMs, live) -> SkipPill(
+                    text = "跳过片头",
+                    onClick = { seekTo(skipMark.introMs) },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = if (isTv) 48.dp else 20.dp, bottom = if (isTv) 132.dp else 92.dp),
+                )
+
+                inOutro -> SkipPill(
+                    text = "下一集 · ${SkipRule.remainingSec(position, duration)} 秒",
+                    onClick = {
+                        if (epIndex + 1 < (line?.episodes?.size ?: 0)) {
+                            epIndex += 1
+                            controlsVisible = true
+                        }
+                    },
+                    onDismiss = { outroDismissed = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = if (isTv) 48.dp else 20.dp, bottom = if (isTv) 132.dp else 92.dp),
+                )
             }
         }
 
@@ -3479,5 +3546,64 @@ private fun TypeGlyph(tint: Color, box: androidx.compose.ui.unit.Dp = 17.dp) {
             sw * 0.9f,
             androidx.compose.ui.graphics.StrokeCap.Round,
         )
+    }
+}
+
+/* ─────────────────────── 片头 / 片尾药丸 ─────────────────────── */
+
+/**
+ * 浮在画面右下角的小药丸。
+ *
+ * 为什么不用底栏圆钮：跳过片头最想按的时刻是「片头正在放、控制层已收起」，
+ * 圆钮这时候根本看不见。所以它必须独立于控制层挂在画面上。
+ *
+ * 电视端靠 [focusable] 进焦点链，但**不主动抢**焦点 —— 播放中按 OK 仍是播放/暂停，
+ * 用户按方向键走到这里才会出现强调色边框。
+ */
+@Composable
+private fun SkipPill(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onDismiss: (() -> Unit)? = null,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        modifier
+            .clip(shape)
+            .background(Color.Black.copy(alpha = 0.74f))
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) ProomColor.accent else Color.White.copy(alpha = 0.20f),
+                shape = shape,
+            )
+            .focusable()
+            .onFocusChanged { focused = it.isFocused }
+            .clickable { onClick() }
+            .padding(start = 18.dp, end = if (onDismiss != null) 10.dp else 18.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        if (onDismiss != null) {
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .clickable { onDismiss() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = "✕",
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 12.sp,
+                )
+            }
+        }
     }
 }

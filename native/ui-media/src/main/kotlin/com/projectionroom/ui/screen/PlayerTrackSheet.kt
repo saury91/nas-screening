@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.projectionroom.shared.playback.SkipRule
 import com.projectionroom.ui.component.PlayerIcons
 import com.projectionroom.ui.component.tvFocusRing
 import com.projectionroom.ui.playback.TrackOption
@@ -43,11 +44,10 @@ import com.projectionroom.ui.theme.ProomSp
 import kotlinx.coroutines.delay
 
 /**
- * 「字幕与音轨」面板。
+ * 「播放设置」面板。
  *
- * 三段：字幕（关闭 / 内嵌轨 / 本地文件）、音轨、字号。
- * 内嵌轨是即时切换（改 trackSelectionParameters），本地字幕要重建媒体项，
- * 但两者都保持播放位置、不打断播放。
+ * 四段：字幕（关闭 / 内嵌轨 / 本地文件）、音轨、字号、跳过片头片尾。
+ * 前三段都是即时生效；跳过时长按剧记忆，改完只影响本剧之后的表现。
  *
  * 电视端没有文件选择器，那一行换成一句说明 —— 比放一个点了没反应的按钮好。
  */
@@ -60,11 +60,16 @@ internal fun PlayerTrackSheet(
     sideSubLabel: String?,
     live: Boolean,
     isTv: Boolean,
+    skipIntroMs: Long,
+    skipOutroMs: Long,
+    canSkip: Boolean,
     onPickText: (TrackOption?) -> Unit,
     onPickAudio: (TrackOption?) -> Unit,
     onPickFile: () -> Unit,
     onRemoveFile: () -> Unit,
     onPickScale: (Float) -> Unit,
+    onPickIntro: (Long) -> Unit,
+    onPickOutro: (Long) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -104,7 +109,7 @@ internal fun PlayerTrackSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "字幕与音轨",
+                    "播放设置",
                     color = Color.White,
                     fontSize = if (isTv) 22.sp else ProomSp(14.sp),
                     fontWeight = FontWeight.SemiBold,
@@ -187,6 +192,20 @@ internal fun PlayerTrackSheet(
                         ) { onPickScale(s) }
                     }
                 }
+
+                Divider()
+                // 片头片尾是按「剧」记的，不是按集：同一部剧每集片头一样长，
+                // 所以这里改一次，之后所有集都跟着变
+                if (canSkip) {
+                    SectionLabel("跳过片头（秒）")
+                    SkipChips(options = SkipRule.introOptions, current = skipIntroMs, onPick = onPickIntro)
+                    SectionLabel("片尾提示（秒）")
+                    SkipChips(options = SkipRule.outroOptions, current = skipOutroMs, onPick = onPickOutro)
+                    Text0("设「关」即不跳；这里改的是本剧，下一集同样生效")
+                } else {
+                    SectionLabel("跳过片头 / 片尾")
+                    Text0("直播没有片头片尾，这两项不适用")
+                }
                 Spacer(Modifier.height(4.dp))
             }
         }
@@ -223,6 +242,29 @@ private fun Divider() {
             .height(1.dp)
             .background(Color.White.copy(alpha = 0.08f))
     )
+}
+
+/**
+ * 跳过时长档位。
+ *
+ * 每行三个：面板在手机上只有 214dp 宽，六个档位排一行会挤成一条线。
+ * 档位值直接用秒数显示，「关」单独处理 —— 单位写在段落标题里。
+ */
+@Composable
+private fun SkipChips(options: List<Long>, current: Long, onPick: (Long) -> Unit) {
+    options.chunked(3).forEach { row ->
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            row.forEach { ms ->
+                ScaleChip(
+                    label = if (ms == 0L) "关" else "${ms / 1000}",
+                    selected = current == ms,
+                ) { onPick(ms) }
+            }
+        }
+    }
 }
 
 @Composable
