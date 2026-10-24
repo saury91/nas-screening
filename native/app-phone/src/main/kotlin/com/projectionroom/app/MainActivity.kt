@@ -676,10 +676,11 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                // 不吞异常：超时 / HTTP 5xx / 域名解析失败都要原样交给歌单页，
+                // 页面据此显示具体原因（以前一律压成空详情，全显示「取不到曲目」，
+                // 明明是自己网络断了却像是歌单没了）
                 val doMusicPlaylist: suspend (String) -> NasApi.PlaylistDetail = { id ->
-                    runCatching { musicApi.playlist(id) }.getOrNull()
-                        ?.takeIf { it.tracks.isNotEmpty() }
-                        ?: NasApi.PlaylistDetail()
+                    musicApi.playlist(id)
                 }
                 val doTrackUrl: suspend (String) -> String = { id ->
                     runCatching { musicApi.trackUrl(id) }.getOrDefault("")

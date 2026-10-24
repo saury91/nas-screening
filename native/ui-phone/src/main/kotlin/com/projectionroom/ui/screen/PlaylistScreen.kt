@@ -56,6 +56,8 @@ import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.component.RemoteImage
 import com.projectionroom.ui.music.PlaylistCache
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val BarH = 56.dp
 
@@ -93,35 +95,53 @@ fun PlaylistScreen(
     var err by remember(id) { mutableStateOf<String?>(null) }
     // 重试代数：0 首时给一个「重新加载」的入口，不然用户只能退了再进
     var retry by remember(id) { mutableIntStateOf(0) }
+    // 转太久给一句提示 + 手动重试：接口偶尔慢到 10 秒开外，
+    // 光一个骨架屏转着不动，看着就像「点进去卡死了」
+    var slow by remember(id) { mutableStateOf(false) }
 
     LaunchedEffect(id, retry) {
         // 只有手里没东西时才亮骨架
         if (d == null) loading = true
         err = null
-        runCatching { load(id) }
-            .onSuccess {
-                // 空壳（id 对、曲目 0 条）不能当成「这个歌单是空的」：
-                // 上游偶尔会返回 trackCount=20 但 tracks 为空的响应（版权受限、抽风），
-                // 之前直接吃下就成了「外面 20 首、点进来 0 首」。
-                if (it.tracks.isNotEmpty()) {
-                    d = it
-                    PlaylistCache.put(id, it)
-                } else if (d == null) {
-                    // 连 name 都没有 = 这次请求本身没通（断网、上游 502），
-                    // 不能当成「歌单是空的」，更不能进失效名单 —— 否则网络抖一下，
-                    // 一个好歌单就被列表永久藏起来了。
-                    if (it.name.isBlank()) {
-                        err = "接口没连上，检查一下网络"
-                    } else {
-                        err = "这个歌单暂时取不到曲目"
-                        // 记一笔：回到列表后把它剔掉，别让人反复点进空页面
-                        PlaylistCache.markDead(id)
-                    }
-                }
+        slow = false
+        val slowTimer = launch {
+            delay(4500)
+            if (loading) slow = true
+        }
+
+        // 详情接口偶发一次拉空/超时（上游抽风、连接被掐），
+        // 自动再试一次比让用户点「重试」体感好得多；两次都空才算这个歌单有问题。
+        var got: NasApi.PlaylistDetail? = null
+        var failure: Throwable? = null
+        for (attempt in 0 until 2) {
+            val r = runCatching { load(id) }
+            failure = r.exceptionOrNull()
+            got = r.getOrNull()
+            if (got != null && got.tracks.isNotEmpty()) break
+            if (attempt == 0) delay(350)
+        }
+
+        val detail = got
+        // 空壳（id 对、曲目 0 条）不能当成「这个歌单是空的」：
+        // 上游偶尔会返回 trackCount=20 但 tracks 为空的响应（版权受限、抽风），
+        // 之前直接吃下就成了「外面 20 首、点进来 0 首」。
+        if (detail != null && detail.tracks.isNotEmpty()) {
+            d = detail
+            PlaylistCache.put(id, detail)
+        } else if (d == null) {
+            // 连 name 都没有 = 这次请求本身没通（断网、上游 502），
+            // 不能当成「歌单是空的」，更不能进失效名单 —— 否则网络抖一下，
+            // 一个好歌单就被列表永久藏起来了。
+            if (detail == null || detail.name.isBlank()) {
+                err = friendlyError(failure)
+            } else {
+                err = "这个歌单暂时取不到曲目"
+                // 记一笔：回到列表后把它剔掉，别让人反复点进空页面
+                PlaylistCache.markDead(id)
             }
-            .onFailure {
-                if (d == null) err = it.message ?: "网络有点问题"
-            }
+        }
+        slowTimer.cancel()
+        slow = false
         loading = false
     }
 
@@ -177,7 +197,15 @@ fun PlaylistScreen(
                             onRetry = { retry += 1 },
                         )
                     } else {
-                        PlaylistSkeleton(topInset, BarH, padX, wide)
+                        PlaylistSkeleton(
+                            topInset = topInset,
+                            barH = BarH,
+                            padX = padX,
+                            wide = wide,
+                            slow = slow,
+                            onRetry = { retry += 1 },
+                            onBack = onBack,
+                        )
                     }
                 }
 
@@ -480,7 +508,16 @@ private fun TrackRow(
 }
 
 @Composable
-private fun PlaylistSkeleton(topInset: Dp, barH: Dp, padX: Dp, wide: Boolean) {
+private fun PlaylistSkeleton(
+    topInset: Dp,
+    barH: Dp,
+    padX: Dp,
+    wide: Boolean,
+    slow: Boolean = false,
+    onRetry: () -> Unit = {},
+    onBack: () -> Unit = {},
+) {
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().padding(top = topInset + barH + 8.dp)) {
         Row(Modifier.padding(horizontal = padX)) {
             SkeletonBlock(
@@ -529,6 +566,61 @@ private fun PlaylistSkeleton(topInset: Dp, barH: Dp, padX: Dp, wide: Boolean) {
             }
         }
     }
+
+    // 转了好几秒还没出来：给句话 + 两个出口，别让人对着骨架屏干等
+    if (slow) {
+        Column(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("接口有点慢，还在加载…", style = ProomType.label, color = ProomColor.muted)
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PillButton("重试", filled = true, onClick = onRetry)
+                PillButton("返回", filled = false, onClick = onBack)
+            }
+        }
+    }
+    }
+}
+
+/**
+ * 把底层异常翻译成人话。
+ *
+ * OkHttp 抛的是 "timeout"、"Unable to resolve host ..." 这类英文串，
+ * 直接扔到界面上用户看不懂；但也不能全压成同一句，否则分不清是断网、
+ * 接口挂了还是真超时 —— 这三种该做的事不一样。
+ */
+private fun friendlyError(t: Throwable?): String {
+    val m = t?.message?.trim().orEmpty()
+    if (m.isBlank()) return "接口没连上，检查一下网络"
+    val low = m.lowercase()
+    return when {
+        "timeout" in low || "timed out" in low -> "请求超时了，稍后重试"
+        "unable to resolve host" in low || "unknownhost" in low -> "域名解析失败，检查一下网络"
+        "refused" in low || "unreachable" in low -> "连不上接口，检查一下网络"
+        m.startsWith("HTTP") -> "接口返回异常（$m）"
+        else -> m
+    }
+}
+
+/** 胶囊按钮：错误页和「加载慢」提示共用，保持两处手感一致 */
+@Composable
+private fun PillButton(text: String, filled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (filled) ProomColor.accent else ProomColor.surface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+    ) {
+        Text(
+            text,
+            fontSize = 13.sp,
+            color = if (filled) ProomColor.bg else ProomColor.text,
+            fontWeight = if (filled) FontWeight.Medium else FontWeight.Normal,
+        )
+    }
 }
 
 @Composable
@@ -556,24 +648,8 @@ private fun PlaylistError(msg: String, onBack: () -> Unit, onRetry: () -> Unit) 
         Spacer(Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // 重试放前面：多数情况是这一次没拉到，重下一遍就有了
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(ProomColor.accent)
-                    .clickable(onClick = onRetry)
-                    .padding(horizontal = 18.dp, vertical = 9.dp),
-            ) {
-                Text("重试", fontSize = 13.sp, color = ProomColor.bg, fontWeight = FontWeight.Medium)
-            }
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(ProomColor.surface)
-                    .clickable(onClick = onBack)
-                    .padding(horizontal = 18.dp, vertical = 9.dp),
-            ) {
-                Text("返回", fontSize = 13.sp, color = ProomColor.text)
-            }
+            PillButton("重试", filled = true, onClick = onRetry)
+            PillButton("返回", filled = false, onClick = onBack)
         }
     }
 }
