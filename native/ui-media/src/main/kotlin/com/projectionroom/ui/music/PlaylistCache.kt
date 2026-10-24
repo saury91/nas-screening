@@ -14,24 +14,49 @@ import com.projectionroom.shared.catalog.NasApi
  */
 object PlaylistCache {
 
+    /**
+     * 多久算「新鲜」：和磁盘缓存（`PlaylistStore.FRESH_MS`）用同一个量级。
+     * 新鲜期内直接上屏、不打网络 —— 详情那个上游要 0.3~12 秒，不是白等的。
+     */
+    const val FRESH_MS = 30 * 60 * 1000L
+
     private const val MAX = 8
 
     /** accessOrder=true：最近看过的排到队尾，淘汰最久没打开的 */
     private val map = object : LinkedHashMap<String, NasApi.PlaylistDetail>(16, 0.75f, true) {
         override fun removeEldestEntry(
             eldest: MutableMap.MutableEntry<String, NasApi.PlaylistDetail>?,
-        ): Boolean = size > MAX
+        ): Boolean {
+            if (size <= MAX) return false
+            // 淘汰时把时间戳一起清掉，否则 at 会一直涨、还留着已经没数据的 id
+            eldest?.key?.let { at.remove(it) }
+            return true
+        }
     }
+
+    /** 每份详情的写入时间，用来判断要不要后台刷新 */
+    private val at = HashMap<String, Long>()
 
     @Synchronized
     fun get(id: String): NasApi.PlaylistDetail? =
         map[id]?.takeIf { it.tracks.isNotEmpty() }
 
+    /** 写入时间（0 = 没有这份数据） */
     @Synchronized
-    fun put(id: String, detail: NasApi.PlaylistDetail) {
+    fun atOf(id: String): Long = at[id] ?: 0L
+
+    @Synchronized
+    fun isFresh(id: String): Boolean = isFresh(atOf(id))
+
+    fun isFresh(at: Long): Boolean =
+        at > 0 && System.currentTimeMillis() - at < FRESH_MS
+
+    @Synchronized
+    fun put(id: String, detail: NasApi.PlaylistDetail, at: Long = System.currentTimeMillis()) {
         // 空结果不写：一次网络抽风别把好好的缓存顶掉
         if (detail.tracks.isEmpty()) return
         map[id] = detail
+        this.at[id] = at
         dead.remove(id)
     }
 
@@ -49,6 +74,7 @@ object PlaylistCache {
     fun markDead(id: String) {
         dead.add(id)
         map.remove(id)
+        at.remove(id)
     }
 
     @Synchronized
