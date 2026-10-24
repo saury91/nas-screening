@@ -431,6 +431,7 @@ class NasApi(
         val play: Long = 0,
     )
 
+    @Serializable
     data class Track(
         val id: String = "",
         val title: String = "",
@@ -438,6 +439,8 @@ class NasApi(
         val cover: String = "",
     )
 
+    /** 可序列化：歌单详情要整份落到磁盘，冷启动时先上屏再后台刷新 */
+    @Serializable
     data class PlaylistDetail(
         val id: String = "",
         val name: String = "",

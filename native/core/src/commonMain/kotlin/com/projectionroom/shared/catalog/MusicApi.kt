@@ -27,6 +27,14 @@ class MusicApi(
     private val http: Http,
     private val base: String = DEFAULT_BASE,
     private val referer: String = REFERER,
+    /**
+     * 歌单详情用单独一条连接、单独的超时。
+     *
+     * 详情是最慢的一个接口：中转站缓存没命中时要现去网易云逐首解析，
+     * 实测同一台机器上 0.3~6 秒，千首大歌单 8~12 秒 —— 卡在别的接口
+     * 共用的 12 秒超时上，表现就是「转了半天最后说取不到」。
+     */
+    private val detailHttp: Http = http,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -103,7 +111,7 @@ class MusicApi(
     // ── 歌单详情 ──────────────────────────────────────────────
     suspend fun playlist(id: String, limit: Int = 400): NasApi.PlaylistDetail {
         if (id.isBlank() || !ready) return NasApi.PlaylistDetail(id = id)
-        val txt = http.get("$base/meting/?server=netease&type=playlist&id=${id.encodeQuery()}", referer)
+        val txt = detailHttp.get("$base/meting/?server=netease&type=playlist&id=${id.encodeQuery()}", referer)
         val d = parse { runCatching { json.decodeFromString<PlDetailRaw>(txt) }.getOrNull() }
             ?: return NasApi.PlaylistDetail(id = id)
         val seen = HashSet<String>()

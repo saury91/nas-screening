@@ -62,6 +62,14 @@ import kotlinx.coroutines.launch
 private val BarH = 56.dp
 
 /**
+ * 磁盘上那份歌单：`at` 是写入时间，页面据此决定「直接用」还是「先上屏再静默刷新」。
+ *
+ * 这里只放一个纯数据类，不让 ui 模块去依赖 data 模块的缓存实现 ——
+ * 具体读哪个文件由壳（MainActivity）注入。
+ */
+class CachedPlaylist(val at: Long, val detail: NasApi.PlaylistDetail)
+
+/**
  * 歌单详情：沉浸式头图 + 曲目列表。
  *
  * 之前只有一块「封面 + 简介」，连返回键都没有（靠系统返回手势），
@@ -77,6 +85,10 @@ private val BarH = 56.dp
 fun PlaylistScreen(
     /** 歌单详情来源（App 直连，不经 NAS） */
     load: suspend (id: String) -> NasApi.PlaylistDetail,
+    /** 磁盘缓存读取：冷启动也能先上屏，不用对着骨架屏等上游那十来秒 */
+    readCache: suspend (id: String) -> CachedPlaylist? = { null },
+    /** 磁盘缓存写入：拉到了就存一份 */
+    writeCache: suspend (id: String, detail: NasApi.PlaylistDetail) -> Unit = { _, _ -> },
     id: String,
     /** 状态栏高度：顶栏画在它下面，背景图通到屏幕最顶 */
     topInset: Dp = 0.dp,
@@ -100,10 +112,33 @@ fun PlaylistScreen(
     var slow by remember(id) { mutableStateOf(false) }
 
     LaunchedEffect(id, retry) {
-        // 只有手里没东西时才亮骨架
-        if (d == null) loading = true
+        // ① 进程内刚拉过：30 分钟内直接信它，不再为一份几乎不变的数据等上游
+        //   （详情接口实测 0.3~12 秒，是这一页唯一慢的东西）
+        if (retry == 0 && d != null && PlaylistCache.isFresh(id)) {
+            loading = false
+            return@LaunchedEffect
+        }
+
         err = null
         slow = false
+
+        // ② 落盘缓存：冷启动第一次进来也先上屏，别把上游那十来秒全砸在骨架屏上
+        if (d == null) {
+            val c = runCatching { readCache(id) }.getOrNull()
+            if (c != null && c.detail.tracks.isNotEmpty()) {
+                d = c.detail
+                PlaylistCache.put(id, c.detail, c.at)
+                // 立刻收骨架：下面的静默刷新不该再把已有内容挡住
+                loading = false
+                // 新鲜期内到此为止；旧数据先上屏，下面继续静默重拉（失败也不打扰）
+                if (retry == 0 && PlaylistCache.isFresh(c.at)) {
+                    return@LaunchedEffect
+                }
+            }
+        }
+
+        // 只有手里没东西时才亮骨架、才给「慢」提示
+        if (d == null) loading = true
         val slowTimer = launch {
             delay(4500)
             if (loading) slow = true
@@ -111,9 +146,11 @@ fun PlaylistScreen(
 
         // 详情接口偶发一次拉空/超时（上游抽风、连接被掐），
         // 自动再试一次比让用户点「重试」体感好得多；两次都空才算这个歌单有问题。
+        // 但屏上已经有内容时只试一次：后台刷新失败就失败，别把老内容换成错误页。
+        val attempts = if (d == null) 2 else 1
         var got: NasApi.PlaylistDetail? = null
         var failure: Throwable? = null
-        for (attempt in 0 until 2) {
+        for (attempt in 0 until attempts) {
             val r = runCatching { load(id) }
             failure = r.exceptionOrNull()
             got = r.getOrNull()
@@ -128,6 +165,8 @@ fun PlaylistScreen(
         if (detail != null && detail.tracks.isNotEmpty()) {
             d = detail
             PlaylistCache.put(id, detail)
+            // 存一份到磁盘：下次点进来（哪怕冷启动）直接出内容
+            runCatching { writeCache(id, detail) }
         } else if (d == null) {
             // 连 name 都没有 = 这次请求本身没通（断网、上游 502），
             // 不能当成「歌单是空的」，更不能进失效名单 —— 否则网络抖一下，
