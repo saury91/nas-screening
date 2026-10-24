@@ -525,6 +525,12 @@ class MainActivity : ComponentActivity() {
                 // 超时给 12 秒：一次搜 60+ 个源，8 秒常在最后几个源上截断。
                 val sourceHttp = remember { OkHttpHttp(timeoutSeconds = 12) }
 
+                // 歌单详情单独一条连接、超时给 30 秒。
+                // 它是最慢的接口：上游缓存没命中时现去网易云逐首解析，
+                // 千首大歌单实测 8~12 秒，压在 12 秒线上就会「刚好被自己掐断」。
+                // 页面这边有 4.5 秒的「接口有点慢」提示 + 重试/返回，不会被拖到没法退出。
+                val musicDetailHttp = remember { OkHttpHttp(timeoutSeconds = 30) }
+
                 // NAS 之外的附加配置（TVBox 订阅 / 别人分享的配置包）：
                 // 有它就不需要 NAS —— 这是「一份配置发给朋友」能成立的关键
                 var extra by remember { mutableStateOf(ExtraConfig()) }
@@ -628,6 +634,7 @@ class MainActivity : ComponentActivity() {
                             ?: com.projectionroom.shared.catalog.MusicApi.DEFAULT_BASE,
                         referer = cfg?.referer?.takeIf { it.isNotBlank() }
                             ?: com.projectionroom.shared.catalog.MusicApi.REFERER,
+                        detailHttp = musicDetailHttp,
                     )
                 }
                 val doMusicCats: () -> Flow<List<NasApi.MusicCatGroup>> = {
@@ -1274,6 +1281,16 @@ class MainActivity : ComponentActivity() {
 
                         is Screen.Playlist -> PlaylistScreen(
                             load = doMusicPlaylist,
+                            // 落盘缓存：冷启动点进来先出上次的内容，再后台刷新。
+                            // 上游那个详情接口冷请求 0.3~12 秒，不落盘就每次都重等一遍。
+                            readCache = { sid ->
+                                PlaylistStore.read(this@MainActivity, sid)?.let {
+                                    com.projectionroom.ui.screen.CachedPlaylist(it.at, it.detail)
+                                }
+                            },
+                            writeCache = { sid, detail ->
+                                PlaylistStore.save(this@MainActivity, sid, detail)
+                            },
                             id = s.id,
                             topInset = barTop,
                             nowPlayingId = com.projectionroom.ui.music.MusicBox.playingId,
