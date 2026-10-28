@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,6 +58,8 @@ import com.projectionroom.ui.screen.MineScreen
 import com.projectionroom.ui.screen.PairScreen
 import com.projectionroom.ui.screen.PairState
 import com.projectionroom.ui.screen.MineTrack
+import com.projectionroom.ui.screen.MineShelf
+import com.projectionroom.ui.screen.AddToPlaylistSheet
 import com.projectionroom.ui.screen.ScanPairScreen
 import com.projectionroom.ui.screen.SettingsScreen
 import com.projectionroom.ui.screen.SettingsState
@@ -86,7 +89,21 @@ private sealed interface Screen {
     data object Home : Screen
     data class Search(val from: Screen = Home) : Screen
     data class Browse(val slug: String, val from: Screen = Home) : Screen
-    data class Playlist(val id: String, val from: Screen = Home) : Screen
+    /**
+     * 在线歌单详情。
+     *
+     * 名字/封面/曲目数是「收藏这个歌单」时要存下来的凭据：
+     * 只存 id 的话，收藏完在「我的歌单」里就是一张没名字的空卡。
+     */
+    data class Playlist(
+        val id: String,
+        val name: String = "",
+        val cover: String = "",
+        val count: Int = 0,
+        val from: Screen = Home,
+    ) : Screen
+    /** 本地歌单：`liked` 是默认收藏歌单，其余 id 是自建歌单 */
+    data class ShelfPlaylist(val id: String, val from: Screen = Home) : Screen
     data class Detail(val vod: Vod, val from: Screen = Home) : Screen
     data class Play(
         val vod: Vod,
@@ -184,7 +201,8 @@ private fun livePlay(chs: List<NasApi.LiveChannel>, index: Int): LivePlay = Live
 /** 页面层级：决定转场方向（变大=前进） */
 private fun depth(s: Screen): Int = when (s) {
     is Screen.Home -> 0
-    is Screen.Browse, is Screen.Search, is Screen.Playlist, is Screen.Connect, is Screen.Mine -> 1
+    is Screen.Browse, is Screen.Search, is Screen.Playlist, is Screen.ShelfPlaylist,
+    is Screen.Connect, is Screen.Mine -> 1
     is Screen.Settings, is Screen.Pair, is Screen.ScanPair -> 2
     is Screen.Detail -> 2
     is Screen.Play, is Screen.MusicPlayer, is Screen.CastRemote -> 3
@@ -327,6 +345,7 @@ class MainActivity : ComponentActivity() {
             NasStore.warmUp(this)
             SearchStore.warmUp(this)
             com.projectionroom.ui.music.MusicLib.warmUp(this)
+            com.projectionroom.ui.music.MusicShelf.warmUp(this)
             com.projectionroom.ui.live.LiveLib.warmUp(this)
             // 播放器的断点续播表：条目按「每集 URL」记，可能几百条，
             // 第一次进播放器才加载会卡一下，这里先让它在后台解析完
@@ -690,7 +709,17 @@ class MainActivity : ComponentActivity() {
                     musicApi.playlist(id)
                 }
                 val doTrackUrl: suspend (String) -> String = { id ->
-                    runCatching { musicApi.trackUrl(id) }.getOrDefault("")
+                    // 失败给空串（当作没音源），但取消必须原样抛出去：
+                    // 这里吞掉 CancellationException 的话，播放器会把「用户已经
+                    // 切到下一首」误判成「这首没地址」，于是自动再跳一首 ——
+                    // 连点几首歌就会串成一串乱跳
+                    try {
+                        musicApi.trackUrl(id)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: Throwable) {
+                        ""
+                    }
                 }
 
                 // 音乐播放器是进程内单例：把「取播放地址」的能力注入一次，
@@ -702,9 +731,16 @@ class MainActivity : ComponentActivity() {
                         resolve = { id -> doTrackUrl(id) },
                         lyric = { id -> runCatching { musicApi.lyric(id) }.getOrDefault(emptyList()) },
                         // 无版权曲目只给 30 秒片段，播到一半就断。这里判长度后跳过，
-                        // 判断失败时一律放行（见 MusicApi.isFullTrack 的注释）
+                        // 判断失败时一律放行（见 MusicApi.isFullTrack 的注释）。
+                        // 取消同样要抛：这一趟回来时用户可能已经切走了
                         isFullTrack = { url ->
-                            runCatching { musicApi.isFullTrack(url) }.getOrDefault(true)
+                            try {
+                                musicApi.isFullTrack(url)
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (_: Throwable) {
+                                true
+                            }
                         },
                     )
                 }
@@ -828,6 +864,14 @@ class MainActivity : ComponentActivity() {
 
                 var screen by remember { mutableStateOf<Screen>(Screen.Home) }
                 var searchHistory by remember { mutableStateOf(SearchStore.list(this@MainActivity)) }
+
+                // 「收藏到歌单」弹层：曲目行的心形/长按、播放页的心形共用这一个，
+                // 弹层内容自己读 MusicLib / MusicShelf，这里只管开和关
+                var sheetTrack by remember {
+                    mutableStateOf<com.projectionroom.ui.music.MusicTrack?>(null)
+                }
+                // 歌单库改动代数：新建/加歌之后让「我的」页和歌单页重读一遍
+                var shelfRev by remember { mutableIntStateOf(0) }
 
                 // 通知栏点歌名 → 落到全屏播放页。
                 // 只在队列还在的时候跳：没有歌可放的话进去就是个空页面。
@@ -1029,7 +1073,12 @@ class MainActivity : ComponentActivity() {
                 val scope = rememberCoroutineScope()
 
                 // 系统返回键：逐屏回退，只在首页才真正退出
-                BackHandler(enabled = screen != Screen.Home) {
+                BackHandler(enabled = screen != Screen.Home || sheetTrack != null) {
+                    // 弹层开着时返回先关弹层
+                    if (sheetTrack != null) {
+                        sheetTrack = null
+                        return@BackHandler
+                    }
                     screen = when (val cur = screen) {
                         is Screen.Detail -> cur.from
                         is Screen.Play -> cur.from
@@ -1040,6 +1089,7 @@ class MainActivity : ComponentActivity() {
                         is Screen.Search -> cur.from
                         is Screen.Browse -> cur.from
                         is Screen.Playlist -> cur.from
+                        is Screen.ShelfPlaylist -> cur.from
                         is Screen.Connect -> cur.from
                         is Screen.Mine -> cur.from
                         is Screen.Settings -> cur.from
@@ -1155,7 +1205,12 @@ class MainActivity : ComponentActivity() {
                                         // 下拉刷新：三路请求都要绕过磁盘缓存的新鲜期
                                         onForceRefresh = { FeedCache.force() },
                                         loadPlaylists = doMusicLists,
-                                        onOpenPlaylist = { p -> screen = Screen.Playlist(p.id, s) },
+                                        onOpenPlaylist = { p ->
+                                            screen = Screen.Playlist(
+                                                id = p.id, name = p.name,
+                                                cover = p.cover, count = p.count, from = s,
+                                            )
+                                        },
                                         // 音乐页顶栏那颗放大镜搜的是歌，不是片：
                                         // 走和歌单同一套聚合接口（App 直连，NAS 不参与）
                                         searchTracks = { kw ->
@@ -1191,6 +1246,50 @@ class MainActivity : ComponentActivity() {
                                         trackHistory = com.projectionroom.ui.music.MusicLib
                                             .history(this@MainActivity)
                                             .map { MineTrack(it.id, it.title, it.artist, it.cover) },
+                                        // 我的歌单：自建的在前面，收藏来的在线歌单排后面
+                                        shelf = remember(shelfRev) {
+                                            val ctx = this@MainActivity
+                                            com.projectionroom.ui.music.MusicShelf.playlists(ctx)
+                                                .map { MineShelf(it.id, it.name, it.cover, it.tracks.size) } +
+                                                com.projectionroom.ui.music.MusicShelf.favs(ctx)
+                                                    .map {
+                                                        MineShelf(
+                                                            id = it.id, name = it.name,
+                                                            cover = it.cover, count = it.count,
+                                                            online = true,
+                                                        )
+                                                    }
+                                        },
+                                        likedCount = remember(shelfRev) {
+                                            com.projectionroom.ui.music.MusicLib
+                                                .favorites(this@MainActivity).size
+                                        },
+                                        likedCover = remember(shelfRev) {
+                                            com.projectionroom.ui.music.MusicLib
+                                                .favorites(this@MainActivity)
+                                                .firstOrNull()?.cover.orEmpty()
+                                        },
+                                        onOpenLiked = {
+                                            screen = Screen.ShelfPlaylist(
+                                                com.projectionroom.ui.music.MusicShelf.LIKED_ID,
+                                                from = s,
+                                            )
+                                        },
+                                        onOpenShelf = { pl ->
+                                            screen = if (pl.online) {
+                                                Screen.Playlist(
+                                                    id = pl.id, name = pl.name,
+                                                    cover = pl.cover, count = pl.count, from = s,
+                                                )
+                                            } else {
+                                                Screen.ShelfPlaylist(pl.id, from = s)
+                                            }
+                                        },
+                                        onCreatePlaylist = { name ->
+                                            com.projectionroom.ui.music.MusicShelf
+                                                .create(this@MainActivity, name)
+                                            shelfRev++
+                                        },
                                         loading = syncing,
                                         onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
                                         // 「接着看」直接进播放器：这里再绕一次详情页太啰嗦
@@ -1237,7 +1336,12 @@ class MainActivity : ComponentActivity() {
                                 loadCats = doMusicCats,
                                 onForceRefresh = { FeedCache.force() },
                                 loadPlaylists = doMusicLists,
-                                onOpenPlaylist = { p -> screen = Screen.Playlist(p.id, s) },
+                                onOpenPlaylist = { p ->
+                                            screen = Screen.Playlist(
+                                                id = p.id, name = p.name,
+                                                cover = p.cover, count = p.count, from = s,
+                                            )
+                                        },
                                 searchTracks = { kw ->
                                     runCatching { musicApi.search(kw) }
                                         .getOrDefault(emptyList())
@@ -1279,42 +1383,119 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        is Screen.Playlist -> PlaylistScreen(
-                            load = doMusicPlaylist,
-                            // 落盘缓存：冷启动点进来先出上次的内容，再后台刷新。
-                            // 上游那个详情接口冷请求 0.3~12 秒，不落盘就每次都重等一遍。
-                            readCache = { sid ->
-                                PlaylistStore.read(this@MainActivity, sid)?.let {
-                                    com.projectionroom.ui.screen.CachedPlaylist(it.at, it.detail)
-                                }
-                            },
-                            writeCache = { sid, detail ->
-                                PlaylistStore.save(this@MainActivity, sid, detail)
-                            },
-                            id = s.id,
-                            topInset = barTop,
-                            nowPlayingId = com.projectionroom.ui.music.MusicBox.playingId,
-                            isPlaying = com.projectionroom.ui.music.MusicBox.playing,
-                            // 点歌**不跳页**：只在底部弹迷你条，想全屏再点封面
-                            onPlayTrack = { detail, index, shuffle ->
-                                val q = detail.tracks.map {
-                                    com.projectionroom.ui.music.MusicTrack(
-                                        id = it.id, title = it.title,
-                                        artist = it.artist, cover = it.cover,
+                        is Screen.Playlist -> {
+                            // 曲目行的心形：先把「已收进歌单」算成一个 id 集合，别每行都扫一遍库。
+                            // shelfRev 跟着弹层里的增删走；MusicBox.fav 管播放页那颗心形的改动
+                            val savedKeys = remember(
+                                shelfRev,
+                                com.projectionroom.ui.music.MusicBox.fav,
+                            ) { musicSavedKeys(this@MainActivity) }
+                            var favOn by remember(s.id) {
+                                mutableStateOf(
+                                    com.projectionroom.ui.music.MusicShelf
+                                        .isFav(this@MainActivity, s.id)
+                                )
+                            }
+                            PlaylistScreen(
+                                load = doMusicPlaylist,
+                                // 落盘缓存：冷启动点进来先出上次的内容，再后台刷新。
+                                // 上游那个详情接口冷请求 0.3~12 秒，不落盘就每次都重等一遍。
+                                readCache = { sid ->
+                                    PlaylistStore.read(this@MainActivity, sid)?.let {
+                                        com.projectionroom.ui.screen.CachedPlaylist(it.at, it.detail)
+                                    }
+                                },
+                                writeCache = { sid, detail ->
+                                    PlaylistStore.save(this@MainActivity, sid, detail)
+                                },
+                                id = s.id,
+                                topInset = barTop,
+                                nowPlayingId = com.projectionroom.ui.music.MusicBox.playingId,
+                                isPlaying = com.projectionroom.ui.music.MusicBox.playing,
+                                // 点歌**不跳页**：只在底部弹迷你条，想全屏再点封面
+                                onPlayTrack = { detail, index, shuffle ->
+                                    val q = detail.tracks.map {
+                                        com.projectionroom.ui.music.MusicTrack(
+                                            id = it.id, title = it.title,
+                                            artist = it.artist, cover = it.cover,
+                                        )
+                                    }
+                                    com.projectionroom.ui.music.MusicBox
+                                        .playAll(this@MainActivity, q, index, shuffle)
+                                },
+                                isTrackFav = { t -> savedKeys.contains(trackKey(t.id, t.title, t.artist)) },
+                                // 心形与长按同一个动作：弹「收藏到歌单」，选一个进去
+                                onAddToPlaylist = { t ->
+                                    sheetTrack = com.projectionroom.ui.music.MusicTrack(
+                                        id = t.id, title = t.title,
+                                        artist = t.artist, cover = t.cover,
                                     )
-                                }
-                                com.projectionroom.ui.music.MusicBox
-                                    .playAll(this@MainActivity, q, index, shuffle)
-                            },
-                            onBack = { screen = s.from },
-                            footer = {
-                                // 底部让开已由外层 Box 统一做（padding = barBottom），
-                                // 这里再来一次 navigationBarsPadding 会多出一条空档
-                                Box(Modifier.fillMaxWidth()) {
-                                    MiniPlayerOrEmpty { screen = Screen.MusicPlayer(s) }
-                                }
-                            },
-                        )
+                                },
+                                fav = favOn,
+                                onToggleFav = {
+                                    favOn = com.projectionroom.ui.music.MusicShelf.toggleFav(
+                                        this@MainActivity,
+                                        id = s.id,
+                                        name = s.name.ifBlank { "歌单 ${s.id}" },
+                                        cover = s.cover,
+                                        count = s.count,
+                                    )
+                                    shelfRev++
+                                },
+                                onBack = { screen = s.from },
+                                footer = {
+                                    // 底部让开已由外层 Box 统一做（padding = barBottom），
+                                    // 这里再来一次 navigationBarsPadding 会多出一条空档
+                                    Box(Modifier.fillMaxWidth()) {
+                                        MiniPlayerOrEmpty { screen = Screen.MusicPlayer(s) }
+                                    }
+                                },
+                            )
+                        }
+
+                        // 本地歌单（我喜欢的音乐 / 自建歌单）：曲目就在本地，
+                        // 不走网络也不写缓存，改一次靠 reload 重读
+                        is Screen.ShelfPlaylist -> {
+                            val ctx = this@MainActivity
+                            val savedKeys = remember(
+                                shelfRev,
+                                com.projectionroom.ui.music.MusicBox.fav,
+                            ) { musicSavedKeys(ctx) }
+                            PlaylistScreen(
+                                load = { lid -> localPlaylistDetail(ctx, lid) },
+                                local = true,
+                                // 「收进歌单」弹层里增删也走这个代数，弹层关掉列表就是新的
+                                reload = shelfRev,
+                                id = s.id,
+                                topInset = barTop,
+                                nowPlayingId = com.projectionroom.ui.music.MusicBox.playingId,
+                                isPlaying = com.projectionroom.ui.music.MusicBox.playing,
+                                onPlayTrack = { detail, index, shuffle ->
+                                    val q = detail.tracks.map {
+                                        com.projectionroom.ui.music.MusicTrack(
+                                            id = it.id, title = it.title,
+                                            artist = it.artist, cover = it.cover,
+                                        )
+                                    }
+                                    com.projectionroom.ui.music.MusicBox
+                                        .playAll(ctx, q, index, shuffle)
+                                },
+                                isTrackFav = { t -> savedKeys.contains(trackKey(t.id, t.title, t.artist)) },
+                                // 心形和长按都弹歌单列表；已经在这个歌单里就是「再点一次移出去」
+                                onAddToPlaylist = { t ->
+                                    sheetTrack = com.projectionroom.ui.music.MusicTrack(
+                                        id = t.id, title = t.title,
+                                        artist = t.artist, cover = t.cover,
+                                    )
+                                },
+                                onBack = { screen = s.from },
+                                footer = {
+                                    Box(Modifier.fillMaxWidth()) {
+                                        MiniPlayerOrEmpty { screen = Screen.MusicPlayer(s) }
+                                    }
+                                },
+                            )
+                        }
 
                         is Screen.Connect -> {
                             var connBusy by remember { mutableStateOf(false) }
@@ -1992,9 +2173,59 @@ class MainActivity : ComponentActivity() {
                             // 不需要壳再传进来
                             com.projectionroom.ui.screen.MusicPlayerScreen(
                                 onBack = { screen = s.from },
+                                // 播放页那颗心按状态分流，不能一律弹清单：
+                                // 亮着的时候用户点它想的是「取消收藏」，再弹一层「收藏到歌单」
+                                // 会让人以为收藏根本没生效，还得再选一次。
+                                onAddToPlaylist = { t ->
+                                    val ctx = this@MainActivity
+                                    val liked = com.projectionroom.ui.music.MusicLib
+                                        .isFav(ctx, t.id, t.title, t.artist)
+                                    val lists = com.projectionroom.ui.music.MusicShelf.playlistsWith(ctx, t)
+                                    val total = lists.size + if (liked) 1 else 0
+                                    when {
+                                        // 还没收进任何歌单：这才是「挑一个放进去」
+                                        total == 0 -> sheetTrack = t
+                                        // 只有一处：直接取消，不再多问一遍
+                                        liked && total == 1 -> {
+                                            com.projectionroom.ui.music.MusicLib.toggle(ctx, t)
+                                            android.widget.Toast.makeText(
+                                                ctx,
+                                                "已移出「${com.projectionroom.ui.music.MusicShelf.LIKED_NAME}」",
+                                                android.widget.Toast.LENGTH_SHORT,
+                                            ).show()
+                                            shelfRev++
+                                            com.projectionroom.ui.music.MusicBox.resyncFav()
+                                        }
+                                        total == 1 -> {
+                                            com.projectionroom.ui.music.MusicShelf.removeTrack(ctx, lists[0].id, t)
+                                            android.widget.Toast.makeText(
+                                                ctx,
+                                                "已移出「${lists[0].name}」",
+                                                android.widget.Toast.LENGTH_SHORT,
+                                            ).show()
+                                            shelfRev++
+                                            com.projectionroom.ui.music.MusicBox.resyncFav()
+                                        }
+                                        // 好几个歌单里都有：删哪个得让人挑，弹层里点一下就是移出
+                                        else -> sheetTrack = t
+                                    }
+                                },
                             )
                         }
                     }
+                    }
+
+                    // 「收藏到歌单」弹层挂在最外层：歌单页和播放页共用，
+                    // 关掉之后两者都要重新读一遍收藏状态
+                    sheetTrack?.let { t ->
+                        AddToPlaylistSheet(
+                            track = t,
+                            onDismiss = { sheetTrack = null },
+                            onChanged = {
+                                shelfRev++
+                                com.projectionroom.ui.music.MusicBox.resyncFav()
+                            },
+                        )
                     }
                 }
             }
@@ -2210,4 +2441,71 @@ private fun NotifPermissionDialog(onAllow: () -> Unit, onDismiss: () -> Unit) {
             onSecondary = onDismiss,
         )
     }
+}
+
+/* ── 歌单/收藏用的小工具（壳层，不污染 UI 参数） ── */
+
+/** 一首歌的身份：有 id 用 id，没有就退回「歌名 + 歌手」（早期收藏没有 id） */
+private fun trackKey(id: String, title: String, artist: String): String =
+    if (id.isNotBlank()) id else "$title|$artist"
+
+/** 收藏库的 id 集合：曲目列表里有几百行，不能每行都去扫一遍收藏 */
+private fun musicFavKeys(ctx: android.content.Context): Set<String> =
+    com.projectionroom.ui.music.MusicLib.favorites(ctx)
+        .map { trackKey(it.id, it.title, it.artist) }
+        .toSet()
+
+/**
+ * 已被收进任意歌单的 id 集合：「我喜欢的音乐」+ 所有自建歌单。
+ *
+ * 曲目行的心形现在表示「这首歌已经有归属」——点它不再直接塞默认歌单，
+ * 而是弹出歌单列表让人挑一个，所以点亮条件要看全部歌单。
+ */
+private fun musicSavedKeys(ctx: android.content.Context): Set<String> {
+    val shelf = com.projectionroom.ui.music.MusicShelf
+    val keys = HashSet<String>(256)
+    keys += musicFavKeys(ctx)
+    shelf.playlists(ctx).forEach { p ->
+        p.tracks.forEach { keys += trackKey(it.id, it.title, it.artist) }
+    }
+    return keys
+}
+
+/**
+ * 本地歌单 → 详情页要的那份结构。
+ *
+ * 自建歌单和「我喜欢的音乐」都套进 [NasApi.PlaylistDetail]，
+ * 这样它们和在线歌单共用同一个详情页（播放、收藏、长按收歌单全都有），
+ * 不用再写一套长得差不多的页面。
+ */
+private fun localPlaylistDetail(
+    ctx: android.content.Context,
+    id: String,
+): NasApi.PlaylistDetail {
+    val shelf = com.projectionroom.ui.music.MusicShelf
+    val key = com.projectionroom.ui.music.MusicLib
+    if (id == shelf.LIKED_ID) {
+        val favs = key.favorites(ctx)
+        return NasApi.PlaylistDetail(
+            id = id,
+            name = shelf.LIKED_NAME,
+            cover = favs.firstOrNull()?.cover.orEmpty(),
+            desc = "点过心形的歌都在这里",
+            count = favs.size,
+            tracks = favs.map {
+                NasApi.Track(id = it.id, title = it.title, artist = it.artist, cover = it.cover)
+            },
+        )
+    }
+    val p = shelf.playlist(ctx, id)
+    return NasApi.PlaylistDetail(
+        id = id,
+        name = p?.name ?: "歌单",
+        cover = p?.cover.orEmpty(),
+        desc = "自建歌单",
+        count = p?.tracks?.size ?: 0,
+        tracks = (p?.tracks ?: emptyList()).map {
+            NasApi.Track(id = it.id, title = it.title, artist = it.artist, cover = it.cover)
+        },
+    )
 }

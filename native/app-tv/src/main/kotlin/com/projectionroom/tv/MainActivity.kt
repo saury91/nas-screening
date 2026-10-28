@@ -704,7 +704,16 @@ class MainActivity : ComponentActivity() {
                         ?: NasApi.PlaylistDetail()
                 }
                 val doTrackUrl: suspend (String) -> String = { id ->
-                    runCatching { musicApi.trackUrl(id) }.getOrDefault("")
+                    // 失败给空串（当作没音源），但取消必须原样抛出去：
+                    // 吞掉 CancellationException 会让播放器把「用户已经切歌了」
+                    // 当成「这首没地址」，再自动跳一首，连点几次就串成一串乱跳
+                    try {
+                        musicApi.trackUrl(id)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: Throwable) {
+                        ""
+                    }
                 }
 
                 // 音乐播放器是进程内单例：把「取播放地址」的能力注入一次，
@@ -716,9 +725,16 @@ class MainActivity : ComponentActivity() {
                         resolve = { id -> doTrackUrl(id) },
                         lyric = { id -> runCatching { musicApi.lyric(id) }.getOrDefault(emptyList()) },
                         // 无版权曲目只给 30 秒片段，播到一半就断。这里判长度后跳过，
-                        // 判断失败时一律放行（见 MusicApi.isFullTrack 的注释）
+                        // 判断失败时一律放行（见 MusicApi.isFullTrack 的注释）。
+                        // 取消同样要抛：回来时用户可能已经切走了
                         isFullTrack = { url ->
-                            runCatching { musicApi.isFullTrack(url) }.getOrDefault(true)
+                            try {
+                                musicApi.isFullTrack(url)
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (_: Throwable) {
+                                true
+                            }
                         },
                     )
                 }

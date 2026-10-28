@@ -82,6 +82,12 @@ object TabIcons {
         }
     }
 
+    /** 加号：新建歌单 / 收进歌单 */
+    val Plus: ImageVector = icon("plus", false) {
+        moveTo(12f, 5.6f); lineTo(12f, 18.4f)
+        moveTo(5.6f, 12f); lineTo(18.4f, 12f)
+    }
+
     /** 收藏（空心）：详情页图标按钮 */
     val Heart: ImageVector = icon("heart", false) { heartPath() }
 

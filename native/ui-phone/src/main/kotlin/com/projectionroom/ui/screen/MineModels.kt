@@ -19,3 +19,17 @@ data class MineTrack(
     val artist: String = "",
     val cover: String = "",
 )
+
+/**
+ * 「我的歌单」里的一张卡：自建的、或者收藏来的在线歌单。
+ *
+ * [online] 决定点开之后去哪：自建歌单在本地就有曲目，直接进本地列表页；
+ * 在线歌单要重新拉一次详情（`Screen.Playlist`）。
+ */
+data class MineShelf(
+    val id: String,
+    val name: String,
+    val cover: String = "",
+    val count: Int = 0,
+    val online: Boolean = false,
+)
