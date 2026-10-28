@@ -89,6 +89,14 @@ fun MineScreen(
     /** 音乐收藏 / 播放记录 */
     trackFavs: List<MineTrack> = emptyList(),
     trackHistory: List<MineTrack> = emptyList(),
+    /** 我的歌单：自建歌单 + 收藏的在线歌单 */
+    shelf: List<MineShelf> = emptyList(),
+    /** 「我喜欢的音乐」的曲目数与封面（没有封面时用第一首的） */
+    likedCount: Int = 0,
+    likedCover: String = "",
+    onOpenLiked: () -> Unit = {},
+    onOpenShelf: (MineShelf) -> Unit = {},
+    onCreatePlaylist: (String) -> Unit = {},
     loading: Boolean = false,
     onOpen: (Vod) -> Unit,
     onPlay: (Vod) -> Unit = {},
@@ -101,6 +109,7 @@ fun MineScreen(
 ) {
     var kind by remember { mutableStateOf(MineKind.All) }
     var searching by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     val q = query.trim()
 
@@ -186,6 +195,27 @@ fun MineScreen(
                                 loading = loading,
                                 searching = q.isNotBlank(),
                                 query = q,
+                            )
+                        }
+                    }
+
+                    /* ── 我的歌单（自建 + 收藏的在线歌单）── */
+                    if (showMusic && q.isBlank()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SectionHead(
+                                "我的歌单",
+                                if (shelf.isEmpty()) "建一个，把喜欢的歌收进去"
+                                else "${shelf.size + 1} 个 · 长按歌单可管理",
+                            )
+                        }
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            railOfShelf(
+                                likedCount = likedCount,
+                                likedCover = likedCover,
+                                shelf = shelf,
+                                onOpenLiked = onOpenLiked,
+                                onOpenShelf = onOpenShelf,
+                                onCreate = { creating = true },
                             )
                         }
                     }
@@ -285,6 +315,13 @@ fun MineScreen(
                         }
                     }
                 }
+            }
+        }
+
+        if (creating) {
+            CreatePlaylistDialog(onDismiss = { creating = false }) { name ->
+                creating = false
+                onCreatePlaylist(name)
             }
         }
     }
@@ -537,6 +574,139 @@ private fun railOfTracks(title: String, list: List<MineTrack>, onPlay: (Int) -> 
 }
 
 /* ───────────────────────── 卡片 ───────────────────────── */
+
+/**
+ * 我的歌单横滑轨：默认收藏歌单 + 自建歌单 + 收藏的在线歌单 + 「新建」。
+ *
+ * 三者形状一致（1:1 封面），所以能和专辑卡并排放；
+ * 顺序按「自己的在前、收藏的在后」，新建永远在最后。
+ */
+@Composable
+private fun railOfShelf(
+    likedCount: Int,
+    likedCover: String,
+    shelf: List<MineShelf>,
+    onOpenLiked: () -> Unit,
+    onOpenShelf: (MineShelf) -> Unit,
+    onCreate: () -> Unit,
+    likedName: String = "我喜欢的音乐",
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Box(Modifier.width(104.dp)) {
+                ShelfCard(
+                    name = likedName,
+                    meta = "$likedCount 首",
+                    cover = likedCover,
+                    liked = true,
+                    onClick = onOpenLiked,
+                )
+            }
+        }
+        items(shelf) { s ->
+            Box(Modifier.width(104.dp)) {
+                ShelfCard(
+                    name = s.name,
+                    meta = if (s.online) "收藏 · ${s.count} 首" else "${s.count} 首",
+                    cover = s.cover,
+                    liked = false,
+                    onClick = { onOpenShelf(s) },
+                )
+            }
+        }
+        item {
+            Box(Modifier.width(104.dp)) { NewShelfCard(onCreate) }
+        }
+    }
+}
+
+/** 歌单卡：封面 + 歌单名 + 数量；默认收藏歌单多一颗心 */
+@Composable
+private fun ShelfCard(
+    name: String,
+    meta: String,
+    cover: String,
+    liked: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(ProomShape.md))
+                .background(ProomColor.card),
+        ) {
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.linearGradient(listOf(ProomColor.card, ProomColor.bgSoft))
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (liked) TabIcons.HeartOn else TabIcons.Music,
+                    contentDescription = null,
+                    tint = if (liked) ProomColor.accentSoft else ProomColor.lineStrong,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+            if (cover.isNotBlank()) {
+                RemoteImage(
+                    model = cover,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Text(
+            name,
+            style = ProomType.cardTitle,
+            color = ProomColor.text,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 7.dp).height(40.dp),
+        )
+        Text(
+            meta,
+            style = ProomType.label,
+            color = ProomColor.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 最后那格「＋」：建歌单的入口固定在轨尾，不用翻到设置里去找 */
+@Composable
+private fun NewShelfCard(onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(ProomShape.md))
+                .background(ProomColor.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = TabIcons.Plus,
+                    contentDescription = null,
+                    tint = ProomColor.accent,
+                    modifier = Modifier.size(24.dp),
+                )
+                Text(
+                    "新建歌单",
+                    style = ProomType.label,
+                    color = ProomColor.dim,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(40.dp + 7.dp + 17.dp))
+    }
+}
 
 /** 专辑卡：1:1 封面 + 歌名 + 歌手 */
 @Composable

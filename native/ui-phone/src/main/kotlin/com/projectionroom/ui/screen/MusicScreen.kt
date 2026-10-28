@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -112,27 +113,39 @@ fun MusicScreen(
     // 「还在拉」和「拉回空」，没配音乐接口时会一直停在骨架屏上。
     var catsLoaded by remember { mutableStateOf(MusicCache.cats().isNotEmpty()) }
     var recLoaded by remember { mutableStateOf(MusicCache.lists(REC_KEY) != null) }
-    // 分类区：一级下标 + 组内二级下标。默认落在「语种 · 华语」（最大众的一档）
+    // 分类区：一级下标 + 组内二级下标。
+    // 重进页面要照着上次选的那一档定位，只有在没有记录时才落默认的「语种 · 华语」——
+    // 无脑回默认的话，下面整片卡片会换成另一批，看着就像「返回后整个重新加载了一遍」
+    val savedPos = remember(cats) { MusicUiState.locate(cats) }
     val initGi = remember(cats) {
-        cats.indexOfFirst { it.name == "语种" }.takeIf { it >= 0 } ?: 0
+        savedPos?.first ?: cats.indexOfFirst { it.name == "语种" }.takeIf { it >= 0 } ?: 0
     }
     var gi by remember(cats) { mutableIntStateOf(initGi) }
     var si by remember(cats) {
         mutableIntStateOf(
-            cats.getOrNull(initGi)?.subs?.indexOfFirst { it.name == "华语" }?.takeIf { it >= 0 } ?: 0
+            savedPos?.second
+                ?: cats.getOrNull(initGi)?.subs?.indexOfFirst { it.name == "华语" }?.takeIf { it >= 0 }
+                ?: 0
         )
     }
-    var cards by remember { mutableStateOf<List<NasApi.Playlist>>(emptyList()) }
-    var listLoading by remember { mutableStateOf(false) }
+    val group = cats.getOrNull(gi)
+    val subs = group?.subs.orEmpty()
+    val sub = subs.getOrNull(si)
+    // 卡片首帧就得有内容：先取缓存，缓存过期就用上次屏上那份快照。
+    // 空着起步的话分类区高度是塌的，滚动位置会被裁掉，数据一回来再撑开，
+    // 那一撑就是用户眼里的「返回后又刷新加载了一下、布局动了一下」
+    var cards by remember {
+        val cached = sub?.id?.let { MusicCache.lists(it) }
+        val snapshot = MusicUiState.cards
+            .takeIf { sub?.id != null && MusicUiState.cardsCat == sub?.id }
+        mutableStateOf(cached ?: snapshot.orEmpty())
+    }
+    var listLoading by remember { mutableStateOf(cards.isEmpty()) }
     var listErr by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     // 刷新代数：分类树、推荐、当前分类三路都要跟着重拉一遍
     var reload by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
-
-    val group = cats.getOrNull(gi)
-    val subs = group?.subs.orEmpty()
-    val sub = subs.getOrNull(si)
 
     LaunchedEffect(reload) {
         // reload > 0 是下拉刷新：缓存已被清掉，这里必须真的重拉
@@ -151,6 +164,15 @@ fun MusicScreen(
         runCatching { loadPlaylists("").collect { rec = MusicCache.putLists(REC_KEY, it) } }
         recLoaded = true
     }
+    // 选中的分类、屏上这批卡片都记进进程内：返回时首帧直接照着画，不重排一次
+    LaunchedEffect(sub?.id) { MusicUiState.subId = sub?.id }
+    LaunchedEffect(cards, sub?.id) {
+        // 只记有内容的那份。骨架期间的空列表写进去，反而会把上次的快照冲掉
+        if (sub?.id != null && cards.isNotEmpty()) {
+            MusicUiState.cardsCat = sub?.id
+            MusicUiState.cards = cards
+        }
+    }
     // 二级分类变化才重新拉。命中缓存立刻出内容，不闪骨架
     LaunchedEffect(sub?.id, reload) {
         val id = sub?.id ?: return@LaunchedEffect
@@ -161,8 +183,9 @@ fun MusicScreen(
                 listLoading = false
                 return@LaunchedEffect
             }
-            listLoading = true
-            cards = emptyList()
+            // 缓存过期了但屏上还有上次那批：留着静默换新。
+            // 先清空再等，等于把已经画好的分类区拆掉重装一遍，位置也跟着歪
+            listLoading = cards.isEmpty()
         } else if (cards.isEmpty()) {
             listLoading = true
         }
@@ -198,22 +221,46 @@ fun MusicScreen(
     }
 
     // 页面是会重建的（进歌单详情再返回），滚动位置只能记在进程里，
-    // 不然滚到第八屏点开一张，返回时直接跳回顶部，等于让人重滚一遍
-    val gridState = rememberLazyGridState()
+    // 不然滚到第八屏点开一张，返回时直接跳回顶部，等于让人重滚一遍。
+    //
+    // 位置必须走 initial*，让状态第一帧就在原位。之前的写法是 remember 从 0 起步、
+    // 再由 LaunchedEffect 去 scrollToItem 追回来 —— 复位那一下用户看得见：
+    // 返回瞬间页面先画在顶部（或第一张卡），然后被拽回原处，像被人硬滚了一把。
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = MusicUiState.index,
+        initialFirstVisibleItemScrollOffset = MusicUiState.offset,
+    )
+    // 推荐歌单那一行也是横滑的，道理同上：横着滑到第 9 张点进去，
+    // 返回时要是弹回第 1 张，刚才翻的功夫全白费
+    val recRowState = rememberLazyListState(
+        initialFirstVisibleItemIndex = MusicUiState.recIndex,
+        initialFirstVisibleItemScrollOffset = MusicUiState.recOffset,
+    )
+    // 只有「数据比首帧晚到」才需要补一次：冷启动时缓存是空的，格子还没那么多，
+    // initial 的位置会被裁掉。命中缓存时这里条件不成立，一帧都不会动。
     LaunchedEffect(Unit) {
-        val target = MusicUiState.index
-        if (target <= 0) return@LaunchedEffect
-        // 等网格真的有这么多项再滚：数据在进程内缓存里，通常一两帧就够；
-        // 条目变少了（后端空了）就超时不动，回到顶部也比硬抖一下好
-        val ready = withTimeoutOrNull(2500) {
-            snapshotFlow { gridState.layoutInfo.totalItemsCount }.first { it > target }
+        val v = MusicUiState.index
+        if (v > 0 && gridState.firstVisibleItemIndex < v) {
+            withTimeoutOrNull(1500) {
+                snapshotFlow { gridState.layoutInfo.totalItemsCount }.first { it > v }
+            }?.let { gridState.scrollToItem(v, MusicUiState.offset) }
         }
-        if (ready != null) gridState.scrollToItem(target, MusicUiState.offset)
+        val h = MusicUiState.recIndex
+        if (h > 0 && recRowState.firstVisibleItemIndex < h) {
+            withTimeoutOrNull(1500) {
+                snapshotFlow { recRowState.layoutInfo.totalItemsCount }.first { it > h }
+            }?.let { recRowState.scrollToItem(h, MusicUiState.recOffset) }
+        }
     }
     DisposableEffect(Unit) {
         onDispose {
             MusicUiState.index = gridState.firstVisibleItemIndex
             MusicUiState.offset = gridState.firstVisibleItemScrollOffset
+            // 推荐行没被布局过（用户已经竖着滚过去了）就别拿 0 覆盖原来记的位置
+            if (recRowState.layoutInfo.totalItemsCount > 0) {
+                MusicUiState.recIndex = recRowState.firstVisibleItemIndex
+                MusicUiState.recOffset = recRowState.firstVisibleItemScrollOffset
+            }
         }
     }
 
@@ -278,6 +325,7 @@ fun MusicScreen(
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         // 横滑要通栏：网格给了 20dp 内边距，这里抵消掉
                         LazyRow(
+                            state = recRowState,
                             contentPadding = PaddingValues(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.bleed(20.dp),
@@ -304,12 +352,23 @@ fun MusicScreen(
                 if (cats.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         GroupTabs(cats.map { it.name }, gi) { i ->
+                            if (i == gi) return@GroupTabs
                             gi = i
                             si = 0
+                            // 换大类就是换一整批卡片：旧的先在屏上等着，会被误认成新分类的结果
+                            cards = emptyList()
+                            listErr = null
+                            listLoading = true
                         }
                     }
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        SubChips(subs.map { it.name }, si) { i -> si = i }
+                        SubChips(subs.map { it.name }, si) { i ->
+                            if (i == si) return@SubChips
+                            si = i
+                            cards = emptyList()
+                            listErr = null
+                            listLoading = true
+                        }
                     }
                 }
 
@@ -750,12 +809,34 @@ private object MusicCache {
 }
 
 /**
- * 音乐页的滚动位置（进程内）。
+ * 音乐页的「上次那一屏」（进程内）。
  *
- * 进歌单详情时整页会被销毁重建，`remember` 里的 `LazyGridState` 一起没了 ——
+ * 进歌单详情时整页会被销毁重建，`remember` 里的状态一起没了 ——
  * 于是滚到第八屏点开一张，返回直接回到顶部，用户得重新滚一遍找刚才看到的位置。
+ *
+ * 光记滚动坐标还不够：位置是按条目序号算的，重建首帧如果分类和卡片还没回来，
+ * 网格条目数对不上，序号会被裁掉，数据一到再撑开，位置和布局就会明显动一下。
+ * 所以选中分类和屏上那批卡片也一起记着，重建时首帧照原样画出来。
  */
 private object MusicUiState {
     var index: Int = 0
     var offset: Int = 0
+    /** 推荐歌单那一行的横向滚动（和上面两个一样，只为「返回还在原地」） */
+    var recIndex: Int = 0
+    var recOffset: Int = 0
+    /** 上次选中的二级分类 id。找不到（分类树变了）时才退回默认的「语种 · 华语」 */
+    var subId: String? = null
+    /** 上次屏上那批卡片属于哪个分类、内容是什么：缓存过期也靠它把首帧填满 */
+    var cardsCat: String? = null
+    var cards: List<NasApi.Playlist> = emptyList()
+
+    /** 按记下的分类 id 在大类树里定位；树变了找不到就返回 null */
+    fun locate(cats: List<NasApi.MusicCatGroup>): Pair<Int, Int>? {
+        val id = subId ?: return null
+        cats.forEachIndexed { i, g ->
+            val j = g.subs.indexOfFirst { it.id == id }
+            if (j >= 0) return i to j
+        }
+        return null
+    }
 }

@@ -1,7 +1,9 @@
 package com.projectionroom.ui.screen
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -55,6 +57,7 @@ import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.component.RemoteImage
+import com.projectionroom.ui.music.MusicShelf
 import com.projectionroom.ui.music.PlaylistCache
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -96,14 +99,33 @@ fun PlaylistScreen(
     nowPlayingId: String = "",
     isPlaying: Boolean = false,
     onPlayTrack: (detail: NasApi.PlaylistDetail, index: Int, shuffle: Boolean) -> Unit,
+    /** 这首歌是否已被收进某个歌单（默认收藏歌单或自建歌单），决定心形亮不亮 */
+    isTrackFav: (NasApi.Track) -> Boolean = { false },
+    /**
+     * 点曲目行右边的心形 / 长按整行：弹「收藏到歌单」。
+     *
+     * 不做「点一下就塞进默认歌单」：收藏是个有归属的动作，进哪个歌单要当场能选，
+     * 弹层里也能新建一个。
+     */
+    onAddToPlaylist: ((NasApi.Track) -> Unit)? = null,
+    /** 歌单本身是否已收藏；null = 不显示这颗心（自建歌单页） */
+    fav: Boolean? = null,
+    onToggleFav: (() -> Unit)? = null,
+    /**
+     * 本地歌单（自建 / 我喜欢的音乐）：不走网络、不写缓存，改一次靠 [reload] 重读。
+     * 这类数据在本地已经是最新的，再去请求一遍上游只会慢。
+     */
+    local: Boolean = false,
+    /** 本地歌单的刷新代数：加歌/删歌之后 +1 */
+    reload: Int = 0,
     onBack: () -> Unit = {},
     /** 底部常驻层（迷你播放条），由壳决定放什么 */
     footer: @Composable () -> Unit = {},
 ) {
     // 先看进程内缓存：从播放页返回、或者刚看过的歌单再点一次，
     // 有数据就直接出内容 —— 不再先闪一屏骨架
-    var d by remember(id) { mutableStateOf(PlaylistCache.get(id)) }
-    var loading by remember(id) { mutableStateOf(d == null) }
+    var d by remember(id) { mutableStateOf(if (local) null else PlaylistCache.get(id)) }
+    var loading by remember(id) { mutableStateOf(!local && d == null) }
     var err by remember(id) { mutableStateOf<String?>(null) }
     // 重试代数：0 首时给一个「重新加载」的入口，不然用户只能退了再进
     var retry by remember(id) { mutableIntStateOf(0) }
@@ -111,7 +133,16 @@ fun PlaylistScreen(
     // 光一个骨架屏转着不动，看着就像「点进去卡死了」
     var slow by remember(id) { mutableStateOf(false) }
 
-    LaunchedEffect(id, retry) {
+    LaunchedEffect(id, retry, reload) {
+        // ⓪ 本地歌单：数据就在内存里，直接读，连骨架屏都不用闪
+        if (local) {
+            d = runCatching { load(id) }.getOrNull() ?: d
+            loading = false
+            err = null
+            slow = false
+            return@LaunchedEffect
+        }
+
         // ① 进程内刚拉过：30 分钟内直接信它，不再为一份几乎不变的数据等上游
         //   （详情接口实测 0.3~12 秒，是这一页唯一慢的东西）
         if (retry == 0 && d != null && PlaylistCache.isFresh(id)) {
@@ -323,19 +354,34 @@ fun PlaylistScreen(
                                     text = "播放全部",
                                     filled = true,
                                     modifier = if (wide) Modifier.width(180.dp) else Modifier.weight(1f),
+                                    // 本地歌单可以被清空，此时点播放会取 0 号曲目崩掉
+                                    enabled = detail.tracks.isNotEmpty(),
                                     big = wide,
                                 ) {
                                     onPlayTrack(detail, 0, false)
                                 }
-                                PlayAllButton(
-                                    text = "随机",
-                                    filled = false,
-                                    modifier = Modifier.width(if (wide) 132.dp else 96.dp),
+                                // 随机做成图标按钮：这一格和右边的收藏心形并排，
+                                // 三个动作（播放全部 / 随机 / 收藏歌单）里只有一个需要文字
+                                IconBtn(
+                                    size = if (wide) 52.dp else 42.dp,
+                                    icon = PlayerIcons.Shuffle,
+                                    desc = "随机播放",
+                                    tint = ProomColor.text,
                                     // 空歌单点「随机」会抛 NoSuchElement：先判一下
                                     enabled = detail.tracks.isNotEmpty(),
-                                    big = wide,
                                 ) {
                                     onPlayTrack(detail, detail.tracks.indices.random(), true)
+                                }
+                                // 收藏这颗歌单：自建歌单不显示（它本来就是「我的」）。
+                                // 点一下直接收 / 取消，不弹层 —— 歌单没有「要放进哪个歌单」的问题
+                                if (fav != null && onToggleFav != null) {
+                                    val on = fav
+                                    IconBtn(
+                                        size = if (wide) 52.dp else 42.dp,
+                                        icon = if (on) TabIcons.HeartOn else TabIcons.Heart,
+                                        desc = if (on) "取消收藏歌单" else "收藏歌单",
+                                        tint = if (on) ProomColor.accent else ProomColor.text,
+                                    ) { onToggleFav() }
                                 }
                             }
                         }
@@ -351,19 +397,31 @@ fun PlaylistScreen(
                                     fontSize = if (wide) 24.sp else 21.sp,
                                     color = ProomColor.text,
                                 )
-                                Text(
-                                    "  ${detail.tracks.size}",
-                                    style = ProomType.meta,
-                                    color = ProomColor.muted,
-                                    modifier = Modifier.padding(bottom = 3.dp),
-                                )
+                                if (detail.tracks.isNotEmpty()) {
+                                    Text(
+                                        "  ${detail.tracks.size}",
+                                        style = ProomType.meta,
+                                        color = ProomColor.muted,
+                                        modifier = Modifier.padding(bottom = 3.dp),
+                                    )
+                                }
                             }
                         }
 
-                        // 宽屏两列：一列 960px 的曲目列表，一屏只能看到 8 首，
-                        // 80 首的歌单要滚十屏。横屏拆成左右两列，一屏 16 首，
-                        // 每行也更短、更好扫视。
-                        if (wide) {
+                        // 本地歌单会被清空（取消掉最后一颗心、自建歌单删光），
+                        // 与其只剩一行「曲目」标题，不如告诉用户歌从哪儿加进来。
+                        if (local && detail.tracks.isEmpty()) {
+                            item {
+                                EmptyShelf(
+                                    liked = id == MusicShelf.LIKED_ID,
+                                    wide = wide,
+                                    padX = padX,
+                                )
+                            }
+                        } else if (wide) {
+                            // 宽屏两列：一列 960px 的曲目列表，一屏只能看到 8 首，
+                            // 80 首的歌单要滚十屏。横屏拆成左右两列，一屏 16 首，
+                            // 每行也更短、更好扫视。
                             itemsIndexed(detail.tracks.chunked(2)) { rowIdx, pair ->
                                 Row(Modifier.fillMaxWidth().padding(horizontal = padX - 12.dp)) {
                                     pair.forEachIndexed { col, t ->
@@ -375,6 +433,9 @@ fun PlaylistScreen(
                                             playing = t.id == nowPlayingId && isPlaying,
                                             modifier = Modifier.weight(1f),
                                             big = true,
+                                            fav = isTrackFav(t),
+                                            onFav = onAddToPlaylist?.let { f -> { f(t) } },
+                                            onLongPress = onAddToPlaylist?.let { f -> { f(t) } },
                                         ) { onPlayTrack(detail, i, false) }
                                     }
                                     // 最后一行只有一首时占位，别让那一行被拉宽
@@ -389,6 +450,9 @@ fun PlaylistScreen(
                                     // 高亮：正在播的那首（暂停也保持高亮，只是不跳音符）
                                     current = t.id == nowPlayingId,
                                     playing = t.id == nowPlayingId && isPlaying,
+                                    fav = isTrackFav(t),
+                                    onFav = onAddToPlaylist?.let { f -> { f(t) } },
+                                    onLongPress = onAddToPlaylist?.let { f -> { f(t) } },
                                 ) { onPlayTrack(detail, i, false) }
                             }
                         }
@@ -450,6 +514,50 @@ fun PlaylistScreen(
 
 /* ───────────────────── 小组件 ───────────────────── */
 
+/**
+ * 本地歌单的空态。
+ *
+ * 「我喜欢的音乐」和自建歌单的加歌方式不一样：前者靠心形，后者靠长按/播放页的心形，
+ * 所以文案分两套；在线歌单为空是上游抽风，不归这里管。
+ */
+@Composable
+private fun EmptyShelf(liked: Boolean, wide: Boolean, padX: Dp) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = padX, vertical = 10.dp)
+            .clip(RoundedCornerShape(ProomShape.md))
+            // 注意别写 surface.copy(alpha = 0.5f)：那是把半透明白设成 50% 不透明，
+            // 会变成一块 #808080 的灰砖；surface 本身就是 5.5% 白
+            .background(ProomColor.card)
+            .padding(
+                horizontal = if (wide) 32.dp else 22.dp,
+                vertical = if (wide) 30.dp else 24.dp,
+            ),
+    ) {
+        Icon(
+            imageVector = TabIcons.Heart,
+            contentDescription = null,
+            tint = ProomColor.dim,
+            modifier = Modifier.size(if (wide) 26.dp else 22.dp),
+        )
+        Text(
+            if (liked) "还没有收藏的歌" else "这个歌单还是空的",
+            color = ProomColor.text,
+            fontSize = if (wide) 19.sp else 16.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 12.dp),
+        )
+        Text(
+            if (liked) "在歌单里点歌曲右边的心形，歌就会收进这里"
+            else "在歌单里长按歌曲，或点播放页右上角的心形，就能把歌加进来",
+            style = ProomType.label,
+            color = ProomColor.muted,
+            modifier = Modifier.padding(top = 6.dp).widthIn(max = if (wide) 560.dp else Dp.Unspecified),
+        )
+    }
+}
+
 @Composable
 private fun PlayAllButton(
     text: String,
@@ -464,6 +572,8 @@ private fun PlayAllButton(
     Box(
         modifier
             .height(if (big) 52.dp else 42.dp)
+            // 禁用态必须看得出来：空歌单上那颗金色「播放全部」按下去没反应会很怪
+            .graphicsLayer { alpha = if (enabled) 1f else 0.38f }
             .clip(shape)
             .background(if (filled) ProomColor.accent else ProomColor.surface)
             .clickable(enabled = enabled, onClick = onClick),
@@ -489,6 +599,35 @@ private fun PlayAllButton(
     }
 }
 
+/** 方形图标按钮：随机 / 收藏歌单共用，尺寸和 [PlayAllButton] 对齐 */
+@Composable
+private fun IconBtn(
+    size: Dp,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    tint: Color,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(size)
+            .graphicsLayer { alpha = if (enabled) 1f else 0.38f }
+            .clip(RoundedCornerShape(ProomShape.sm))
+            .background(ProomColor.surface)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = desc,
+            tint = tint,
+            modifier = Modifier.size(if (size >= 48.dp) 22.dp else 19.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TrackRow(
     index: Int,
@@ -499,6 +638,12 @@ private fun TrackRow(
     modifier: Modifier = Modifier,
     /** 宽屏：行更高、字号更大（10-foot 视距） */
     big: Boolean = false,
+    /** 已被收进某个歌单（心形实心） */
+    fav: Boolean = false,
+    /** 点右边心形：弹「收藏到歌单」 */
+    onFav: (() -> Unit)? = null,
+    /** 长按整行：同 [onFav] */
+    onLongPress: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -507,8 +652,8 @@ private fun TrackRow(
             .padding(horizontal = 12.dp, vertical = 1.dp)
             .clip(RoundedCornerShape(ProomShape.sm))
             .background(if (current) ProomColor.accentSoft else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = if (big) 13.dp else 10.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(start = 10.dp, end = if (onFav != null) 2.dp else 10.dp, top = if (big) 13.dp else 10.dp, bottom = if (big) 13.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(if (big) 38.dp else 32.dp), contentAlignment = Alignment.CenterStart) {
@@ -542,6 +687,23 @@ private fun TrackRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        // 右边的心形：点一下弹「收藏到歌单」，和长按是同一件事
+        if (onFav != null) {
+            Box(
+                Modifier
+                    .size(if (big) 44.dp else 40.dp)
+                    .clip(RoundedCornerShape(ProomShape.sm))
+                    .clickable(onClick = onFav),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (fav) TabIcons.HeartOn else TabIcons.Heart,
+                    contentDescription = "收藏到歌单",
+                    tint = if (fav) ProomColor.accent else ProomColor.dim,
+                    modifier = Modifier.size(if (big) 20.dp else 18.dp),
+                )
+            }
         }
     }
 }
@@ -589,10 +751,13 @@ private fun PlaylistSkeleton(
                     .height(if (wide) 52.dp else 42.dp),
                 radius = ProomShape.sm,
             )
-            SkeletonBlock(
-                Modifier.width(if (wide) 132.dp else 96.dp).height(if (wide) 52.dp else 42.dp),
-                radius = ProomShape.sm,
-            )
+            // 随机 + 收藏歌单都是方形图标按钮
+            repeat(2) {
+                SkeletonBlock(
+                    Modifier.size(if (wide) 52.dp else 42.dp),
+                    radius = ProomShape.sm,
+                )
+            }
         }
         repeat(if (wide) 5 else 8) {
             Row(Modifier.fillMaxWidth().padding(horizontal = padX)) {

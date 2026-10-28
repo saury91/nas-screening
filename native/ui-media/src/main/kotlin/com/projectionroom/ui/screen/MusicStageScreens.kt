@@ -94,6 +94,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import com.projectionroom.ui.music.AudioFx
 import com.projectionroom.ui.music.MusicBox
+import com.projectionroom.ui.music.MusicTrack
 import com.projectionroom.ui.music.RepeatMode
 import com.projectionroom.ui.music.SleepTimer
 import com.projectionroom.ui.theme.LocalProomTv
@@ -119,7 +120,13 @@ import kotlin.math.roundToInt
 /* ─────────────────── 外壳 ─────────────────── */
 
 @Composable
-internal fun MusicStageScreen(isTv: Boolean, wide: Boolean, onBack: () -> Unit) {
+internal fun MusicStageScreen(
+    isTv: Boolean,
+    wide: Boolean,
+    onBack: () -> Unit,
+    /** 手机：顶栏那颗心点开就是「收藏到歌单」，选默认歌单或任意自建歌单 */
+    onAddToPlaylist: ((MusicTrack) -> Unit)? = null,
+) {
     val context = LocalContext.current
     val track = MusicBox.current ?: return
     var queueOpen by remember { mutableStateOf(false) }
@@ -179,7 +186,14 @@ internal fun MusicStageScreen(isTv: Boolean, wide: Boolean, onBack: () -> Unit) 
             }
         } else {
             // 手机：整页交给竖向翻页（上下滑切歌），顶栏和传输条作为固定层压在上面
-            PhoneStage(wide, onBack, { fxOpen = true }, { queueOpen = true }, { sleepOpen = true })
+            PhoneStage(
+                wide = wide,
+                onBack = onBack,
+                onFx = { fxOpen = true },
+                onQueue = { queueOpen = true },
+                onSleep = { sleepOpen = true },
+                onAddToPlaylist = onAddToPlaylist?.let { cb -> { MusicBox.current?.let(cb) } },
+            )
         }
         if (queueOpen) StageQueueSheet(wide) { queueOpen = false }
         if (fxOpen) StageFxSheet { fxOpen = false }
@@ -233,6 +247,7 @@ private fun PhoneStage(
     onFx: () -> Unit,
     onQueue: () -> Unit,
     onSleep: () -> Unit = {},
+    onAddToPlaylist: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val track = MusicBox.current ?: return
@@ -247,7 +262,10 @@ private fun PhoneStage(
                 .navigationBarsPadding()
                 .padding(horizontal = 22.dp),
         ) {
-            VinylStage(true, track.title, track.artist, track.cover, onBack, onFx, onQueue, onSleep = onSleep)
+            VinylStage(
+                true, track.title, track.artist, track.cover, onBack, onFx, onQueue,
+                onSleep = onSleep, onAddToPlaylist = onAddToPlaylist,
+            )
             StageErrorLine()
         }
         return
@@ -321,7 +339,10 @@ private fun PhoneStage(
                 .navigationBarsPadding()
                 .padding(horizontal = 22.dp),
         ) {
-            StageHeader(isTv = false, onBack, onFx, "正在播放", onSleep = onSleep)
+            StageHeader(
+                isTv = false, onBack = onBack, onFx = onFx, title = "正在播放", onSleep = onSleep,
+                onAddToPlaylist = onAddToPlaylist,
+            )
             Spacer(Modifier.weight(1f))
             Column(
                 Modifier
@@ -431,6 +452,8 @@ private fun StageHeader(
     // 电视：页面还没拿到焦点时先不让这几个图标可聚焦，避免它们抢走遥控器的第一下
     trailingFocusable: Boolean = true,
     onSleep: () -> Unit = {},
+    /** 只有手机给：给了它，心形点下去是弹歌单清单，而不是直接收藏 */
+    onAddToPlaylist: (() -> Unit)? = null,
 ) {
     if (isTv) {
         TvPageHeader(
@@ -456,7 +479,9 @@ private fun StageHeader(
         // 中间不再放「● 正在播放」：它居中、图标靠右，屏幕一窄文字就压到收藏键上。
         // 播放状态本来就有唱片转动和传输条的暂停键两个信号，这行字是多余的。
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
-            FavBtn(40.dp)
+            // 心形就承担「收藏到歌单」：不再另放一个「＋」，
+            // 两颗键做同一件事只会让人猜哪个是收藏、哪个是加进歌单
+            FavBtn(40.dp, onClick = onAddToPlaylist)
             SleepBtn(40.dp, onSleep)
             FxBtn(40.dp, onFx)
             StopBtn(40.dp) { onBack(); MusicBox.stop() }
@@ -486,20 +511,33 @@ private fun SleepBtn(size: Dp, onClick: () -> Unit, focusable: Boolean = true) {
     }
 }
 
+/**
+ * 收藏这颗心。
+ *
+ * 语义跟着状态走，和曲目行那颗保持一致：
+ * - 没亮：点它是「收藏到歌单」，手机弹清单挑一个（TV/通知栏直接进默认歌单）
+ * - 亮着：点它就是「取消收藏」，不再弹「收藏」的清单让用户以为还要再选一次
+ *
+ * 手机的分流（只有一个归属就直接删、多处才弹层）在壳里做，按钮只负责把点击交出去。
+ */
 @Composable
-private fun FavBtn(size: Dp, focusable: Boolean = true) {
+private fun FavBtn(size: Dp, focusable: Boolean = true, onClick: (() -> Unit)? = null) {
     Box(
         Modifier
             .size(size)
             .focusProperties { canFocus = focusable }
             .clip(CircleShape)
             .tvFocusRing(CircleShape)
-            .clickable { MusicBox.toggleFav() },
+            .clickable { if (onClick != null) onClick() else MusicBox.toggleFav() },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             if (MusicBox.fav) TabIcons.HeartOn else TabIcons.Heart,
-            if (MusicBox.fav) "取消收藏" else "收藏",
+            when {
+                MusicBox.fav -> "取消收藏"
+                onClick != null -> "收藏到歌单"
+                else -> "收藏"
+            },
             tint = if (MusicBox.fav) ProomColor.accent else Color.White.copy(alpha = 0.78f),
             modifier = Modifier.size(21.dp),
         )
@@ -557,8 +595,12 @@ private fun ColumnScope.VinylStage(
     onQueue: () -> Unit,
     tv: Boolean = false,
     onSleep: () -> Unit = {},
+    onAddToPlaylist: (() -> Unit)? = null,
 ) {
-    StageHeader(isTv = false, onBack, onFx, "正在播放", onSleep = onSleep)
+    StageHeader(
+        isTv = false, onBack = onBack, onFx = onFx, title = "正在播放", onSleep = onSleep,
+        onAddToPlaylist = onAddToPlaylist,
+    )
 
     if (wide) {
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {

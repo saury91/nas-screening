@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.projectionroom.shared.catalog.Lrc
 import com.projectionroom.shared.catalog.LrcLine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -100,6 +101,16 @@ object MusicBox {
     private var ticker: Job? = null
     /** 连续失败计数：整张歌单都没音源时不能无限自动「下一首」 */
     private var failStreak = 0
+    /**
+     * 切歌代次。
+     *
+     * 取播放地址是一次几秒的网络往返（302 解跳转 + 探长度），用户连点几首时
+     * 前一次的 job 会被 cancel —— 但 cancel 掐不断已经发出去的阻塞请求，它返回后
+     * 仍会继续往下跑。每次 [loadCurrent] 领一个号，加载链路每一步都核对：
+     * 号不是最新的就直接作废，绝不能把「用户已经切走了」当成「这首没有音源」
+     * 去自动跳下一首 —— 那样连点几次就会串成一串乱跳。
+     */
+    private var loadSeq = 0
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     /** 没装 resolver 之前的最后一次请求，装上后补播 */
     private var pending: Triple<Context, List<MusicTrack>, Int>? = null
@@ -220,17 +231,27 @@ object MusicBox {
 
     private fun loadCurrent(ctx: Context, resolver: suspend (String) -> String) {
         val t = current ?: return
+        // 先领号再 cancel：被取消的那个 job 回来时一看号变了，就知道该闭嘴
+        val seq = ++loadSeq
         loadLyric(t)
         loadJob?.cancel()
         error = null
         loading = true
         playingId = t.id
-        fav = MusicLib.isFav(ctx, t.id, t.title, t.artist)
+        fav = savedSomewhere(ctx, t)
         // 开播就算一条播放记录（「我的 - 播放记录」里的音乐页签靠它）
         MusicLib.touch(ctx, t)
         val p = player(ctx)
+        // 旧歌在这里就掐掉。新地址要现取（302 解跳转再探长度，一两秒很常见），
+        // 这期间要是让旧歌继续响着，用户看到的是「点了没反应，还是原来那首」，
+        // 接着就会连点好几首。清干净之后屏上是「新歌名 + 正在加载」，符合预期。
+        if (p.mediaItemCount > 0) {
+            p.stop()
+            p.clearMediaItems()
+        }
         loadJob = scope.launch {
-            val url = runCatching { resolver(t.id) }.getOrDefault("")
+            val url = fetchOrNull { resolver(t.id) }.orEmpty()
+            if (seq != loadSeq) return@launch
             if (url.isBlank()) {
                 // 没有版权/下架：直接跳下一首（整个队列都没地址时兜底停下）
                 skipOrStop("「${t.title}」没有可用音源，已跳过")
@@ -239,7 +260,8 @@ object MusicBox {
             // 上游对无版权曲目只给 30 秒片段（约 480KB）：放下去就是「播一半突然断」，
             // 不如和「没有音源」同样处理 —— 跳下一首，把原因说清楚。
             // 判断本身失败时放行：宁可放过一首片段，也不要卡住整张歌单。
-            val full = runCatching { resolveFullTrack?.invoke(url) ?: true }.getOrDefault(true)
+            val full = fetchOrNull { resolveFullTrack?.invoke(url) ?: true } ?: true
+            if (seq != loadSeq) return@launch
             if (!full) {
                 skipOrStop("「${t.title}」只有试听片段，已跳过")
                 return@launch
@@ -259,6 +281,23 @@ object MusicBox {
     }
 
     /**
+     * 包住一次可能失败的网络取数：失败给 null，**但取消要原样抛出去**。
+     *
+     * 原写法是 `runCatching { ... }.getOrDefault("")`。协程被 cancel 时
+     * CancellationException 也会被 runCatching 吞掉，返回一个「正常的空值」，
+     * 于是「用户已经切走了」被下游当成「这首没有音源」，直接自动跳下一首。
+     * 连点几首歌，就会看到高亮和歌名自己一趟趟往下窜。
+     */
+    private suspend fun <T> fetchOrNull(block: suspend () -> T): T? =
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            null
+        }
+
+    /**
      * 拉歌词：异步、失败就算了。
      *
      * 这里必须核对「拿回来时还是不是这首」—— 用户连点两次下一首时，
@@ -270,7 +309,7 @@ object MusicBox {
         lyricJob?.cancel()
         val fetch = resolveLyric ?: return
         lyricJob = scope.launch {
-            val lines = runCatching { fetch(t.id) }.getOrNull().orEmpty()
+            val lines = fetchOrNull { fetch(t.id) }.orEmpty()
             if (current?.id == t.id) {
                 lyric = lines
                 // 歌词是异步到的：到货时按当前进度定位，别停在第一句
@@ -376,14 +415,53 @@ object MusicBox {
         exo?.repeatMode = if (repeat == RepeatMode.One) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
-    /** 收藏 / 取消收藏当前这首（全屏页和通知栏共用这一个入口） */
+    /**
+     * 这首歌是否已经有归属：在默认收藏歌单里，或在任意一个自建歌单里。
+     *
+     * 心形只有一颗，含义必须和曲目行里那颗一致 —— 那边点亮看的是「在任意歌单」，
+     * 这边要是只看默认歌单，同一首歌在列表里和播放页就会一金一白。
+     */
+    private fun savedSomewhere(ctx: Context, t: MusicTrack): Boolean {
+        if (MusicLib.isFav(ctx, t.id, t.title, t.artist)) return true
+        return MusicShelf.playlistsWith(ctx, t).isNotEmpty()
+    }
+
+    /**
+     * 收藏 / 取消收藏当前这首（电视端和通知栏走这里，没有歌单清单可选）。
+     *
+     * 亮着的时候再点就是取消，得真取消干净：只把「我喜欢的音乐」里那份删掉、
+     * 留着自建歌单里那份的话，心不会灭，用户看到的是一次「点了没反应」。
+     * 没亮的时候点才收进默认歌单。
+     */
     fun toggleFav() {
         val t = current ?: return
         val ctx = appContext ?: return
-        fav = MusicLib.toggle(ctx, t)
+        if (savedSomewhere(ctx, t)) {
+            MusicShelf.playlistsWith(ctx, t).forEach { MusicShelf.removeTrack(ctx, it.id, t) }
+            if (MusicLib.isFav(ctx, t.id, t.title, t.artist)) MusicLib.toggle(ctx, t)
+        } else {
+            MusicLib.toggle(ctx, t)
+        }
+        fav = savedSomewhere(ctx, t)
+    }
+
+    /**
+     * 重新读一遍当前这首的收藏状态。
+     *
+     * 收藏不一定从这个页面点：曲目行的心形、「收藏到歌单」弹层都能改，
+     * 改完不刷新的话播放页的心形还是旧状态。
+     */
+    fun resyncFav() {
+        val t = current ?: return
+        val ctx = appContext ?: return
+        fav = savedSomewhere(ctx, t)
     }
 
     fun stop() {
+        // 号一改，在途的那次取地址回来也无权再动播放器：否则关了播放条，
+        // 几百毫秒后它自己又把刚取到的音源推上去，「关掉又自己响」
+        loadSeq++
+        loadJob?.cancel()
         exo?.pause()
         exo?.clearMediaItems()
         playing = false
@@ -416,6 +494,7 @@ object MusicBox {
     fun shutdown() {
         ticker?.cancel()
         ticker = null
+        loadSeq++
         loadJob?.cancel()
         lyricJob?.cancel()
         exo?.let {

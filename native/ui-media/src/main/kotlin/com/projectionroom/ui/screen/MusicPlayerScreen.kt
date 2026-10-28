@@ -2,6 +2,7 @@ package com.projectionroom.ui.screen
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalConfiguration
+import com.projectionroom.ui.music.MusicTrack
 
 /**
  * 全屏音乐播放器。
@@ -18,8 +19,14 @@ fun MusicPlayerScreen(
     onBack: () -> Unit,
     /** 电视端：顶栏换成与其它页面同一套 TvPageHeader（返回提示 + 标题 + 右侧动作） */
     isTv: Boolean = false,
+    /**
+     * 手机端：顶栏那颗心点开就是歌单清单（和曲目行那颗心一致），
+     * 选默认歌单、自建歌单，或者当场新建一个。
+     * 电视不传 —— 遥控器上这一层弹层不好点，那边仍是点一下直接收藏。
+     */
+    onAddToPlaylist: ((MusicTrack) -> Unit)? = null,
 ) {
     // 手机横屏仍走黑胶版的左右结构，竖屏走上下结构
     val wide = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
-    MusicStageScreen(isTv = isTv, wide = wide, onBack = onBack)
+    MusicStageScreen(isTv = isTv, wide = wide, onBack = onBack, onAddToPlaylist = onAddToPlaylist)
 }
