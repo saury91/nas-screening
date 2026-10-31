@@ -274,6 +274,8 @@ DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 
 Entries marked "empty disables" are content entry points: leave them empty and no request is made to any third-party service.
 
+Any of the above can also go into a `.env` file at the repo root; `app.py` reads it on startup (existing environment variables win). `.env` is gitignored, which makes it the right place for your real endpoints and credentials.
+
 > This is a **LAN** setup: no password, no HTTPS. Never expose 8899 directly to the internet; use a reverse proxy with real authentication if you need remote access.
 
 ---
