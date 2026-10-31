@@ -610,7 +610,10 @@ def online_search(kw, limit=30):
     }
     sep = "&" if "?" in ONLINE_SEARCH_URL else "?"
     url = ONLINE_SEARCH_URL + sep + urlencode(q)
-    txt = http_get(url, timeout=12, extra={"User-Agent": _UPSTREAM_UA})
+    try:
+        txt = http_get(url, timeout=12, extra={"User-Agent": _UPSTREAM_UA})
+    except Exception:
+        return {"items": []}
     try:
         d = json.loads(txt)
     except Exception:
