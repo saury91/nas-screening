@@ -637,8 +637,9 @@ class MainActivity : ComponentActivity() {
                 // 接口公开、无签名，只有聚合域名校验 Referer；CDN 本身不校验，
                 // 所以取到 CDN 地址后播放器可以直接播，NAS 完全不参与。
                 // 聚合接口地址由配置包给出（NAS 改环境变量重发配置就换域名），
-                // 没下发才用内置默认 —— 所以没连过 NAS 的手机也有歌听。
-                val musicApi = remember(bundle?.music?.api, bundle?.music?.referer) {
+                // 仓库里不留默认地址 —— 没下发就整块关闭，一个请求都不发。
+                val musicApi = remember(bundle?.music?.api, bundle?.music?.referer,
+                                        bundle?.music?.lyricApi) {
                     val cfg = bundle?.music
                     com.projectionroom.shared.catalog.MusicApi(
                         http = sourceHttp,
@@ -646,6 +647,8 @@ class MainActivity : ComponentActivity() {
                             ?: com.projectionroom.shared.catalog.MusicApi.DEFAULT_BASE,
                         referer = cfg?.referer?.takeIf { it.isNotBlank() }
                             ?: com.projectionroom.shared.catalog.MusicApi.REFERER,
+                        lyricBase = cfg?.lyricApi.orEmpty(),
+                        lyricReferer = cfg?.lyricReferer.orEmpty(),
                     )
                 }
                 /**

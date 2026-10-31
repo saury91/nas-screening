@@ -567,11 +567,14 @@ data class ConfigBundle(
     val badPicHosts: List<String> = emptyList(),
 )
 
-/** 音乐聚合接口的地址与 Referer；api 为空表示「没下发，用内置默认」 */
+/** 音乐聚合接口的地址与 Referer；空表示「没下发」，整块不启用 */
 @Serializable
 data class MusicCfg(
     val api: String = "",
     val referer: String = "",
+    /** 歌词端点；同样空 = 不请求 */
+    val lyricApi: String = "",
+    val lyricReferer: String = "",
 )
 
 /**

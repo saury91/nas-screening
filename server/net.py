@@ -16,7 +16,7 @@ def idna(url):
 
     两件事：
     1. 中文域名转 punycode —— urllib 只认 ASCII 主机名。
-       TVBox 生态里大量用中文域名（http://www.例子.测试/tv），不转直接失败。
+       TVBox 生态里大量用中文域名（http://例子.测试/tv），不转直接失败。
     2. 路径/查询里的中文按 UTF-8 百分号编码 —— 采集站的播放地址经常是
        `/video/shaqiu/HD中字/index.m3u8` 这种，不转的话 urllib 组装请求行时
        会抛 UnicodeEncodeError，表现为「代理 502、播放器一直缓冲」。

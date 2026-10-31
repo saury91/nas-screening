@@ -17,7 +17,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from .cache import cache_peek
-from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, NO_AUTH, SLUG_CAT, STATIC)
+from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, LYRIC_API,
+                     LYRIC_REFERER, NO_AUTH, SLUG_CAT, STATIC)
 from .db import (dbrun, note_search, pref_json, source_get, sources_list,
                  toggle_fav, touch_history)
 from .log import log
@@ -494,7 +495,9 @@ class Handler(BaseHTTPRequestHandler):
                 "live": {"groups": live.live_groups(), "items": live.live_list()},
                 # 音乐聚合接口也随配置走：接口换域名/失效时改环境变量重发配置就行，
                 # 不必等一个 APK 版本。没配就是空串，App 端据此显示「未配置」。
-                "music": {"api": musicbox.api_base(), "referer": musicbox.referer()},
+                # lyricApi / lyricReferer 同理：歌词端点也由配置下发，App 里不留默认地址。
+                "music": {"api": musicbox.api_base(), "referer": musicbox.referer(),
+                          "lyricApi": LYRIC_API, "lyricReferer": LYRIC_REFERER},
             }
             ver = hashlib.sha1(
                 json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -751,7 +754,7 @@ class Handler(BaseHTTPRequestHandler):
                 lim = 30
             return _json(music.online_search(qs.get("kw") or "", limit=lim))
         if path == "/api/music/online/url":
-            # 播放时现取，不复用探测阶段的缓存：第三方音源地址带时效
+            # 播放时现取，不复用探测阶段的缓存：直连音源的地址带时效
             u = music.online_url(qs.get("id") or "", src=qs.get("src") or "", use_cache=False)
             if not u:
                 return _err("取不到播放地址，换一首试试", 404)

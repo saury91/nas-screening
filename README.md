@@ -262,8 +262,14 @@ DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 | `LIVE_SEEDS` | 空 | 直播候选源，逗号分隔，每日汇总用 |
 | `CMS_SEEDS` | 空 | 片源「资源目录」地址，逗号分隔，自动发现用 |
 | `MUSIC_ONLINE` | `0` | 为 `1` 时启用在线搜歌 |
+| `ONLINE_SEARCH_URL` | 空 | 在线搜歌接口，空即关闭；需与 `MUSIC_ONLINE=1` 同时满足 |
+| `ONLINE_PLAY_URL` | 空 | 播放地址转换接口，空即不返回在线播放地址 |
+| `ONLINE_COVER_BASE` | 空 | 在线封面图前缀，空则搜索结果不带封面 |
+| `ONLINE_REFERER` | 空 | 上述接口要求的 Referer |
 | `MUSICBOX_API` | 空 | 在线歌单 / 播放接口地址，空即关闭在线音乐 |
 | `MUSICBOX_REFERER` | 空 | 在线歌单接口要求的 Referer |
+| `LYRIC_API` | 空 | 歌词接口，随配置包下发给 App；空则显示「暂无歌词」 |
+| `LYRIC_REFERER` | 空 | 歌词接口要求的 Referer |
 | `MAGNET_SITE` | 空 | 磁力搜索站地址，空即关闭磁力搜索 |
 | `MUSIC_DIR` | 空 | 本地音乐目录，也可稍后在设置页填写 |
 | `QBT_URL` | `http://127.0.0.1:8080` | qBittorrent 地址 |

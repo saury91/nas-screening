@@ -66,6 +66,21 @@ MUSICBOX_SERVER = os.environ.get("MUSICBOX_SERVER", "netease")
 # 仓库不自带、也不默认启用任何在线内容服务，需要就自己开。
 MUSIC_ONLINE = os.environ.get("MUSIC_ONLINE", "0") == "1"
 
+# 在线音源的端点。**一律空值**：仓库里不写任何真实地址，
+# 谁要用谁在自己的 .env 里配，配齐才发请求，缺一项就当没开。
+# 搜索接口：在 URL 后面追加查询参数，所以这里不要带问号。
+ONLINE_SEARCH_URL = os.environ.get("ONLINE_SEARCH_URL", "")
+# 播放地址转换接口：同样追加查询参数
+ONLINE_PLAY_URL = os.environ.get("ONLINE_PLAY_URL", "")
+# 封面前缀：搜索结果里的图片路径拼在它后面
+ONLINE_COVER_BASE = os.environ.get("ONLINE_COVER_BASE", "").rstrip("/")
+# 上游要求的 Referer，缺了会被拒
+ONLINE_REFERER = os.environ.get("ONLINE_REFERER", "")
+
+# 在线歌词（App 直连，随配置包下发）。同样默认空 = 不请求。
+LYRIC_API = os.environ.get("LYRIC_API", "")
+LYRIC_REFERER = os.environ.get("LYRIC_REFERER", "")
+
 # ── BT 磁力搜索 ───────────────────────────────────────────────
 # 站点地址由使用者自己填（MAGNET_SITE=https://...）。默认空 = 关闭，
 # 仓库不指定、也不预置任何 BT 资源站。

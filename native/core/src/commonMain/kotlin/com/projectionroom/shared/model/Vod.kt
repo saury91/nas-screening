@@ -82,7 +82,7 @@ object Quality {
 
     /**
      * 从备注 / 播放地址 / 站名里认画质，认不出返回空串。
-     * 只看 URL 的 path，别拿整条地址匹配 —— `sd.example` 会被误判成 480P。
+     * 只看 URL 的 path，别拿整条地址匹配 —— 域名里带 `sd` 的会被误判成 480P。
      */
     fun from(vararg texts: String): String {
         val blob = texts.filter { it.isNotBlank() }

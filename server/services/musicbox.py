@@ -204,7 +204,7 @@ def playlist(pid, limit=None):
 
 
 def search(kw, limit=8):
-    """按关键词搜歌（给「第三方音源曲目反查歌词」用）。"""
+    """按关键词搜歌（给「直连音源曲目反查歌词」用）。"""
     if not configured():
         return []
     d = _json("/%s/search/song/?keywords=%s&pn=1&limit=%d"

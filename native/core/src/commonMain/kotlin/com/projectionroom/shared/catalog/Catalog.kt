@@ -36,8 +36,8 @@ class Catalog(
     /**
      * 连不上的封面图床（NAS 探测后随配置包下发）。
      *
-     * 片库/搜索是 App 直连采集站拉的，同一部片在不同源上封面域名不同
-     * （暴风 pic-a.example.invalid、量子 pic-b.example.invalid……）。某个图床整体连不上时，
+     * 片库/搜索是 App 直连采集站拉的，同一部片在不同源上封面域名不同。
+     * 某个图床整体连不上时，
      * 合并多源数据时避开它，就不至于整页海报都是空白。
      */
     badPicHosts: List<String> = emptyList(),
