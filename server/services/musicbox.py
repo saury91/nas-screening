@@ -204,7 +204,7 @@ def playlist(pid, limit=None):
 
 
 def search(kw, limit=8):
-    """按关键词搜歌（给「酷我曲目反查歌词」用）。"""
+    """按关键词搜歌（给「直连音源曲目反查歌词」用）。"""
     if not configured():
         return []
     d = _json("/%s/search/song/?keywords=%s&pn=1&limit=%d"
@@ -219,7 +219,7 @@ def search(kw, limit=8):
 
 
 def stream_target(sid):
-    """返回上游播放地址（302 到网易云 CDN），由 api 层带 Referer 转发。"""
+    """返回上游播放地址（302 到上游 CDN），由 api 层带 Referer 转发。"""
     sid = str(sid or "").strip()
     base = api_base()
     if not sid.isdigit() or not base:

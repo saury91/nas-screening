@@ -16,7 +16,8 @@ import threading
 import time
 from urllib.parse import quote, urlencode
 
-from ..config import MUSIC_ONLINE
+from ..config import (MUSIC_ONLINE, ONLINE_COVER_BASE, ONLINE_PLAY_URL,
+                      ONLINE_REFERER, ONLINE_SEARCH_URL)
 from ..db import pref_json, pref_set_json
 from ..log import log
 import urllib.request
@@ -575,19 +576,26 @@ def status():
     return {"provider": "", "configured": False, "ok": False, "msg": "未启用音乐库"}
 
 
-# ═══════════════════════ 在线音源（酷我）═══════════════════════
-# 公开接口、无需签名：搜索走 search.kuwo.cn，播放地址走 antiserver 转换。
-# 只是「把第三方的公开接口接进来」，不下载、不缓存音频文件。
-_KUWO_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+# ═══════════════════════ 在线音源（第三方公开接口）═══════════════════════
+# 端点全部来自环境变量（见 config.py）：仓库里不写任何平台名和地址，
+# 没配就是关闭状态。这里只负责「把地址拼起来、把返回解析成统一结构」，
+# 不下载、不缓存、不转存任何音频文件。
+_UPSTREAM_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+
+def online_enabled():
+    """联网搜歌是否可用：总开关 + 端点都配齐才算开着。"""
+    return bool(MUSIC_ONLINE and ONLINE_SEARCH_URL)
 
 
 def online_search(kw, limit=30):
-    """在线搜歌，返回统一 track 结构（provider=kuwo）。
+    """在线搜歌，返回统一 track 结构。
 
-    只在 MUSIC_ONLINE=1 时启用：仓库不自带、也不默认启用任何在线音源。
+    只在同时配了 MUSIC_ONLINE=1 与 ONLINE_SEARCH_URL 时启用：
+    仓库不自带、也不默认启用任何在线音源。
     """
-    if not MUSIC_ONLINE:
+    if not online_enabled():
         return {"items": [], "disabled": True}
     kw = (kw or "").strip()
     if not kw:
@@ -600,8 +608,12 @@ def online_search(kw, limit=30):
         "vipver": "MUSIC_9.2.0.0_W6", "devid": "11404450", "newver": "1",
         "issubtitle": "1", "pcjson": "1",
     }
-    url = "http://search.kuwo.cn/r.s?" + urlencode(q)
-    txt = http_get(url, timeout=12, extra={"User-Agent": _KUWO_UA})
+    sep = "&" if "?" in ONLINE_SEARCH_URL else "?"
+    url = ONLINE_SEARCH_URL + sep + urlencode(q)
+    try:
+        txt = http_get(url, timeout=12, extra={"User-Agent": _UPSTREAM_UA})
+    except Exception:
+        return {"items": []}
     try:
         d = json.loads(txt)
     except Exception:
@@ -612,7 +624,7 @@ def online_search(kw, limit=30):
         if not rid:
             continue
         pic = (s.get("web_albumpic_short") or "").strip()
-        cover = ("https://img4.kuwo.cn/star/albumcover/" + pic.replace("120", "300", 1)) if pic else ""
+        cover = (ONLINE_COVER_BASE + "/" + pic.replace("120", "300", 1)) if (pic and ONLINE_COVER_BASE) else ""
         out.append({
             "id": rid,
             "title": (s.get("SONGNAME") or s.get("NAME") or "").strip(),
@@ -620,7 +632,7 @@ def online_search(kw, limit=30):
             "album": (s.get("ALBUM") or "").strip(),
             "duration": int(s.get("DURATION") or 0),
             "cover": cover,
-            "provider": "kuwo",
+            "provider": "online",
         })
         if len(out) >= limit:
             break
@@ -629,15 +641,15 @@ def online_search(kw, limit=30):
 
 _URL_CACHE = {}
 _URL_TTL = 600
-# 酷我对无版权/需会员的曲目会返回一段固定大小的试听片段（实测 181521B ≈ 11s）
+# 无版权/需会员的曲目会返回一段固定大小的试听片段（实测 181521B ≈ 11s）
 _PREVIEW_BYTES = 181521
 
 
 def online_url(rid, src="", use_cache=True):
     """把歌曲 ID 换成可播放地址。
 
-    netease 的曲目不直连 CDN（上游要求 Referer），一律走本机同源代理；
-    酷我走原来的 antiserver 转换，地址有时效，播放前现取。
+    聚合接口（musicbox）的曲目不直连 CDN（上游要求 Referer），一律走本机同源代理；
+    直连音源走 ONLINE_PLAY_URL 转换，地址有时效，播放前现取。
     """
     import time as _t
     rid = str(rid or "").strip()
@@ -645,7 +657,7 @@ def online_url(rid, src="", use_cache=True):
         return ""
     if str(src or "").strip() in ("netease", "musicbox"):
         return "/api/music/online/stream?id=" + rid
-    if not MUSIC_ONLINE:
+    if not (MUSIC_ONLINE and ONLINE_PLAY_URL):
         return ""
     if use_cache:
         hit = _URL_CACHE.get(rid)
@@ -653,9 +665,11 @@ def online_url(rid, src="", use_cache=True):
             return hit[1]
     q = {"type": "convert_url", "format": "mp3", "response": "url", "rid": "MUSIC_" + rid}
     try:
-        txt = http_get("http://antiserver.kuwo.cn/anti.s?" + urlencode(q),
-                       timeout=10, extra={"User-Agent": _KUWO_UA,
-                                          "Referer": "https://www.kuwo.cn"})
+        sep = "&" if "?" in ONLINE_PLAY_URL else "?"
+        extra = {"User-Agent": _UPSTREAM_UA}
+        if ONLINE_REFERER:
+            extra["Referer"] = ONLINE_REFERER
+        txt = http_get(ONLINE_PLAY_URL + sep + urlencode(q), timeout=10, extra=extra)
     except Exception:
         return ""
     txt = (txt or "").strip()
@@ -669,7 +683,7 @@ def online_url(rid, src="", use_cache=True):
 
 def _content_length(url, timeout=6):
     try:
-        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _KUWO_UA})
+        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _UPSTREAM_UA})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return int(r.headers.get("Content-Length") or 0)
     except Exception:
@@ -694,9 +708,9 @@ def _is_full_track(track):
 
 
 # 在线推荐（兜底方案）：用几个代表性关键词去搜，做成「按类型」的货架。
-# 酷我没有开放的「分类歌单」接口，但搜索接口是公开的，用它拼出分类最稳。
+# 上游没有开放的「分类歌单」接口，但搜索接口够用，用它拼出分类最稳。
 # 关键词是实测选的：这些词搜出来的结果里「能完整播」的比例最高。
-# 用明星名搜（周杰伦/陈奕迅）反而全是会员试听，做推荐位没意义。
+# 用明星名搜反而全是会员试听，做推荐位没意义。
 _ONLINE_CATS = [
     ("民谣", "民谣"), ("摇滚", "摇滚"), ("电子", "电子"), ("轻音乐", "轻音乐"),
     ("钢琴", "钢琴"), ("影视原声", "原声带"), ("怀旧金曲", "怀旧"), ("抖音热歌", "抖音热歌"),
@@ -706,7 +720,7 @@ _ONLINE_HOME = {"at": 0, "data": None}
 # 歌单推荐优先挑这些品类的歌单：独立音乐 / 纯音乐占比高，几乎都能整曲播放
 _PREFER_WORDS = ("轻音乐", "纯音乐", "钢琴", "氛围", "安静", "民谣", "爵士", "lo-fi",
                  "Lo-fi", "学习", "工作", "治愈", "放松", "Chill", "夜")
-# 网易云歌单标题鱼龙混杂，这类标题不适合出现在自家客厅的放映室里
+# 上游歌单标题鱼龙混杂，这类标题不适合出现在自家客厅的放映室里
 _BLOCK_WORDS = ("微醺", "床上", "约", "裸", "18禁", "情色", "色气", "擦边")
 
 
@@ -721,7 +735,7 @@ def _shelf_from_playlist(pl, tracks, need):
         return None
     return {
         "name": pl.get("name") or "",
-        "sub": "网易云歌单 · %d 首" % (pl.get("count") or len(tracks)),
+        "sub": "在线歌单 · %d 首" % (pl.get("count") or len(tracks)),
         "cover": pl.get("cover") or "",
         "items": tracks[:need],
     }
@@ -892,7 +906,7 @@ def _norm_title(s):
 
 
 def _lyrics_from_cover(title, artist):
-    """酷我那边歌词接口已经要签名了，改成按「歌名 + 歌手」去歌单源反查。
+    """直连音源那边歌词接口已经要签名了，改成按「歌名 + 歌手」去歌单源反查。
 
     只接受高置信匹配（歌名归一相等），否则宁可显示「暂无歌词」，
     也不想给人看一首歌配着另一首歌的词。
@@ -922,7 +936,7 @@ def _lyrics_from_cover(title, artist):
         return []
     try:
         txt = http_get(musicbox.lrc_url(best["id"]), timeout=12,
-                       extra={"Referer": musicbox.referer(), "User-Agent": _KUWO_UA})
+                       extra={"Referer": musicbox.referer(), "User-Agent": _UPSTREAM_UA})
         return parse_lrc(txt)
     except Exception:
         return []
@@ -944,9 +958,9 @@ def lyrics(tid, src="", title="", artist=""):
         if src in ("netease", "musicbox"):
             from . import musicbox
             txt = http_get(musicbox.lrc_url(tid), timeout=12,
-                           extra={"Referer": musicbox.referer(), "User-Agent": _KUWO_UA})
+                           extra={"Referer": musicbox.referer(), "User-Agent": _UPSTREAM_UA})
             lines = parse_lrc(txt)
-        elif src == "kuwo":
+        elif src == "online":
             lines = _lyrics_from_cover(title, artist)
     except Exception:
         lines = []

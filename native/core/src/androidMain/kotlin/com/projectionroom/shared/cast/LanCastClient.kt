@@ -48,7 +48,7 @@ class LanCastClient {
         val payload = LanCast.DISCOVER.toByteArray()
         // 255.255.255.255 会被不少家用路由/AP 直接丢掉（尤其访客网络和开了
         // 「隔离」的 5G 频段），只发全网广播就会出现「手填地址能连、搜不到设备」。
-        // 补发各网卡的子网广播（192.168.1.255 这种）能救回一大半这类环境。
+        // 补发各网卡的子网广播（192.0.2.255 这种）能救回一大半这类环境。
         val targets = broadcastTargets()
         DatagramSocket().use { sock ->
             runCatching { sock.broadcast = true }

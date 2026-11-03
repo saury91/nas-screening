@@ -83,7 +83,7 @@ import com.projectionroom.ui.component.RemoteImage
  */
 @Composable
 fun MusicScreen(
-    /** 分类树来源（现在是 App 直连网易云聚合接口，不走 NAS） */
+    /** 分类树来源（现在是 App 直连上游聚合接口，不走 NAS） */
     /** 分类，流式：先磁盘缓存，再源站 */
     loadCats: () -> Flow<List<NasApi.MusicCatGroup>>,
     /** 某个分类下的歌单；传空串表示「推荐」 */

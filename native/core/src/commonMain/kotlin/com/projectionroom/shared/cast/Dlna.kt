@@ -12,7 +12,7 @@ package com.projectionroom.shared.cast
  * UDP 组播和 HTTP 都得用平台 API，放在 commonMain 反而写不出可测的代码。
  */
 data class CastDevice(
-    /** 设备描述 XML 的地址，形如 http://192.168.1.8:49152/description.xml */
+    /** 设备描述 XML 的地址，形如 http://192.0.2.8:49152/description.xml */
     val location: String,
     val name: String,
     val model: String = "",

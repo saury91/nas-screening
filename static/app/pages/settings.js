@@ -651,9 +651,9 @@ async function musicPanel(panel) {
 
     <div class="card-block" id="m-sub" ${provider === 'subsonic' ? '' : 'hidden'}>
       <h4>Subsonic 服务</h4>
-      <p class="hint">地址填到根路径，例如 http://192.168.1.10:4533。密码保存在本机 SQLite 里，只在局域网使用。</p>
+      <p class="hint">地址填到根路径，例如 http://192.0.2.10:4533。密码保存在本机 SQLite 里，只在局域网使用。</p>
       <div class="field"><label>服务器地址</label>
-        <input class="input" id="m-url" placeholder="http://192.168.1.10:4533" value="${esc(sub.url || '')}"></div>
+        <input class="input" id="m-url" placeholder="http://192.0.2.10:4533" value="${esc(sub.url || '')}"></div>
       <div class="setting-2col">
         <div class="field"><label>用户名</label>
           <input class="input" id="m-user" value="${esc(sub.user || '')}"></div>

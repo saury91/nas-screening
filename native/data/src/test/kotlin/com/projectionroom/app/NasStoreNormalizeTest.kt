@@ -14,12 +14,12 @@ class NasStoreNormalizeTest {
 
     @Test
     fun `裸地址补协议与默认端口`() {
-        assertEquals("http://192.168.1.10:8899", NasStore.normalize("192.168.1.10"))
+        assertEquals("http://192.0.2.10:8899", NasStore.normalize("192.0.2.10"))
     }
 
     @Test
     fun `带端口的保持原样`() {
-        assertEquals("http://192.168.1.10:9000", NasStore.normalize("192.168.1.10:9000"))
+        assertEquals("http://192.0.2.10:9000", NasStore.normalize("192.0.2.10:9000"))
     }
 
     @Test

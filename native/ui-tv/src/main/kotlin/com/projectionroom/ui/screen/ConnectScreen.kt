@@ -119,7 +119,7 @@ fun ConnectScreen(
                             .padding(horizontal = ProomSpace.md, vertical = 12.dp),
                     ) {
                         Text(
-                            text.ifEmpty { "192.168.1.10:8899" },
+                            text.ifEmpty { "192.0.2.10:8899" },
                             style = ProomType.body,
                             color = if (text.isEmpty()) ProomColor.muted else ProomColor.text,
                         )

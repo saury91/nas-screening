@@ -460,7 +460,7 @@ class MainActivity : ComponentActivity() {
                         onConnect = { raw ->
                             val url = NasStore.normalize(raw)
                             if (url == null) {
-                                findErr = "地址格式不对，示例：192.168.1.10:8899"
+                                findErr = "地址格式不对，示例：192.0.2.10:8899"
                             } else {
                                 NasStore.save(this@MainActivity, url)
                                 NasStore.setSkipped(this@MainActivity, false)
@@ -545,7 +545,7 @@ class MainActivity : ComponentActivity() {
                 val sourceHttp = remember { OkHttpHttp(timeoutSeconds = 12) }
 
                 // 歌单详情单独一条连接、超时给 30 秒。
-                // 它是最慢的接口：上游缓存没命中时现去网易云逐首解析，
+                // 它是最慢的接口：上游缓存没命中时现去上游逐首解析，
                 // 千首大歌单实测 8~12 秒，压在 12 秒线上就会「刚好被自己掐断」。
                 // 页面这边有 4.5 秒的「接口有点慢」提示 + 重试/返回，不会被拖到没法退出。
                 val musicDetailHttp = remember { OkHttpHttp(timeoutSeconds = 30) }
@@ -640,12 +640,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                // ── 音乐（网易云聚合接口，App 直连）──
+                // ── 音乐（上游聚合接口，App 直连）──
                 // 接口公开、无签名，只有聚合域名校验 Referer；CDN 本身不校验，
                 // 所以取到 CDN 地址后播放器可以直接播，NAS 完全不参与。
                 // 聚合接口地址由配置包给出（NAS 改环境变量重发配置就换域名），
-                // 没下发才用内置默认 —— 所以没连过 NAS 的手机也有歌听。
-                val musicApi = remember(bundle?.music?.api, bundle?.music?.referer) {
+                // 仓库里不留默认地址 —— 没下发就整块关闭，一个请求都不发。
+                val musicApi = remember(bundle?.music?.api, bundle?.music?.referer,
+                                        bundle?.music?.lyricApi) {
                     val cfg = bundle?.music
                     com.projectionroom.shared.catalog.MusicApi(
                         http = sourceHttp,
@@ -653,6 +654,8 @@ class MainActivity : ComponentActivity() {
                             ?: com.projectionroom.shared.catalog.MusicApi.DEFAULT_BASE,
                         referer = cfg?.referer?.takeIf { it.isNotBlank() }
                             ?: com.projectionroom.shared.catalog.MusicApi.REFERER,
+                        lyricBase = cfg?.lyricApi.orEmpty(),
+                        lyricReferer = cfg?.lyricReferer.orEmpty(),
                         detailHttp = musicDetailHttp,
                     )
                 }
@@ -1525,7 +1528,7 @@ class MainActivity : ComponentActivity() {
                                 onConnect = { raw ->
                                     val url = NasStore.normalize(raw)
                                     if (url == null) {
-                                        connHint = "地址格式不对，示例：192.168.1.10:8899"
+                                        connHint = "地址格式不对，示例：192.0.2.10:8899"
                                     } else {
                                         NasStore.save(this@MainActivity, url)
                                         baseUrl = url
@@ -1923,7 +1926,7 @@ class MainActivity : ComponentActivity() {
                                 onManualCast = { addr ->
                                     val base = com.projectionroom.shared.cast.LanCast.normalizeBase(addr)
                                     if (base == null) {
-                                        AppRoute.settingsMessage = "地址格式不对，示例：192.168.1.20:49521"
+                                        AppRoute.settingsMessage = "地址格式不对，示例：192.0.2.20:49521"
                                         screen = castPlay ?: s.from
                                     } else {
                                         connectLan(com.projectionroom.shared.cast.CastCode(base))
@@ -1934,7 +1937,7 @@ class MainActivity : ComponentActivity() {
                                 val p = addr.substringAfter(':', "").trim().toIntOrNull()
                                     ?: Pair.PORT
                                 if (host.isBlank()) {
-                                    AppRoute.settingsMessage = "地址格式不对，示例：192.168.1.20:8898"
+                                    AppRoute.settingsMessage = "地址格式不对，示例：192.0.2.20:8898"
                                     screen = Screen.Settings(from = s.from)
                                 } else {
                                     scopeTop.launch {

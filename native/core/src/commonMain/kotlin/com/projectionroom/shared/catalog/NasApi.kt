@@ -551,7 +551,7 @@ data class ConfigBundle(
     val sources: List<Source> = emptyList(),
     val live: NasApi.LiveFeed = NasApi.LiveFeed(),
     /**
-     * 音乐聚合接口（网易云转发）。
+     * 音乐聚合接口（上游转发）。
      *
      * 以前这是写死在 APK 里的一行常量：接口换域名、被封，只能等下一个版本。
      * 现在跟着配置包走 —— NAS 改环境变量 `MUSICBOX_API` 重发配置即生效。
@@ -567,11 +567,14 @@ data class ConfigBundle(
     val badPicHosts: List<String> = emptyList(),
 )
 
-/** 音乐聚合接口的地址与 Referer；api 为空表示「没下发，用内置默认」 */
+/** 音乐聚合接口的地址与 Referer；空表示「没下发」，整块不启用 */
 @Serializable
 data class MusicCfg(
     val api: String = "",
     val referer: String = "",
+    /** 歌词端点；同样空 = 不请求 */
+    val lyricApi: String = "",
+    val lyricReferer: String = "",
 )
 
 /**

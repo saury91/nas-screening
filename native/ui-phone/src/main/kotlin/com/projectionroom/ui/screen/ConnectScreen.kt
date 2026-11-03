@@ -141,7 +141,7 @@ fun ConnectScreen(
                             decorationBox = { inner ->
                                 Box {
                                     if (text.isEmpty()) {
-                                        Text("192.168.1.10:8899", style = ProomType.body, color = ProomColor.muted)
+                                        Text("192.0.2.10:8899", style = ProomType.body, color = ProomColor.muted)
                                     }
                                     inner()
                                 }

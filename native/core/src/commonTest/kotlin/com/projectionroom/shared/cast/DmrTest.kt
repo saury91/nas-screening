@@ -20,9 +20,9 @@ class DmrTest {
 
     @Test
     fun `SSDP 应答带 LOCATION 与 USN`() {
-        val r = Dmr.ssdpResponse("http://192.168.1.5:49520/description.xml", "uuid:abc")
+        val r = Dmr.ssdpResponse("http://192.0.2.5:49520/description.xml", "uuid:abc")
         assertTrue(r.startsWith("HTTP/1.1 200 OK"))
-        assertTrue(r.contains("LOCATION: http://192.168.1.5:49520/description.xml"))
+        assertTrue(r.contains("LOCATION: http://192.0.2.5:49520/description.xml"))
         assertTrue(r.contains("USN: uuid:abc::urn:schemas-upnp-org:device:MediaRenderer:1"))
         assertTrue(r.endsWith("\r\n\r\n"))
     }

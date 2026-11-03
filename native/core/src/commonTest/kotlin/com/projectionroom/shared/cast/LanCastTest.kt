@@ -105,32 +105,32 @@ class LanCastTest {
 
     @Test
     fun `手填地址的三种写法`() {
-        assertEquals("http://192.168.1.8:49521", LanCast.normalizeBase("192.168.1.8"))
-        assertEquals("http://192.168.1.8:14953", LanCast.normalizeBase("192.168.1.8:14953"))
-        assertEquals("http://192.168.1.8:49521", LanCast.normalizeBase("proom://192.168.1.8/"))
-        assertEquals("http://192.168.1.8:49521", LanCast.normalizeBase(" http://192.168.1.8:49521/proom/info "))
+        assertEquals("http://192.0.2.8:49521", LanCast.normalizeBase("192.0.2.8"))
+        assertEquals("http://192.0.2.8:14953", LanCast.normalizeBase("192.0.2.8:14953"))
+        assertEquals("http://192.0.2.8:49521", LanCast.normalizeBase("proom://192.0.2.8/"))
+        assertEquals("http://192.0.2.8:49521", LanCast.normalizeBase(" http://192.0.2.8:49521/proom/info "))
         // 端口写错就是写错，不能猜一个默认端口去连别的东西
-        assertNull(LanCast.normalizeBase("192.168.1.8:abc"))
-        assertNull(LanCast.normalizeBase("192.168.1.8:70000"))
+        assertNull(LanCast.normalizeBase("192.0.2.8:abc"))
+        assertNull(LanCast.normalizeBase("192.0.2.8:70000"))
         assertNull(LanCast.normalizeBase(""))
     }
 
     @Test
     fun `扫码投屏：配对码也能当投屏码用`() {
         // 电视「显示配对二维码」那张：port 是配对服务 8898，不是控制口
-        val c1 = assertNotNull(LanCast.codeOf("proom://pair?host=192.168.1.8&port=8898&token=1234"))
-        assertEquals("http://192.168.1.8:${LanCast.PORT}", c1.base)
+        val c1 = assertNotNull(LanCast.codeOf("proom://pair?host=192.0.2.8&port=8898&token=1234"))
+        assertEquals("http://192.0.2.8:${LanCast.PORT}", c1.base)
     }
 
     @Test
     fun `扫码投屏：专用投屏码带名字和端口`() {
-        val c = assertNotNull(LanCast.codeOf("proom://cast?host=192.168.1.9&port=14953&name=客厅电视"))
-        assertEquals("http://192.168.1.9:14953", c.base)
+        val c = assertNotNull(LanCast.codeOf("proom://cast?host=192.0.2.9&port=14953&name=客厅电视"))
+        assertEquals("http://192.0.2.9:14953", c.base)
         assertEquals("客厅电视", c.name)
         // 端口写坏就回落默认口，不要拿一个非法端口去连
         assertEquals(
-            "http://192.168.1.9:${LanCast.PORT}",
-            assertNotNull(LanCast.codeOf("proom://cast?host=192.168.1.9&port=0")).base,
+            "http://192.0.2.9:${LanCast.PORT}",
+            assertNotNull(LanCast.codeOf("proom://cast?host=192.0.2.9&port=0")).base,
         )
     }
 
@@ -138,8 +138,8 @@ class LanCastTest {
     fun `扫码投屏：别的二维码不认`() {
         // 纯地址码也认，用户可能用别的工具生成了一张地址码
         assertEquals(
-            "http://192.168.1.8:${LanCast.PORT}",
-            assertNotNull(LanCast.codeOf("192.168.1.8")).base,
+            "http://192.0.2.8:${LanCast.PORT}",
+            assertNotNull(LanCast.codeOf("192.0.2.8")).base,
         )
         assertNull(LanCast.codeOf("https://example.com/abc"))
         // 没有 host 的 proom 码是坏码，不能猜

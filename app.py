@@ -10,6 +10,12 @@ import time
 
 from http.server import ThreadingHTTPServer
 
+# 先读本地 .env，再导入其它模块：配置是导入时求值的，
+# 顺序反了 .env 就不生效。测试不走这个入口，所以不会被本地配置污染。
+from server.env import load as _load_env
+
+_load_env()
+
 from server.api import Handler
 from server.cache import cache_load
 from server.config import (LIVE_AUTO, MUSIC_DIR, PORT, HOST, DB_PATH)

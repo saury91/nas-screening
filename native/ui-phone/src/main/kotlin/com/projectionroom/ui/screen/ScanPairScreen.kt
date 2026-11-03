@@ -385,7 +385,7 @@ private fun ManualDialog(
                 color = ProomColor.muted,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             )
-            Field(if (castMode) "192.168.1.20:49521" else "192.168.1.20:8898", addr) { addr = it }
+            Field(if (castMode) "192.0.2.20:49521" else "192.0.2.20:8898", addr) { addr = it }
             if (!castMode) {
                 Spacer(Modifier.height(10.dp))
                 Field("配对码 4 位数字", code) {

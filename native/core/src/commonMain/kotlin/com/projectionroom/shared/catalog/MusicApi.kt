@@ -7,30 +7,34 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * 在线歌单（网易云）—— App 自己直连，不经过 NAS。
+ * 在线歌单 —— App 自己直连，不经过 NAS。
  *
- * 用的是公开的聚合接口（Meting 风格），**不需要登录、没有签名**：
+ * 用的是第三方公开的聚合接口（Meting 风格），**不需要登录、没有签名**：
  *   GET  /netease/playlist/recommend?limit=N      推荐歌单
  *   GET  /getPlaylistCategory                     分类树
  *   GET  /netease/playlist/category?type=&limit=  分类歌单
  *   GET  /meting/?type=playlist&id=              歌单详情（含曲目 id）
  *   GET  /meting/?type=url&id=                   播放地址（302 到 CDN）
  *
- * 只有聚合接口校验 Referer，网易云 CDN 本身不校验 ——
+ * 只有聚合接口校验 Referer，上游 CDN 本身不校验 ——
  * 所以播放地址可以「现取现给」，播放器直连 CDN，NAS 完全不参与。
  *
- * [base] / [referer] 由配置包（`bundle.music`）给出，缺省才用内置地址：
+ * [base] / [referer] / [lyricBase] 全部由配置包（`bundle.music`）给出。
+ * **仓库里不留任何默认地址**：没下发就是关闭状态，一个请求都不发。
  * 接口域名换人、被封、挂掉的时候，改 NAS 的环境变量重发一次配置就能修，
- * 不用等下一个 APK 版本；NAS 不在（没有配置包）时仍有内置默认可用。
+ * 不用等下一个 APK 版本。
  */
 class MusicApi(
     private val http: Http,
     private val base: String = DEFAULT_BASE,
     private val referer: String = REFERER,
+    /** 歌词端点，同理由配置包下发；空 = 不请求，界面显示「暂无歌词」 */
+    private val lyricBase: String = "",
+    private val lyricReferer: String = "",
     /**
      * 歌单详情用单独一条连接、单独的超时。
      *
-     * 详情是最慢的一个接口：中转站缓存没命中时要现去网易云逐首解析，
+     * 详情是最慢的一个接口：中转站缓存没命中时要现去上游逐首解析，
      * 实测同一台机器上 0.3~6 秒，千首大歌单 8~12 秒 —— 卡在别的接口
      * 共用的 12 秒超时上，表现就是「转了半天最后说取不到」。
      */
@@ -90,7 +94,7 @@ class MusicApi(
      *
      * 参数名必须是 `keywords`：换成 `keyword` 或随手加个 `limit`，上游都不报错，
      * 直接回 `{}` —— 看着跟「没搜到」一模一样，很容易当成接口没数据。
-     * 返回是 meting 的 song 结构，id 就是网易云 songId，播放和歌单里的曲目同一条路。
+     * 返回是 meting 的 song 结构，id 就是上游 songId，播放和歌单里的曲目同一条路。
      */
     suspend fun search(keyword: String, limit: Int = 40): List<NasApi.Track> {
         val kw = keyword.trim()
@@ -140,7 +144,7 @@ class MusicApi(
     /**
      * 播放地址。
      *
-     * 接口 302 到网易云 CDN，这里把跳转**解开**再交给播放器：
+     * 接口 302 到上游 CDN，这里把跳转**解开**再交给播放器：
      * 地址有时效（十几分钟），必须点击时现取；解开后还能避免播放器跟 302 时丢请求头。
      */
     suspend fun trackUrl(sid: String): String {
@@ -153,13 +157,13 @@ class MusicApi(
      * 歌词。
      *
      * 聚合接口的 `type=lyric` 实测 20 秒都不返回（上游被限），
-     * 所以直接打网易云自己的公开接口 —— 它只认 Referer，不要登录态。
-     * 拿不到就返回空，界面上显「暂无歌词」，不影响播放。
+     * 所以歌词走单独一条端点，地址由配置包（`bundle.music.lyricApi`）下发。
+     * **App 里不留默认地址**：没下发就不请求，界面上显「暂无歌词」。
      */
     suspend fun lyric(sid: String): List<LrcLine> {
-        if (sid.isBlank() || !ready) return emptyList()
+        if (sid.isBlank() || !ready || lyricBase.isBlank()) return emptyList()
         val txt = runCatching {
-            http.get("$LYRIC_BASE?id=${sid.encodeQuery()}&lv=1&kv=1&tv=-1", REFERER_NETEASE)
+            http.get("$lyricBase?id=${sid.encodeQuery()}&lv=1&kv=1&tv=-1", lyricReferer)
         }.getOrNull() ?: return emptyList()
         val d = parse { runCatching { json.decodeFromString<LrcRaw>(txt) }.getOrNull() } ?: return emptyList()
         return Lrc.parse(d.lrc?.lyric.orEmpty())
@@ -245,11 +249,5 @@ class MusicApi(
 
         /** 整曲最短 1.2MB；试听片段固定 30 秒、约 480KB */
         const val FULL_MIN = 1200L * 1024L
-
-        /** 网易云官方歌词接口（聚合接口的 lyric 太慢） */
-        private const val LYRIC_BASE = "https://music.163.com/api/song/lyric"
-
-        /** 官方接口校验 Referer，缺了会返回 403 或空 */
-        private const val REFERER_NETEASE = "https://music.163.com/"
     }
 }

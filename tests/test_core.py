@@ -49,7 +49,7 @@ class TestText(unittest.TestCase):
         self.assertEqual(guess_quality("HD中字"), "HD")
         self.assertEqual(guess_quality("https://a.com/2024/1080/index.m3u8"), "1080P")
         # 域名里的 sd 不能被当成 480P
-        self.assertEqual(guess_quality("https://sdzyapi.com/x.m3u8"), "")
+        self.assertEqual(guess_quality("https://sd.example/x.m3u8"), "")
         self.assertEqual(guess_quality(""), "")
 
 

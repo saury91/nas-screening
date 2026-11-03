@@ -14,7 +14,7 @@ interface Http {
     /**
      * 只取跳转目标，不跟随。
      *
-     * 网易云的播放地址是先 302 到 CDN：把最终的 CDN 地址交给播放器，
+     * 上游的播放地址是先 302 到 CDN：把最终的 CDN 地址交给播放器，
      * 比让播放器自己跟一遍跳转稳（ExoPlayer 跟 302 时偶发丢掉请求头）。
      */
     suspend fun resolveRedirect(url: String, referer: String? = null): String = url

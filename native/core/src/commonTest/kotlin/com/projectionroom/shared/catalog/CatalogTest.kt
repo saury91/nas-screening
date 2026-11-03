@@ -114,8 +114,8 @@ class CatalogTest {
 
     @Test
     fun `域名里的 sd 不会被误判`() {
-        // sdzyapi.com 曾是真实踩过的坑
-        assertEquals("", Quality.from("http://sdzyapi.com/api.php/provide/vod"))
+        // 采集站域名里带 sd 是常见情况，曾经真实踩过
+        assertEquals("", Quality.from("http://sd.example/api.php/provide/vod"))
     }
 
     @Test

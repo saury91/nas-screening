@@ -257,7 +257,7 @@ object MusicBox {
                 skipOrStop("「${t.title}」没有可用音源，已跳过")
                 return@launch
             }
-            // 网易云对无版权曲目只给 30 秒片段（约 480KB）：放下去就是「播一半突然断」，
+            // 上游对无版权曲目只给 30 秒片段（约 480KB）：放下去就是「播一半突然断」，
             // 不如和「没有音源」同样处理 —— 跳下一首，把原因说清楚。
             // 判断本身失败时放行：宁可放过一首片段，也不要卡住整张歌单。
             val full = fetchOrNull { resolveFullTrack?.invoke(url) ?: true } ?: true

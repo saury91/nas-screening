@@ -258,8 +258,14 @@ DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 | `LIVE_SEEDS` | empty | Candidate live sources, comma separated, used by the daily refresh |
 | `CMS_SEEDS` | empty | Source "resource catalogs", comma separated, used by auto-discovery |
 | `MUSIC_ONLINE` | `0` | Set to `1` to enable online song search |
+| `ONLINE_SEARCH_URL` | empty | Online search endpoint; empty disables it, and `MUSIC_ONLINE=1` is still required |
+| `ONLINE_PLAY_URL` | empty | Playback URL converter; empty means no online stream URL is returned |
+| `ONLINE_COVER_BASE` | empty | Cover image prefix; empty drops covers from search results |
+| `ONLINE_REFERER` | empty | Referer required by the endpoints above |
 | `MUSICBOX_API` | empty | Online playlist / stream endpoint; empty disables online music |
 | `MUSICBOX_REFERER` | empty | Referer required by the playlist endpoint |
+| `LYRIC_API` | empty | Lyrics endpoint, shipped to the app in the config bundle; empty shows "no lyrics" |
+| `LYRIC_REFERER` | empty | Referer required by the lyrics endpoint |
 | `MAGNET_SITE` | empty | Magnet search site; empty disables magnet search |
 | `MUSIC_DIR` | empty | Local music folder; can also be set in the UI |
 | `QBT_URL` | `http://127.0.0.1:8080` | qBittorrent address |
@@ -267,6 +273,8 @@ DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 | `NO_AUTH` | `1` | Set to `0` to enable multi-account mode |
 
 Entries marked "empty disables" are content entry points: leave them empty and no request is made to any third-party service.
+
+Any of the above can also go into a `.env` file at the repo root; `app.py` reads it on startup (existing environment variables win). `.env` is gitignored, which makes it the right place for your real endpoints and credentials.
 
 > This is a **LAN** setup: no password, no HTTPS. Never expose 8899 directly to the internet; use a reverse proxy with real authentication if you need remote access.
 

@@ -51,7 +51,7 @@ object NasStore {
     }
 
     /**
-     * 用户可能只输 `192.168.1.10:8899`，也可能整个粘贴 `http://.../`。
+     * 用户可能只输 `192.0.2.10:8899`，也可能整个粘贴 `http://.../`。
      * 统一成 `http://host:port`，非法输入返回 null。
      */
     fun normalize(raw: String): String? {

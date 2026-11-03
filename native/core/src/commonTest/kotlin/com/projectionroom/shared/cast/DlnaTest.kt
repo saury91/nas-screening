@@ -23,11 +23,11 @@ class DlnaTest {
         val resp = """
             HTTP/1.1 200 OK
             CACHE-CONTROL: max-age=1800
-            LOCATION: http://192.168.1.8:49152/description.xml
+            LOCATION: http://192.0.2.8:49152/description.xml
             ST: urn:schemas-upnp-org:device:MediaRenderer:1
 
         """.trimIndent()
-        assertEquals("http://192.168.1.8:49152/description.xml", Ssdp.locationOf(resp))
+        assertEquals("http://192.0.2.8:49152/description.xml", Ssdp.locationOf(resp))
     }
 
     @Test
@@ -60,12 +60,12 @@ class DlnaTest {
 
     @Test
     fun `解析设备描述时取 AVTransport 而不是别的服务`() {
-        val d = UpnpDesc.parse(desc, "http://192.168.1.8:49152/description.xml")!!
+        val d = UpnpDesc.parse(desc, "http://192.0.2.8:49152/description.xml")!!
         assertEquals("客厅电视", d.name)
         assertEquals("MiTV-4A", d.model)
         assertEquals("uuid:1234-abcd", d.udn)
         // 关键：不能拿到 ContentDirectory 的 /upnp/control/CD
-        assertEquals("http://192.168.1.8:49152/upnp/control/AVTransport1", d.controlUrl)
+        assertEquals("http://192.0.2.8:49152/upnp/control/AVTransport1", d.controlUrl)
         assertTrue(d.canCast)
     }
 

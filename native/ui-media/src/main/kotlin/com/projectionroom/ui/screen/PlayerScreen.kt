@@ -778,7 +778,7 @@ fun PlayerScreen(
      *
      * 先问 `/proom/info`：应答了就说明对面是我们自己的接收端，走自定义协议
      * （能带倍速/音量/请求头）；不答再退回 DLNA 的 description.xml。
-     * 用户填 `192.168.1.8:49520`（DMR 端口）或 `*.xml` 时直接跳过探测，
+     * 用户填 `192.0.2.8:49520`（DMR 端口）或 `*.xml` 时直接跳过探测，
      * 省掉两秒白等。
      */
     fun castManual(raw: String) {
@@ -3478,7 +3478,7 @@ private fun CastSheet(
                         decorationBox = { inner ->
                             if (manual.isEmpty()) {
                                 Text(
-                                    "电视地址，如 192.168.1.8 或 192.168.1.8:49520",
+                                    "电视地址，如 192.0.2.8 或 192.0.2.8:49520",
                                     color = Color.White.copy(alpha = 0.3f),
                                     fontSize = ProomSp(12.sp),
                                 )

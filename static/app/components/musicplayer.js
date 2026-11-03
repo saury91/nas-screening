@@ -258,7 +258,7 @@ function load(autoplay) {
       let url = src;
       if (!url) {
         // 在线音源要现取一次播放地址（地址带时效）
-        const d = (t.provider === 'kuwo' || t.provider === 'netease')
+        const d = (t.provider === 'online' || t.provider === 'netease')
           ? await api.musicOnlineUrl(t.id, t.provider)
           : await api.musicStream(t.id);
         url = d.url;
@@ -474,7 +474,7 @@ export function initMusicPlayer() {
     render();
     renderNowPlaying();
     const t = track();
-    if (t && t.provider === 'kuwo' && t.duration && a.duration &&
+    if (t && t.provider === 'online' && t.duration && a.duration &&
         a.duration < t.duration * 0.8) {
       toast('这首只有试听片段，换一首试试', 'err');
     }

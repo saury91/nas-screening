@@ -9,7 +9,7 @@ import java.net.SocketTimeoutException
  * 局域网自动发现。
  *
  * 协议在 NAS 端（app.py 的 discovery_loop）：往 UDP 8897 广播 `PROOM_DISCOVER`，
- * 对方回 `PROOM_OFFER http://192.168.x.x:8899`。
+ * 对方回 `PROOM_OFFER http://192.0.2.x:8899`。
  * 和电视端的发现走同一套，NAS 端不用改。
  */
 object Discovery {
@@ -20,7 +20,7 @@ object Discovery {
 
     /**
      * 找一台放映室。会重发几次广播（UDP 会丢包，只发一次十有八九收不到）。
-     * 返回形如 `http://192.168.1.10:8899`，找不到返回 null。
+     * 返回形如 `http://192.0.2.10:8899`，找不到返回 null。
      */
     fun find(timeoutMs: Int = 3500): String? {
         DatagramSocket().use { sock ->
