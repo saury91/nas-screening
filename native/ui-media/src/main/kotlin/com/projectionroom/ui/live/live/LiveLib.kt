@@ -105,7 +105,33 @@ object LiveLib {
         put(app, next)
     }
 
+    /** 取消收藏；没有观看记录时整条移除 */
+    fun removeFav(ctx: Context, name: String) {
+        update(ctx, name) { it.copy(fav = false) }
+    }
+
+    /** 删除最近观看；收藏还在时条目保留 */
+    fun removeHistory(ctx: Context, name: String) {
+        update(ctx, name) { it.copy(plays = 0) }
+    }
+
     /* ── 内部 ── */
+
+    private fun update(ctx: Context, name: String, transform: (LiveItem) -> LiveItem) {
+        val app = ctx.applicationContext
+        val cur = items(app)
+        var hit = false
+        val now = System.currentTimeMillis()
+        val next = cur.mapNotNull {
+            if (it.name != name) it
+            else {
+                hit = true
+                val changed = transform(it).copy(at = now)
+                if (changed.fav || changed.plays > 0) changed else null
+            }
+        }
+        if (hit) put(app, next)
+    }
 
     private fun items(ctx: Context): List<LiveItem> {
         cache?.let { return it }

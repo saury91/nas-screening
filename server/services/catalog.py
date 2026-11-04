@@ -26,9 +26,12 @@ from ..text import (_desc_better, _norm_key, _relevance, _score_max,
 # 就吃掉好几秒，「到点返回」也等着最慢那一轮。放宽到 32，基本一轮打完。
 _SEARCH_POOL = concurrent.futures.ThreadPoolExecutor(
     max_workers=32, thread_name_prefix="cms-search")
-# 浏览单独一个池：搜索和翻页互不挤占，慢站也不会把搜索的 worker 占满
+# 浏览单独一个池：搜索和翻页互不挤占，慢站也不会把搜索的 worker 占满。
+# 一次浏览是 BROWSE_SITES(8) × 最多 4 个子分类 = 32 个请求，10 个 worker 要排
+# 3~4 轮、每轮 3~9 秒，到点（deadline）基本一个都没回来 —— 剧集/动漫/综艺
+# 因此长期显示「暂时没货」。worker 提到 32，一轮并发打完。
 _BROWSE_POOL = concurrent.futures.ThreadPoolExecutor(
-    max_workers=10, thread_name_prefix="cms-browse")
+    max_workers=32, thread_name_prefix="cms-browse")
 
 
 def _taste():
@@ -314,19 +317,43 @@ def build_recommend(limit=18):
 
 
 
-def detect_catmap(site):
-    """探测某站的分类 ID 各自属于哪个大类。
+# 「电影 / 电视剧 / 动漫」这类一级分类只是目录分组，索尼、豪华、天堂等站
+# 对父级 type_id 直接返回 0 条（叶子分类动作片/国产剧才有内容）。
+# 不剔掉的话，App 拿它当该分类的前 3 个 id 之一，每页都白拉一趟。
+_PARENT_NAMES = {"电影", "电影片", "电视剧", "连续剧", "动漫", "动漫片",
+                 "综艺", "综艺片", "纪录片", "记录片"}
+
+
+def _type_alive(site, tid):
+    """探某个 type_id 是否真有内容。网络异常按「有」处理，别误杀正常分类。"""
+    try:
+        return bool(_qs(site, "ac=detail&t=%s&pg=1" % tid, timeout=8))
+    except Exception:
+        return True
+
+
+def detect_catmap_full(site):
+    """探测某站每个分类 ID 属于哪个大类，顺带记下站内的分类名。
 
     各站 t 的排法完全不同（暴风 t=20 才是电影，别家 t=6 就是），而且会变。
     所以不写死映射——探一次记下来缓存一天，浏览时才知道该拉哪个 t。
 
     优先走 MacCMS 的 `ac=list`：它直接把 class 表（type_id + type_name）返回，
     一次请求就够。早期版本盲探 30 个 ID × 每个源，首点「电影」实测 26 秒。
+
+    拿到 class 表后还要把「空壳父级分类」剔掉：这是「索尼/豪华/天堂明明探到
+    40 个分类、浏览却一条不出」的根因 —— 映射是对的，但 App 取前 3 个 id
+    时把 t=1（父级 电影）排在首位，那一条永远空手而归。
+
+    返回 (cats, names)：`cats` 是 id → 大类，`names` 是 id → 站内分类名。
+    names 是给 App 选「地区」用的：猫眼「动漫」下面依次是 动画片 / 国产动漫 /
+    欧美动漫 / 日韩动漫 / 里番动漫，每页只取前 3 个 id 时，「日本」永远命中
+    不到日韩动漫 —— 结果就是筛完只剩几条。
     """
-    key = "catmap|" + site["name"]
+    key = "catmap3|" + site["name"]
     c = cache_peek(key)
-    if c and cache_valid(key, CATMAP_TTL):
-        return c
+    if isinstance(c, dict) and c.get("cats") and cache_valid(key, CATMAP_TTL):
+        return c["cats"], c.get("names") or {}
 
     try:
         api = site["api"]
@@ -335,18 +362,35 @@ def detect_catmap(site):
         classes = []
         if isinstance(d, dict):
             classes = d.get("class") or d.get("classes") or []
-        out = {}
+        out, names, parents = {}, {}, []
         for x in classes:
             if not isinstance(x, dict):
                 continue
             tid = x.get("type_id", x.get("id"))
-            c2 = _cat(x.get("type_name") or x.get("name") or "")
+            tname = (x.get("type_name") or x.get("name") or "").strip()
+            c2 = _cat(tname)
             if tid is not None and c2:
                 out[str(tid)] = c2
+                if tname:
+                    names[str(tid)] = tname
+                if tname in _PARENT_NAMES:
+                    parents.append(str(tid))
+        # 父级分类并发探一下，空的直接从映射里删掉
+        if parents:
+            with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=min(4, len(parents))) as ex:
+                alive = list(ex.map(lambda t: _type_alive(site, t), parents))
+            dead = [t for t, ok in zip(parents, alive) if not ok]
+            for t in dead:
+                out.pop(t, None)
+                names.pop(t, None)
+            if dead:
+                log("分类映射 %s：父级分类 %s 返回空，已剔除"
+                    % (site["name"], ",".join(dead)))
         if out:
-            cache_put(key, out)
+            cache_put(key, {"cats": out, "names": names})
             log("分类映射 %s：ac=list 拿到 %d 个分类" % (site["name"], len(out)))
-            return out
+            return out, names
     except Exception:
         pass                     # 有的站不支持 ac=list，退回盲探
 
@@ -367,25 +411,61 @@ def detect_catmap(site):
             if c2:
                 out[str(t)] = c2
     if out:
-        cache_put(key, out)
-    return out
+        cache_put(key, {"cats": out, "names": {}})
+    return out, {}
+
+
+def detect_catmap(site):
+    """只要 id → 大类的映射（服务端浏览用）"""
+    return detect_catmap_full(site)[0]
 
 
 def catmap_warm():
     """启动时后台把分类映射预热掉，免得第一次点「浏览」要干等。
 
     各站之间并发，站内 ac=list 一次搞定；不支持 ac=list 的站才走盲探。
+
+    注意这里**不受 BROWSE_SITES 限制**：分类映射会随配置包下发给 App，
+    App 端自己挑有映射的源来拉列表。只预热前几个的话，剩下的源在 App 里
+    等于不存在 —— 片库凭空少掉一大半。
     """
     def one(s):
         try:
-            detect_catmap(s)
+            return detect_catmap(s) or None
         except Exception:
-            pass
-    sites = active_sites()[:BROWSE_SITES]
+            return None
+    sites = active_sites()
     if not sites:
         return
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(sites)) as ex:
-        list(ex.map(one, sites))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(sites), 12)) as ex:
+        missed = [s for s, m in zip(sites, ex.map(one, sites)) if not m]
+    # 首轮拉空的隔一会儿再试一次：十几个站同时打，个别站会瞬时超时/限流，
+    # 失败一次就永久留空的话，App 里那几个源等于不存在（片库直接少一半）。
+    if missed:
+        time.sleep(1.5)
+        def again(s):
+            try:
+                return detect_catmap(s) or None
+            except Exception:
+                return None
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(len(missed), 6)) as ex:
+            for s, m in zip(missed, ex.map(again, missed)):
+                if not m:
+                    log("分类映射 %s：重试后仍为空，该源不参与浏览" % s["name"])
+
+
+def _area_keys(area):
+    """地区筛选的关键词（含各站常见别名）。第一个一定是界面上的原值。"""
+    extra = {
+        "内地": ["国产", "大陆"],
+        "中国香港": ["港台", "香港"], "香港": ["港台", "香港"],
+        "中国台湾": ["港台", "台湾"], "台湾": ["港台", "台湾"],
+        # 「日韩」分不出具体国家，选日本/韩国时都算命中，总比整批漏掉强
+        "日本": ["日韩", "日漫"], "韩国": ["日韩", "韩剧"],
+        "欧美": ["美国", "英国", "法国"],
+    }
+    return [area] + extra.get(area, [])
 
 
 def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
@@ -409,8 +489,13 @@ def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
     else:
         pool = pool[:BROWSE_SITES]
     for s in pool:
-        cm = detect_catmap(s)
+        cm, tnames = detect_catmap_full(s)
         ts = [t for t, c in cm.items() if not cat or c == cat]
+        if ts and area:
+            # 分类名里带地区的排前面：猫眼「动漫」有 5 个子分类，
+            # 只取前 4 个的话「日韩动漫」经常被挤掉，筛日本就没货了
+            keys = _area_keys(area)
+            ts.sort(key=lambda t: 0 if any(k in tnames.get(t, "") for k in keys) else 1)
         if ts:
             nsite += 1
             tasks += [(s, t) for t in ts[:4]]   # 每站最多 4 个分类，控制请求数
@@ -436,7 +521,8 @@ def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
     if year:
         out = [x for x in out if str(x.get("year") or "").startswith(year)]
     if area:
-        out = [x for x in out if area in (x.get("area") or "")]
+        out = [x for x in out if any(k in (x.get("area") or "")
+                                     for k in _area_keys(area))]
 
     items = _dedup(out, limit)
     # 新片优先；同年份里信息全的（有简介）优先
@@ -445,7 +531,10 @@ def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
     res = {"items": items, "pg": pg, "cat": cat, "year": year, "area": area,
            "more": len(out) > limit, "total": len(out),
            "sites": nsite, "at": int(time.time())}
-    cache_put(ck, res)
+    # 空结果不落缓存：多半是慢站没在 deadline 内回来，缓存住会让这个分类
+    # 整整 10 分钟都显示没货（用户点一次空一次）。下次直接重试。
+    if items:
+        cache_put(ck, res)
     return res
 
 

@@ -90,6 +90,77 @@ class LibraryMergeTest {
     }
 
     @Test
+    fun `删除收藏后 NAS 上的旧收藏不会拉回来`() {
+        val lib = LibraryOps.removeFav(
+            LibFile(listOf(local("片", fav = true))), "片", now,
+        )
+        assertTrue(lib.favorites().isEmpty())
+
+        val merged = LibraryMerge.pull(lib, listOf(Vod(name = "片")), null, now)
+        assertTrue(merged.favorites().isEmpty())
+        assertEquals(1, merged.removed.count { it.fav })
+    }
+
+    @Test
+    fun `删除收藏但还有记录时条目保留`() {
+        val lib = LibraryOps.removeFav(
+            LibFile(listOf(local("片", fav = true, position = 5_000, duration = 10_000))),
+            "片", now,
+        )
+        assertTrue(lib.favorites().isEmpty())
+        assertEquals(1, lib.history().size)
+    }
+
+    @Test
+    fun `删除记录后 NAS 上的旧进度不会拉回来`() {
+        val lib = LibraryOps.removeHistory(
+            LibFile(listOf(local("片", position = 5_000, duration = 10_000))),
+            "片", now,
+        )
+        assertTrue(lib.history().isEmpty())
+
+        val merged = LibraryMerge.pull(lib, null, listOf(Vod(name = "片", progress = 0.5f)), now)
+        assertTrue(merged.history().isEmpty())
+        assertEquals(1, merged.removed.count { it.his })
+    }
+
+    @Test
+    fun `删除记录但收藏还在时只清进度`() {
+        val lib = LibraryOps.removeHistory(
+            LibFile(listOf(local("片", fav = true, position = 5_000, duration = 10_000))),
+            "片", now,
+        )
+        assertTrue(lib.history().isEmpty())
+        assertEquals(1, lib.favorites().size)
+    }
+
+    @Test
+    fun `重新收藏会撤销删除墓碑`() {
+        val removed = LibraryOps.removeFav(
+            LibFile(listOf(local("片", fav = true))), "片", now,
+        )
+        val back = LibraryOps.toggleFav(
+            removed, Vod(name = "片"), now + 1,
+        )
+        assertTrue(back.favorites().size == 1)
+        assertTrue(back.removed.none { it.fav })
+
+        // 再拉 NAS 也不会被墓碑挡住（本机 pending 仍优先，但不影响收藏状态）
+        val merged = LibraryMerge.pull(back, listOf(Vod(name = "片")), null, now + 2)
+        assertEquals(1, merged.favorites().size)
+    }
+
+    @Test
+    fun `标记同步完成不能丢掉墓碑`() {
+        val removed = LibraryOps.removeHistory(
+            LibFile(listOf(local("片", position = 5_000, duration = 10_000))),
+            "片", now,
+        )
+        val synced = LibraryOps.markSynced(removed, setOf("片"), fav = false, his = true)
+        assertEquals(1, synced.removed.count { it.his })
+    }
+
+    @Test
     fun `收藏与记录指向同一部片时合并成一条`() {
         val merged = LibraryMerge.pull(
             LibFile(),

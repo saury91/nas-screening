@@ -566,30 +566,27 @@ class MainActivity : ComponentActivity() {
                  *
                  * 这样 NAS 关机时搜索照常能用；NAS 在线时也基本用不到它。
                  */
-                val doSearch: suspend (String) -> List<com.projectionroom.shared.model.Vod> =
+                val doSearch: (String) -> kotlinx.coroutines.flow.Flow<List<com.projectionroom.shared.model.Vod>> =
                     remember(allSources) {
                         { kw ->
                             val srcs = allSources
-                            // 本地源一个都没回应时，别把异常咽成空列表 —— 搜索页要据此
+                            // 一个源都没回应时别把异常咽成空列表 —— 搜索页要据此
                             // 说「片源没响应」，否则用户会以为自己片名打错了。
-                            // 咽掉之后就只剩「没找到」这一种说法了。
                             // 搜索只走本地直连 —— 它属于「资源加载」，不该依赖 NAS。
-                            // NAS 只承担同步 / 投射 / 更新 / 配置四件事；原先这里挂了两层
-                            // NAS 兜底，NAS 一挂就白等 2.5 秒 ×2，还把「源都没响应」拖成十几秒。
+                            // NAS 只承担同步 / 投射 / 更新 / 配置四件事。
                             if (srcs.isEmpty()) {
-                                emptyList()
+                                kotlinx.coroutines.flow.emptyFlow()
                             } else {
                                 // 必须切到 Default：解析 JSON、合并去重都是 CPU 活，
                                 // 留在 Main 上会把主线程压住（实测详情页能压出 ANR）
-                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                                    com.projectionroom.shared.catalog.Catalog(
-                                        sourceHttp,
-                                        (bundle?.badPicHosts.orEmpty() + com.projectionroom.ui.component.BadPicHosts.all()),
-                                    )
-                                        // 71 个源一起查，9 秒常在最后一批上截断，
-                                        // 结果就是「明明有却搜不到」。给到 12 秒。
-                                        .search(kw, srcs, deadlineMs = 12_000)
-                                }
+                                com.projectionroom.shared.catalog.Catalog(
+                                    sourceHttp,
+                                    (bundle?.badPicHosts.orEmpty() + com.projectionroom.ui.component.BadPicHosts.all()),
+                                )
+                                    // 流式：每个源回来就发一版，先到的先上屏。
+                                    // 等齐再返回的话，最慢那个源会把首屏拖到 12 秒。
+                                    .searchStream(kw, srcs, deadlineMs = 12_000)
+                                    .flowOn(kotlinx.coroutines.Dispatchers.Default)
                             }
                         }
                     }
@@ -805,17 +802,19 @@ class MainActivity : ComponentActivity() {
                                 val ser = ListSerializer(Vod.serializer())
                                 val ctx = this@MainActivity
 
-                                fun page(items: List<Vod>) = NasApi.BrowsePage(
+                                fun page(items: List<Vod>, more: Boolean) = NasApi.BrowsePage(
                                     items = items,
                                     total = items.size,
                                     sites = sites,
-                                    more = items.size >= 40,
+                                    more = more,
                                 )
 
                                 val cached = withContext(Dispatchers.IO) {
                                     FeedCache.read(ctx, key, ser)
                                 }
-                                if (cached != null) emit(page(cached.value))
+                                // 缓存里没存「还有没有下一页」：非空就先当有，
+                                // 真到底了下一轮请求回来会把 more 修正成 false
+                                if (cached != null) emit(page(cached.value, cached.value.isNotEmpty()))
 
                                 if (cached != null &&
                                     FeedCache.isFresh(cached.at, FeedCache.BROWSE_FRESH_MS)
@@ -832,11 +831,12 @@ class MainActivity : ComponentActivity() {
                                         )
                                         .browseStream(catName, pg, y, a, srcs, deadlineMs = 9_000)
                                         .flowOn(Dispatchers.Default)
-                                        .collect { partial ->
+                                        .collect { chunk ->
+                                            val partial = chunk.items
                                             // 空快照也要发下去：换筛选后一条都没命中时，
                                             // 界面要显示「没有片子」，而不是留着上一次的结果
                                             if (partial.isNotEmpty()) latest = partial
-                                            emit(page(partial))
+                                            emit(page(partial, chunk.more))
                                             if (partial.isEmpty()) return@collect
                                             // 边拉边落盘：用户随时可能切走或杀进程，
                                             // 只在收尾写一次的话，那时候缓存还是空的
@@ -867,6 +867,9 @@ class MainActivity : ComponentActivity() {
 
                 var screen by remember { mutableStateOf<Screen>(Screen.Home) }
                 var searchHistory by remember { mutableStateOf(SearchStore.list(this@MainActivity)) }
+                // 搜索页状态放在这里而不是页面里：点进详情再返回时，页面会离开
+                // composition、页面内的 remember 被丢掉，返回就成了空白搜索页
+                val searchState = remember { com.projectionroom.ui.screen.SearchState() }
 
                 // 「收藏到歌单」弹层：曲目行的心形/长按、播放页的心形共用这一个，
                 // 弹层内容自己读 MusicLib / MusicShelf，这里只管开和关
@@ -875,6 +878,8 @@ class MainActivity : ComponentActivity() {
                 }
                 // 歌单库改动代数：新建/加歌之后让「我的」页和歌单页重读一遍
                 var shelfRev by remember { mutableIntStateOf(0) }
+                // 直播/音乐本地库改动代数：收藏或记录删除后重读「我的」
+                var mineRev by remember { mutableIntStateOf(0) }
 
                 // 通知栏点歌名 → 落到全屏播放页。
                 // 只在队列还在的时候跳：没有歌可放的话进去就是个空页面。
@@ -1250,7 +1255,7 @@ class MainActivity : ComponentActivity() {
                                             .history(this@MainActivity)
                                             .map { MineTrack(it.id, it.title, it.artist, it.cover) },
                                         // 我的歌单：自建的在前面，收藏来的在线歌单排后面
-                                        shelf = remember(shelfRev) {
+                                        shelf = remember(shelfRev, mineRev) {
                                             val ctx = this@MainActivity
                                             com.projectionroom.ui.music.MusicShelf.playlists(ctx)
                                                 .map { MineShelf(it.id, it.name, it.cover, it.tracks.size) } +
@@ -1263,11 +1268,11 @@ class MainActivity : ComponentActivity() {
                                                         )
                                                     }
                                         },
-                                        likedCount = remember(shelfRev) {
+                                        likedCount = remember(shelfRev, mineRev) {
                                             com.projectionroom.ui.music.MusicLib
                                                 .favorites(this@MainActivity).size
                                         },
-                                        likedCover = remember(shelfRev) {
+                                        likedCover = remember(shelfRev, mineRev) {
                                             com.projectionroom.ui.music.MusicLib
                                                 .favorites(this@MainActivity)
                                                 .firstOrNull()?.cover.orEmpty()
@@ -1324,6 +1329,47 @@ class MainActivity : ComponentActivity() {
                                                 )
                                                 screen = Screen.MusicPlayer(s)
                                             }
+                                        },
+                                        // 长按删除：影视先落本地库（带墓碑，防 NAS 旧数据拉回），
+                                        // 再后台同步；直播/音乐本来就是本地库，删完直接重绘
+                                        onRemoveVodFav = { vod ->
+                                            lib = LibraryStore.removeFav(this@MainActivity, vod.name)
+                                            scope.launch {
+                                                runCatching {
+                                                    LibrarySync.sync(this@MainActivity, syncApi, lib)
+                                                }.onSuccess { lib = it }
+                                            }
+                                        },
+                                        onRemoveVodHistory = { vod ->
+                                            lib = LibraryStore.removeHistory(this@MainActivity, vod.name)
+                                            scope.launch {
+                                                runCatching {
+                                                    LibrarySync.sync(this@MainActivity, syncApi, lib)
+                                                }.onSuccess { lib = it }
+                                            }
+                                        },
+                                        onRemoveChannelFav = { c ->
+                                            com.projectionroom.ui.live.LiveLib
+                                                .removeFav(this@MainActivity, c.name)
+                                            mineRev++
+                                        },
+                                        onRemoveChannelHistory = { c ->
+                                            com.projectionroom.ui.live.LiveLib
+                                                .removeHistory(this@MainActivity, c.name)
+                                            mineRev++
+                                        },
+                                        onRemoveTrackFav = { t ->
+                                            com.projectionroom.ui.music.MusicLib.removeFav(
+                                                this@MainActivity, t.id, t.title, t.artist,
+                                            )
+                                            com.projectionroom.ui.music.MusicBox.resyncFav()
+                                            mineRev++
+                                        },
+                                        onRemoveTrackHistory = { t ->
+                                            com.projectionroom.ui.music.MusicLib.removeHistory(
+                                                this@MainActivity, t.id, t.title, t.artist,
+                                            )
+                                            mineRev++
                                         },
                                         onRefresh = { syncTick += 1 },
                                         onSettings = { screen = Screen.Settings(from = s) },
@@ -1956,6 +2002,7 @@ class MainActivity : ComponentActivity() {
 
                         is Screen.Search -> SearchScreen(
                             search = doSearch,
+                            state = searchState,
                             onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
                             onBack = { screen = s.from },
                             topInset = barTop,

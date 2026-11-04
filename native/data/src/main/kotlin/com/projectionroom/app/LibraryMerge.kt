@@ -19,8 +19,11 @@ internal object LibraryMerge {
         if (nasFavs == null && nasHist == null) return lib
 
         val byName = lib.items.associateBy { it.name }.toMutableMap()
+        // 本机删了但 NAS 还没删：先挡住，等同步器把删除推上去
+        val favGone = lib.removed.filter { it.fav }.mapTo(HashSet()) { it.name }
+        val hisGone = lib.removed.filter { it.his }.mapTo(HashSet()) { it.name }
 
-        nasFavs.orEmpty().forEach { v ->
+        nasFavs.orEmpty().filterNot { it.name in favGone }.forEach { v ->
             val old = byName[v.name]
             when {
                 old == null -> byName[v.name] = LibItem(
@@ -33,7 +36,7 @@ internal object LibraryMerge {
             }
         }
 
-        nasHist.orEmpty().forEach { v ->
+        nasHist.orEmpty().filterNot { it.name in hisGone }.forEach { v ->
             val old = byName[v.name]
             when {
                 old == null -> byName[v.name] = LibItem(
@@ -49,6 +52,6 @@ internal object LibraryMerge {
             }
         }
 
-        return LibFile(byName.values.toList())
+        return LibFile(byName.values.toList(), lib.removed)
     }
 }

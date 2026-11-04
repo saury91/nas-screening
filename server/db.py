@@ -267,6 +267,14 @@ def toggle_fav(kind, key, title="", cover="", payload="", profile="admin"):
     return True
 
 
+def delete_fav(kind, key, profile="admin"):
+    dbrun("DELETE FROM fav WHERE profile=? AND kind=? AND key=?", (profile, kind, key))
+
+
+def delete_history(kind, key, profile="admin"):
+    dbrun("DELETE FROM history WHERE profile=? AND kind=? AND key=?", (profile, kind, key))
+
+
 # ── 片源 ──────────────────────────────────────────────────────
 def sources_list(kind=None, enabled_only=False):
     import json

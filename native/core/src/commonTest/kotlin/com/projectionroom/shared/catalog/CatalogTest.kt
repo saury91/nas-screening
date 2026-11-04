@@ -285,7 +285,8 @@ class CatalogTest {
             Source("慢", "https://slow.com/api", cats = mapOf("1" to "电影")),
         )
 
-        val snaps = Catalog(http).browseStream("电影", 1, "", "", srcs).toList()
+        val chunks = Catalog(http).browseStream("电影", 1, "", "", srcs).toList()
+        val snaps = chunks.map { it.items }
 
         assertTrue(snaps.size >= 2, "应该分多次吐出，实际只有 ${snaps.size} 次")
         for (i in 1 until snaps.size) {

@@ -90,7 +90,8 @@ object LocalHome {
                     catalog.browseStream(
                         cat, 1, "", "", srcs,
                         deadlineMs = deadlineMs, typeIdsPerSource = 1,
-                    ).collect { partial ->
+                    ).collect { chunk ->
+                        val partial = chunk.items
                         if (partial.isEmpty()) return@collect
                         val snap = mutex.withLock {
                             done[cat] = partial

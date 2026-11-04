@@ -409,6 +409,18 @@ class NasApi(
         return d.fav
     }
 
+    /** 取消收藏（明确删除，不依赖当前状态，避免多端并发时 toggle 翻反） */
+    suspend fun deleteFavorite(name: String): Boolean {
+        val body = "{\"kind\":\"online\",\"key\":\"${name.escapeJson()}\"}"
+        return parse { json.decodeFromString<OkResp>(http.post("$base/api/fav/delete", body)) }.ok
+    }
+
+    /** 删除播放记录 */
+    suspend fun deleteHistory(name: String): Boolean {
+        val body = "{\"kind\":\"online\",\"key\":\"${name.escapeJson()}\"}"
+        return parse { json.decodeFromString<OkResp>(http.post("$base/api/history/delete", body)) }.ok
+    }
+
     private fun String.escapeJson(): String = buildString {
         for (ch in this@escapeJson) {
             when (ch) {

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.projectionroom.ui.component
 
 import androidx.compose.animation.core.animateFloatAsState
@@ -5,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
@@ -55,6 +58,8 @@ fun ChannelTile(
     /** 右下角角标，比如「4 源」；空则不显示 */
     badge: String = "",
     onClick: () -> Unit = {},
+    /** 手机「我的」页用：长按弹删除确认；null 时保持纯点击行为 */
+    onLongClick: (() -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(ProomShape.md)
@@ -68,7 +73,13 @@ fun ChannelTile(
         Modifier
             .fillMaxWidth()
             .onFocusChanged { focused = it.isFocused }
-            .clickable(onClick = onClick),
+            .then(
+                if (onLongClick != null) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                },
+            ),
     ) {
         Box(
             Modifier

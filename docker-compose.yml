@@ -1,0 +1,29 @@
+# 部署到 fnOS：把本目录整体放到 NAS 上，docker compose up -d --build
+# 数据（数据库 / 种子 / UI 升级包）全在 ./data，备份只备份这一个目录。
+services:
+  projection-room:
+    build: .
+    image: projection-room:latest
+    container_name: projection-room
+    restart: unless-stopped
+    ports:
+      - "8899:8899"
+    environment:
+      PORT: "8899"
+      DB_PATH: /data/media.db
+      SEED_FILE: /data/seed.json
+      # 局域网自用，不弹账户与 PIN；要恢复多账户改成 0
+      NO_AUTH: "1"
+      LIVE_AUTO: "1"
+      LIVE_AUTO_HOUR: "4"
+      # 每日维护按本地钟点触发：镜像里没有 tzdata，靠下面挂宿主时区文件生效
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/data
+      - /usr/share/zoneinfo/Asia/Shanghai:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8899/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
+      retries: 3

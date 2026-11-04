@@ -2,6 +2,10 @@ FROM python:3.12-alpine
 
 WORKDIR /app
 
+# 时区：每日直播维护按本地钟点（LIVE_AUTO_HOUR）触发，镜像里不装 tzdata
+# （alpine 源在国内拉不动），改为把宿主的时区文件挂进 /etc/localtime：
+#   -v /usr/share/zoneinfo/Asia/Shanghai:/etc/localtime:ro  -e TZ=Asia/Shanghai
+
 # 只用标准库，无需 pip install；前端也没有构建步骤
 COPY app.py          /app/app.py
 COPY server          /app/server

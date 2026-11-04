@@ -33,10 +33,46 @@ object MacCms {
         val playUrl: String = "",
     )
 
-    /** 按分类 ID 拉列表（各站 type_id 由配置包里的 cats 给出） */
-    fun listUrl(api: String, typeId: String, page: Int = 1): String {
+    /**
+     * 按分类 ID 拉列表（各站 type_id 由配置包里的 cats 给出）。
+     *
+     * [year]/[area] 会原样带给采集站（MacCMS 的 `year`/`area` 过滤参数）：
+     * 站方支持就由它筛好再返回，一页 20 条全是目标内容；不支持的站会忽略这两个
+     * 参数，等于没传 —— 所以调用方还得在本地再筛一遍。
+     */
+    fun listUrl(
+        api: String,
+        typeId: String,
+        page: Int = 1,
+        year: String = "",
+        area: String = "",
+    ): String {
         val sep = if (api.contains('?')) '&' else '?'
-        return "$api${sep}ac=detail&t=${typeId}&pg=$page"
+        val sb = StringBuilder("$api${sep}ac=detail&t=${typeId}&pg=$page")
+        if (year.isNotBlank()) sb.append("&year=").append(year.encodeQuery())
+        if (area.isNotBlank()) sb.append("&area=").append(area.encodeQuery())
+        return sb.toString()
+    }
+
+    /**
+     * 一页结果 + 站方的分页信息。
+     *
+     * `pagecount` 大多数 MacCMS 站都会给，是判断「还有没有下一页」唯一可靠的依据：
+     * 早先拿「本页凑了 40 条」当过界条件，一加筛选每页就剩几条，永远凑不够 40，
+     * 「加载更多」于是彻底不动了。
+     */
+    data class Page(val list: List<Raw>, val page: Int, val pageCount: Int)
+
+    fun parsePage(text: String): Page {
+        val list = parseList(text)
+        val root = runCatching { json.parseToJsonElement(text.trim()) }.getOrNull()
+        fun num(key: String): Int = when (root) {
+            is JsonObject -> root[key]
+                ?.let { runCatching { it.jsonPrimitive.content.toIntOrNull() }.getOrNull() }
+                ?: 0
+            else -> 0
+        }
+        return Page(list, num("page"), num("pagecount"))
     }
 
     fun searchUrl(api: String, keyword: String, page: Int = 1): String {

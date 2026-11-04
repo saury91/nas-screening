@@ -70,3 +70,9 @@ native/build/
 native/*/build/
 native/local.properties
 native/.kotlin/
+
+# ── 浏览器自动化会话产物（playwright-cli 生成）──
+.playwright-cli/
+
+# ── 浏览器自动化会话产物（playwright-cli 生成）──
+.playwright-cli/

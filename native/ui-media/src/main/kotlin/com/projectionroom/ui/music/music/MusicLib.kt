@@ -114,7 +114,39 @@ object MusicLib {
         put(app, next)
     }
 
+    /** 取消收藏；没有播放记录时整条移除 */
+    fun removeFav(ctx: Context, id: String, title: String, artist: String) {
+        update(ctx, id, title, artist) { it.copy(fav = false) }
+    }
+
+    /** 删除播放记录；收藏还在时条目保留 */
+    fun removeHistory(ctx: Context, id: String, title: String, artist: String) {
+        update(ctx, id, title, artist) { it.copy(plays = 0) }
+    }
+
     /* ── 内部 ── */
+
+    private fun update(
+        ctx: Context,
+        id: String,
+        title: String,
+        artist: String,
+        transform: (MusicItem) -> MusicItem,
+    ) {
+        val app = ctx.applicationContext
+        val cur = items(app)
+        var hit = false
+        val now = System.currentTimeMillis()
+        val next = cur.mapNotNull {
+            if (!sameItem(it, id, title, artist)) it
+            else {
+                hit = true
+                val changed = transform(it).copy(at = now)
+                if (changed.fav || changed.plays > 0) changed else null
+            }
+        }
+        if (hit) put(app, next)
+    }
 
     /**
      * 同一个条目判定：优先 id（最可靠），迁过来的老数据没有 id，退回「歌名 + 歌手」。

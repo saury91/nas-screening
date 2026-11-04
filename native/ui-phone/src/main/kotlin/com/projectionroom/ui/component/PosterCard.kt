@@ -1,9 +1,12 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.projectionroom.ui.component
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -44,6 +47,8 @@ fun PosterCard(
     modifier: Modifier = Modifier,
     focused: Boolean = false,
     onClick: () -> Unit = {},
+    /** 手机「我的」页用：长按弹删除确认；null 时保持纯点击行为 */
+    onLongClick: (() -> Unit)? = null,
 ) {
     // 电视要有明显的聚焦反馈；手机靠触摸态，不放大
     val target = if (focused) {
@@ -51,7 +56,15 @@ fun PosterCard(
     } else 1f
     val scale by animateFloatAsState(target, tween(ProomMotion.short, easing = ProomMotion.ease))
 
-    Column(modifier = modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Column(
+        modifier = modifier.fillMaxWidth().then(
+            if (onLongClick != null) {
+                Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            } else {
+                Modifier.clickable(onClick = onClick)
+            },
+        ),
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()

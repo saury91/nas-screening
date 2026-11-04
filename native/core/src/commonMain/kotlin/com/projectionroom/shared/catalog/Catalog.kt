@@ -128,6 +128,62 @@ class Catalog(
     }
 
     /**
+     * 流式搜索：**每个源一回来就发一版**「目前搜到的全部结果」。
+     *
+     * [search] 要等所有源到齐（或到 deadline）才返回：十几个源里只要有一个连不上，
+     * 用户就要对着骨架屏等满 12 秒，而第一批发结果通常 300 毫秒就到了。搜索页要的是
+     * 「边搜边出」，所以这里按到达顺序逐批补。
+     *
+     * 顺序 = 首次到达顺序（同一批内部按相关度排）：已经上屏的卡片不会因为后来一批
+     * 「更相关」而整体挪位。搜索词一般很短、命中条目本来就不多，排序不完美远好过
+     * 网格自己在抖。
+     *
+     * @throws SourcesUnavailable 一个源都没回来（整网断开）时抛出，
+     *     搜索页据此说「片源都没响应」，而不是「没找到」。
+     */
+    fun searchStream(
+        keyword: String,
+        sources: List<Source>,
+        deadlineMs: Long = 12_000,
+    ): Flow<List<Vod>> = channelFlow {
+        val kw = keyword.trim()
+        if (kw.isBlank() || sources.isEmpty()) {
+            close()
+            return@channelFlow
+        }
+        val key = normKey(kw)
+
+        // 归一化片名 → 该片在各源上的记录。LinkedHashMap 保住首次到达顺序。
+        val slots = LinkedHashMap<String, MutableList<Pair<Source, MacCms.Raw>>>()
+        val mutex = Mutex()
+        val start = TimeSource.Monotonic.markNow()
+        // 有源回来过没有：全都没回来是「网络问题」，不是「没这部片」
+        var arrived = 0
+
+        coroutineScope {
+            sources.forEach { src ->
+                launch(Dispatchers.Default) {
+                    // 到点了就不再发新请求：慢源不能拖着整页
+                    if (start.elapsedNow().inWholeMilliseconds > deadlineMs) return@launch
+                    val rows = runCatching { fetchOne(src, kw, key) }.getOrNull() ?: return@launch
+                    val snap = mutex.withLock {
+                        arrived++
+                        if (rows.isEmpty()) return@withLock null
+                        // 一批内部先按相关度排，再整批追加到队尾
+                        rows.sortedByDescending { relevance(it.second.name, kw) }
+                            .forEach { row ->
+                                slots.getOrPut(normKey(row.second.name)) { mutableListOf() }.add(row)
+                            }
+                        slots.values.map { toVod(it) }
+                    }
+                    if (!snap.isNullOrEmpty()) send(snap)
+                }
+            }
+        }
+        if (arrived == 0) throw SourcesUnavailable("${sources.size} 个源都没响应")
+    }
+
+    /**
      * 本地详情：只用片名 + 年份，把全部源搜一遍再合并。
      *
      * 语义和 NAS 的 `/api/detail` 一致（先按名搜，再挑年份对得上的那条），
@@ -266,6 +322,9 @@ class Catalog(
         )
     }
 
+    /** 片库一页：条目 + 源站是否还有下一页。`more` 就是「加载更多」能不能继续的依据 */
+    data class BrowseChunk(val items: List<Vod>, val more: Boolean)
+
     /**
      * 本地浏览：按大类拉各站的最新列表，合并去重。
      *
@@ -283,7 +342,7 @@ class Catalog(
         typeIdsPerSource: Int = 3,
     ): List<Vod> = browseStream(
         cat, page, year, area, sources, deadlineMs, typeIdsPerSource,
-    ).last()
+    ).last().items
 
     /**
      * 流式浏览：**每有一个源回来就发一次**「目前已拿到的全部内容的合并版」。
@@ -294,6 +353,10 @@ class Catalog(
      *
      * 每次发的都是**完整快照**而不是增量，UI 侧直接替换即可，不用自己合并去重；
      * 而且快照之间是「只往后追加」的关系：已上屏的条目位置永远不变。
+     *
+     * 快照里带 [BrowseChunk.more]：由源站返回的 `pagecount` 判断还有没有下一页。
+     * 这里曾经用「本页凑够 40 条」当依据，一加筛选每页就剩几条，永远够不上 40，
+     * 于是「加载更多」彻底不动了 —— 这正是「动漫 + 日本只剩几条」的直接原因。
      */
     fun browseStream(
         cat: String,
@@ -309,13 +372,22 @@ class Catalog(
          * 不节流的话 20 个结果会让网格重排 20 次（电视上看得出来在抖）。
          */
         minEmitGapMs: Long = 320,
-    ): Flow<List<Vod>> = channelFlow {
+    ): Flow<BrowseChunk> = channelFlow {
+        // 带筛选时一页常常只命中个位数：源站不认 year/area 就只剩本地筛，
+        // 20 条里能剩 2 条。这里对同一个分类顺着往后多翻两页补回来，
+        // 否则「动漫 + 日本」不仅第一页零星几条，下一页也一样零星。
+        val filtering = year.isNotBlank() || area.isNotBlank()
+        val maxRounds = if (filtering) 3 else 1
+        val targetPerTask = if (filtering) 8 else 1
+
+        // 带地区筛选时优先用分类名对得上的子分类（猫眼「日本」→ 日韩动漫）。
+        // 不对齐的话每页只取前 3 个 id，日韩动漫那个 id 永远轮不到。
         val jobs = sources.mapNotNull { src ->
-            val ids = src.typeIdsOf(cat)
+            val ids = src.typeIdsOf(cat, area)
             if (ids.isEmpty()) null else src to ids.take(typeIdsPerSource)
         }
         if (jobs.isEmpty()) {
-            send(emptyList())
+            send(BrowseChunk(emptyList(), false))
             return@channelFlow
         }
 
@@ -333,6 +405,8 @@ class Catalog(
         val mutex = Mutex()
         val clock = TimeSource.Monotonic.markNow()
         var lastSent = -minEmitGapMs
+        // 只要还有任意一个源没到底，就还能继续「加载更多」
+        var moreAny = false
 
         coroutineScope {
             jobs.forEach { (src, ids) ->
@@ -340,25 +414,52 @@ class Catalog(
                     launch {
                         // 单个请求各自限时，不再「一个整体超时把全部结果丢掉」——
                         // 超时的那个只是缺席，不影响已经回来的
-                        val rows = withTimeoutOrNull(deadlineMs) {
+                        val picked = withTimeoutOrNull(deadlineMs) {
                             runCatching {
-                                val text = http.get(MacCms.listUrl(src.api, tid, page))
-                                MacCms.parseList(text)
-                                    .filter { MacCms.parseLines(it.playUrl).isNotEmpty() }
-                                    .map { src to it }
-                            }.getOrDefault(emptyList())
-                        }.orEmpty()
-                            // 年份/地区筛选放在入队之前：入过的槽位就不再动，
-                            // 免得筛掉之后队尾又冒出新条目
-                            .filter { (_, r) ->
-                                (year.isBlank() || r.year.trim().startsWith(year)) &&
-                                    areaMatches(r.area, area)
-                            }
-                        if (rows.isEmpty()) return@launch
+                                val acc = mutableListOf<Pair<Source, MacCms.Raw>>()
+                                var p = page
+                                var hasNext = false
+                                var round = 0
+                                while (round < maxRounds) {
+                                    var pg = MacCms.parsePage(
+                                        http.get(MacCms.listUrl(src.api, tid, p, year, serverArea(area))),
+                                    )
+                                    // 站方不认这个地区值时会直接筛成 0 条：
+                                    // 退一步不带 area 再拉，至少还有本地的 areaMatches 兜底
+                                    if (pg.list.isEmpty() && area.isNotBlank()) {
+                                        pg = MacCms.parsePage(
+                                            http.get(MacCms.listUrl(src.api, tid, p, year)),
+                                        )
+                                    }
+                                    hasNext = if (pg.pageCount > 0) {
+                                        p < pg.pageCount
+                                    } else {
+                                        pg.list.size >= 15
+                                    }
+                                    acc += pg.list
+                                        .filter { MacCms.parseLines(it.playUrl).isNotEmpty() }
+                                        // 年份/地区始终在本地再筛一遍：源站忽略参数的站不少
+                                        .filter { r ->
+                                            (year.isBlank() || r.year.trim().startsWith(year)) &&
+                                                areaMatches(r.area, area)
+                                        }
+                                        .map { src to it }
+                                    round++
+                                    if (!hasNext || acc.size >= targetPerTask) break
+                                    p++
+                                }
+                                acc to hasNext
+                            }.getOrNull()
+                        }
+                        // 超时/异常：不知道还有没有下一页，保守当「有」，
+                        // 多翻一页空的总比「加载更多」直接消失强
+                        val rows = picked?.first.orEmpty()
+                        val hasNext = picked?.second ?: true
 
                         // 先在锁里把快照算出来，再在锁外 send：
                         // 持锁 send 一旦因为背压挂起，会把其它源也堵住
                         val snapshot = mutex.withLock {
+                            if (hasNext) moreAny = true
                             for (row in rows) {
                                 val key = normKey(row.second.name)
                                 val group = slots.getOrPut(key) { mutableListOf() }
@@ -376,7 +477,7 @@ class Catalog(
                                 null
                             } else {
                                 lastSent = now
-                                built.toList()
+                                BrowseChunk(built.toList(), moreAny)
                             }
                         }
                         if (snapshot != null) send(snapshot)
@@ -387,15 +488,12 @@ class Catalog(
 
         // 收尾补一次：被上面节流跳过的结果必须完整地发出去，
         // 否则用户会看到「刷新到一半就停住」
-        val tail = mutex.withLock { built.toList() }
-        if (tail.isNotEmpty()) {
-            send(tail)
-        } else {
-            // 全部被年份/地区筛掉了：这里必须发一个空快照。
-            // 不发的话调用方收不到任何数据，界面会一直挂着上一次筛选的结果 ——
-            // 用户看到的就是「点了年份/地区，下面一点没变」。
-            send(emptyList())
+        val tail = mutex.withLock {
+            BrowseChunk(built.toList(), moreAny && page < MAX_BROWSE_PAGE)
         }
+        // 全部被年份/地区筛掉了也必须发一个空快照：不发的话调用方收不到任何数据，
+        // 界面会一直挂着上一次筛选的结果 —— 用户看到的就是「点了年份/地区，下面一点没变」。
+        send(tail)
     }
 
     /**
@@ -410,14 +508,42 @@ class Catalog(
         if (raw.contains(want)) return true
         val aliases = when (want) {
             "内地" -> listOf("大陆")
-            "中国香港" -> listOf("香港")
-            "中国台湾" -> listOf("台湾")
+            "中国香港", "香港" -> listOf("香港")
+            "中国台湾", "台湾" -> listOf("台湾")
+            // 「日韩」是各站最常见的写法，分不出具体哪个国家，
+            // 选日本/韩国时都算命中，总比把这些片全漏掉强
+            "日本" -> listOf("日韩", "日漫")
+            "韩国" -> listOf("日韩", "韩剧")
             else -> emptyList()
         }
         return aliases.any { raw.contains(it) }
     }
 
+    /**
+     * 把界面上的地区名换成采集站认的写法。
+     *
+     * 只是「顺手让源站先筛一遍」，值不对也捅不出娄子 —— 拿到 0 条会自动退回
+     * 不带 area 的请求，本地还有 [areaMatches] 兜底。像「欧美」这种源站本来
+     * 就没有对应值的，直接不传，免得白白多一轮请求。
+     */
+    private fun serverArea(want: String): String = when (want) {
+        "" -> ""
+        "内地" -> "大陆"
+        "中国香港" -> "香港"
+        "中国台湾" -> "台湾"
+        "欧美" -> ""
+        else -> want
+    }
+
     companion object {
+        /**
+         * 片库最多翻到第几页。
+         *
+         * 是为了兜住「源站一直说有下一页、但每页都筛不出东西」的病态情况：
+         * 没有这个上限，带筛选的列表会自己一页页往后跑。
+         */
+        private const val MAX_BROWSE_PAGE = 12
+
         private val SEP = Regex("[\\s·:：\\-—_·]+")
         private val BRACKETS = Regex("[（(【\\[].*?[）)】\\]]")
         private val TAIL_YEAR = Regex("(19|20)\\d{2}$")

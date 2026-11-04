@@ -19,8 +19,8 @@ from http.server import BaseHTTPRequestHandler
 from .cache import cache_peek
 from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, LYRIC_API,
                      LYRIC_REFERER, NO_AUTH, SLUG_CAT, STATIC)
-from .db import (dbrun, note_search, pref_json, source_get, sources_list,
-                 toggle_fav, touch_history)
+from .db import (dbrun, delete_fav, delete_history, note_search, pref_json,
+                 source_get, sources_list, toggle_fav, touch_history)
 from .log import log
 from .providers import (active_sites, add_source, all_sites, import_config,
                         remove_source, set_cat, set_enabled, set_pri,
@@ -473,9 +473,10 @@ class Handler(BaseHTTPRequestHandler):
             # App 自己不可能猜对。映射由 catalog.warm_catmaps() 在后台探，
             # 这里只读缓存 —— 配置包必须秒回，不能等 71 个源逐个探。
             def _cached_catmap(x):
-                k = "catmap|" + (x.get("name") or "")
+                k = "catmap3|" + (x.get("name") or "")
                 try:
-                    return cache_peek(k) or {}
+                    c = cache_peek(k)
+                    return c if isinstance(c, dict) else {}
                 except Exception:
                     return {}
 
@@ -483,7 +484,10 @@ class Handler(BaseHTTPRequestHandler):
 
             src = [{"name": x.get("name"), "api": x.get("url"),
                     "type": x.get("type") or 0, "cat": x.get("cat"),
-                    "cats": maps.get(x.get("name")) or {}}
+                    "cats": (maps.get(x.get("name")) or {}).get("cats") or {},
+                    # 站内分类名：App 选「地区」时用它挑对子分类
+                    # （猫眼 动漫 → 动画片/国产动漫/欧美动漫/日韩动漫…）
+                    "names": (maps.get(x.get("name")) or {}).get("names") or {}}
                    for x in rows]
 
             # 版本号要覆盖**整包内容**，不能只哈希片源。
@@ -923,6 +927,18 @@ class Handler(BaseHTTPRequestHandler):
                             b.get("cover", ""), b.get("payload", ""),
                             profile=self.me()["id"])
             return send({"ok": True, "fav": on})
+        if path == "/api/fav/delete":
+            key = b.get("key") or ""
+            if not key:
+                return send({"ok": False, "msg": "缺 key"})
+            delete_fav(b.get("kind") or "online", key, profile=self.me()["id"])
+            return send({"ok": True})
+        if path == "/api/history/delete":
+            key = b.get("key") or ""
+            if not key:
+                return send({"ok": False, "msg": "缺 key"})
+            delete_history(b.get("kind") or "online", key, profile=self.me()["id"])
+            return send({"ok": True})
         if path == "/api/live/check":
             return send(live.check_channels(b.get("group") or ""))
         if path == "/api/live/add":

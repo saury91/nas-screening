@@ -1,7 +1,10 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.projectionroom.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -104,6 +107,13 @@ fun MineScreen(
     onPlayChannel: (MineChannel) -> Unit = {},
     /** 点某首歌：把整张列表交出去，从第 index 首开始播（和歌单页一致） */
     onPlayTrack: (List<MineTrack>, Int) -> Unit = { _, _ -> },
+    // 长按删除：收藏和记录各一条，由壳负责落库
+    onRemoveVodFav: (Vod) -> Unit = {},
+    onRemoveVodHistory: (Vod) -> Unit = {},
+    onRemoveChannelFav: (MineChannel) -> Unit = {},
+    onRemoveChannelHistory: (MineChannel) -> Unit = {},
+    onRemoveTrackFav: (MineTrack) -> Unit = {},
+    onRemoveTrackHistory: (MineTrack) -> Unit = {},
     onRefresh: () -> Unit = {},
     onSettings: () -> Unit = {},
 ) {
@@ -111,6 +121,8 @@ fun MineScreen(
     var searching by remember { mutableStateOf(false) }
     var creating by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    // 长按先弹确认，避免误删。点「删除」才真正落库
+    var pendingRemove by remember { mutableStateOf<RemoveRequest?>(null) }
     val q = query.trim()
 
     // 搜索只管名字，但会同时过滤三类 —— 用户不一定记得某个东西是"影视"还是"音乐"
@@ -223,23 +235,54 @@ fun MineScreen(
                     /* ── 收藏 ── */
                     if (favCount > 0) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
-                            SectionHead("收藏", "$favCount 项 · 点开继续看")
+                            SectionHead("收藏", "$favCount 项 · 长按可移除")
                         }
                         // 全部：三类各一条横滑轨（形状不同，不能混排到一条网格里）
                         if (kind == MineKind.All) {
                             if (vodFavs.isNotEmpty()) {
                                 item(span = { GridItemSpan(maxLineSpan) }) {
-                                    railOfVods("影视", vodFavs, onOpen)
+                                    railOfVods(
+                                        "影视", vodFavs, onOpen,
+                                        onLongClick = { v ->
+                                            pendingRemove = RemoveRequest(
+                                                title = "取消收藏",
+                                                message = "「${v.name}」将从影视收藏中移除。",
+                                                confirmText = "移除",
+                                                onConfirm = { onRemoveVodFav(v) },
+                                            )
+                                        },
+                                    )
                                 }
                             }
                             if (chFavs.isNotEmpty()) {
                                 item(span = { GridItemSpan(maxLineSpan) }) {
-                                    railOfChannels("直播", chFavs, onOpenChannel)
+                                    railOfChannels(
+                                        "直播", chFavs, onOpenChannel,
+                                        onLongClick = { c ->
+                                            pendingRemove = RemoveRequest(
+                                                title = "取消收藏",
+                                                message = "「${c.name}」将从直播收藏中移除。",
+                                                confirmText = "移除",
+                                                onConfirm = { onRemoveChannelFav(c) },
+                                            )
+                                        },
+                                    )
                                 }
                             }
                             if (tkFavs.isNotEmpty()) {
                                 item(span = { GridItemSpan(maxLineSpan) }) {
-                                    railOfTracks("音乐", tkFavs) { i -> onPlayTrack(tkFavs, i) }
+                                    railOfTracks(
+                                        "音乐", tkFavs,
+                                        onPlay = { i -> onPlayTrack(tkFavs, i) },
+                                        onLongClick = { t ->
+                                            pendingRemove = RemoveRequest(
+                                                title = "取消收藏",
+                                                message = "「${t.title}」将从音乐收藏中移除。",
+                                                confirmText = "移除",
+                                                onConfirm = { onRemoveTrackFav(t) },
+                                            )
+                                        },
+                                    )
                                 }
                             }
                         } else {
@@ -252,6 +295,14 @@ fun MineScreen(
                                         poster = v.pic,
                                         progress = v.progress,
                                         onClick = { onOpen(v) },
+                                        onLongClick = {
+                                            pendingRemove = RemoveRequest(
+                                                title = "取消收藏",
+                                                message = "「${v.name}」将从影视收藏中移除。",
+                                                confirmText = "移除",
+                                                onConfirm = { onRemoveVodFav(v) },
+                                            )
+                                        },
                                     )
                                 }
                                 MineKind.Live -> items(chFavs) { c ->
@@ -260,10 +311,29 @@ fun MineScreen(
                                         subtitle = c.group.ifBlank { "直播" },
                                         badge = if (c.urls.size > 1) "${c.urls.size} 源" else "",
                                         onClick = { onOpenChannel(c) },
+                                        onLongClick = {
+                                            pendingRemove = RemoveRequest(
+                                                title = "取消收藏",
+                                                message = "「${c.name}」将从直播收藏中移除。",
+                                                confirmText = "移除",
+                                                onConfirm = { onRemoveChannelFav(c) },
+                                            )
+                                        },
                                     )
                                 }
                                 MineKind.Music -> itemsIndexed(tkFavs) { i, t ->
-                                    TrackCard(t, onClick = { onPlayTrack(tkFavs, i) })
+                                    TrackCard(
+                                        t,
+                                        onClick = { onPlayTrack(tkFavs, i) },
+                                        onLongClick = {
+                                            pendingRemove = RemoveRequest(
+                                                title = "取消收藏",
+                                                message = "「${t.title}」将从音乐收藏中移除。",
+                                                confirmText = "移除",
+                                                onConfirm = { onRemoveTrackFav(t) },
+                                            )
+                                        },
+                                    )
                                 }
                                 MineKind.All -> Unit
                             }
@@ -273,7 +343,7 @@ fun MineScreen(
                     /* ── 播放记录 ── */
                     if (hisCount > 0) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
-                            SectionHead("播放记录", "$hisCount 条 · 点右下角接着看", top = ProomSpace.sm)
+                            SectionHead("播放记录", "$hisCount 条 · 长按可删除", top = ProomSpace.sm)
                         }
                         if (showVod && vodHis.isNotEmpty()) {
                             if (kind == MineKind.All) {
@@ -285,6 +355,14 @@ fun MineScreen(
                                         v = v,
                                         onOpen = { onOpen(v) },
                                         onPlay = { onPlay(v) },
+                                        onLongClick = {
+                                            pendingRemove = RemoveRequest(
+                                                title = "删除播放记录",
+                                                message = "「${v.name}」的播放进度将被删除，收藏不受影响。",
+                                                confirmText = "删除",
+                                                onConfirm = { onRemoveVodHistory(v) },
+                                            )
+                                        },
                                     )
                                 }
                             }
@@ -299,6 +377,14 @@ fun MineScreen(
                                         c = c,
                                         onOpen = { onOpenChannel(c) },
                                         onPlay = { onPlayChannel(c) },
+                                        onLongClick = {
+                                            pendingRemove = RemoveRequest(
+                                                title = "删除播放记录",
+                                                message = "「${c.name}」将从最近观看中移除。",
+                                                confirmText = "删除",
+                                                onConfirm = { onRemoveChannelHistory(c) },
+                                            )
+                                        },
                                     )
                                 }
                             }
@@ -309,7 +395,18 @@ fun MineScreen(
                             }
                             tkHis.forEachIndexed { i, t ->
                                 item(span = { GridItemSpan(maxLineSpan) }) {
-                                    TrackHistoryCard(t, onPlay = { onPlayTrack(tkHis, i) })
+                                    TrackHistoryCard(
+                                        t,
+                                        onPlay = { onPlayTrack(tkHis, i) },
+                                        onLongClick = {
+                                            pendingRemove = RemoveRequest(
+                                                title = "删除播放记录",
+                                                message = "「${t.title}」将从播放记录中移除。",
+                                                confirmText = "删除",
+                                                onConfirm = { onRemoveTrackHistory(t) },
+                                            )
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -324,12 +421,93 @@ fun MineScreen(
                 onCreatePlaylist(name)
             }
         }
+
+        pendingRemove?.let { req ->
+            RemoveConfirmDialog(
+                title = req.title,
+                message = req.message,
+                confirmText = req.confirmText,
+                onDismiss = { pendingRemove = null },
+                onConfirm = {
+                    pendingRemove = null
+                    req.onConfirm()
+                },
+            )
+        }
+    }
+}
+
+/** 长按后待确认的删除动作 */
+private class RemoveRequest(
+    val title: String,
+    val message: String,
+    val confirmText: String,
+    val onConfirm: () -> Unit,
+)
+
+@Composable
+private fun RemoveConfirmDialog(
+    title: String,
+    message: String,
+    confirmText: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(ProomShape.lg))
+                .background(ProomColor.bgSoft)
+                .padding(20.dp),
+        ) {
+            Text(title, style = ProomType.title, color = ProomColor.text)
+            Text(
+                message,
+                style = ProomType.meta,
+                color = ProomColor.muted,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ConfirmBtn("取消", false, Modifier.weight(1f), onDismiss)
+                ConfirmBtn(confirmText, true, Modifier.weight(1f), onConfirm)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmBtn(text: String, primary: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(ProomShape.sm))
+            .background(if (primary) ProomColor.accent else ProomColor.surface)
+            .clickable(onClick = onClick)
+            .padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            color = if (primary) Color(0xFF1B1206) else ProomColor.text,
+            style = ProomType.label,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
 /** 名字/分组名匹配：空查询视为全命中 */
 private fun match(text: String, q: String): Boolean =
     q.isBlank() || text.contains(q, ignoreCase = true)
+
+/** 点击 +（可选）长按：没有长按回调时退回普通点击，别让卡片多一层手势 */
+private fun Modifier.tap(onClick: () -> Unit, onLongClick: (() -> Unit)? = null): Modifier =
+    then(
+        if (onLongClick != null) {
+            Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+        } else {
+            Modifier.clickable(onClick = onClick)
+        },
+    )
 
 /* ───────────────────────── 顶栏 ───────────────────────── */
 
@@ -525,7 +703,12 @@ private fun RailHead(title: String, count: Int) {
 }
 
 @Composable
-private fun railOfVods(title: String, list: List<Vod>, onOpen: (Vod) -> Unit) {
+private fun railOfVods(
+    title: String,
+    list: List<Vod>,
+    onOpen: (Vod) -> Unit,
+    onLongClick: (Vod) -> Unit,
+) {
     Column {
         RailHead(title, list.size)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -536,6 +719,7 @@ private fun railOfVods(title: String, list: List<Vod>, onOpen: (Vod) -> Unit) {
                         meta = v.year.ifBlank { v.type },
                         poster = v.pic,
                         onClick = { onOpen(v) },
+                        onLongClick = { onLongClick(v) },
                     )
                 }
             }
@@ -544,7 +728,12 @@ private fun railOfVods(title: String, list: List<Vod>, onOpen: (Vod) -> Unit) {
 }
 
 @Composable
-private fun railOfChannels(title: String, list: List<MineChannel>, onOpen: (MineChannel) -> Unit) {
+private fun railOfChannels(
+    title: String,
+    list: List<MineChannel>,
+    onOpen: (MineChannel) -> Unit,
+    onLongClick: (MineChannel) -> Unit,
+) {
     Column {
         RailHead(title, list.size)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -554,6 +743,7 @@ private fun railOfChannels(title: String, list: List<MineChannel>, onOpen: (Mine
                         name = c.name,
                         subtitle = c.group.ifBlank { "直播" },
                         onClick = { onOpen(c) },
+                        onLongClick = { onLongClick(c) },
                     )
                 }
             }
@@ -562,12 +752,23 @@ private fun railOfChannels(title: String, list: List<MineChannel>, onOpen: (Mine
 }
 
 @Composable
-private fun railOfTracks(title: String, list: List<MineTrack>, onPlay: (Int) -> Unit) {
+private fun railOfTracks(
+    title: String,
+    list: List<MineTrack>,
+    onPlay: (Int) -> Unit,
+    onLongClick: (MineTrack) -> Unit,
+) {
     Column {
         RailHead(title, list.size)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             itemsIndexed(list) { i, t ->
-                Box(Modifier.width(104.dp)) { TrackCard(t, onClick = { onPlay(i) }) }
+                Box(Modifier.width(104.dp)) {
+                    TrackCard(
+                        t,
+                        onClick = { onPlay(i) },
+                        onLongClick = { onLongClick(t) },
+                    )
+                }
             }
         }
     }
@@ -710,8 +911,12 @@ private fun NewShelfCard(onClick: () -> Unit) {
 
 /** 专辑卡：1:1 封面 + 歌名 + 歌手 */
 @Composable
-private fun TrackCard(t: MineTrack, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+private fun TrackCard(
+    t: MineTrack,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Column(Modifier.fillMaxWidth().tap(onClick, onLongClick)) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -756,14 +961,19 @@ private fun TrackCard(t: MineTrack, onClick: () -> Unit) {
 
 /** 影视记录卡：2:3 小海报 + 进度线贴底 */
 @Composable
-private fun VodHistoryCard(v: Vod, onOpen: () -> Unit, onPlay: () -> Unit) {
+private fun VodHistoryCard(
+    v: Vod,
+    onOpen: () -> Unit,
+    onPlay: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
     val p = v.progress.coerceIn(0f, 1f)
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(ProomShape.sm))
             .background(ProomColor.surface)
-            .clickable(onClick = onOpen)
+            .tap(onOpen, onLongClick)
     ) {
         Row(
             Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 12.dp),
@@ -789,13 +999,18 @@ private fun VodHistoryCard(v: Vod, onOpen: () -> Unit, onPlay: () -> Unit) {
 
 /** 直播记录卡：16:9 小块 + 台名 + 分组 */
 @Composable
-private fun LiveHistoryCard(c: MineChannel, onOpen: () -> Unit, onPlay: () -> Unit) {
+private fun LiveHistoryCard(
+    c: MineChannel,
+    onOpen: () -> Unit,
+    onPlay: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(ProomShape.sm))
             .background(ProomColor.surface)
-            .clickable(onClick = onOpen)
+            .tap(onOpen, onLongClick)
     ) {
         Row(
             Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 12.dp),
@@ -835,13 +1050,17 @@ private fun LiveHistoryCard(c: MineChannel, onOpen: () -> Unit, onPlay: () -> Un
 
 /** 音乐记录卡：1:1 小封面 + 歌名 + 歌手 */
 @Composable
-private fun TrackHistoryCard(t: MineTrack, onPlay: () -> Unit) {
+private fun TrackHistoryCard(
+    t: MineTrack,
+    onPlay: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(ProomShape.sm))
             .background(ProomColor.surface)
-            .clickable(onClick = onPlay)
+            .tap(onPlay, onLongClick)
     ) {
         Row(
             Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 12.dp),

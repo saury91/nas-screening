@@ -20,10 +20,46 @@ data class Source(
      * 为空表示这个源没探到映射 —— 浏览时跳过它，搜索不受影响。
      */
     val cats: Map<String, String> = emptyMap(),
+    /**
+     * 该站的分类 ID → 站内分类名，例如 `{"40": "日韩动漫", "39": "欧美动漫"}`。
+     *
+     * 选「地区」时靠它挑对子分类：猫眼「动漫」下面依次是 动画片 / 国产动漫 /
+     * 欧美动漫 / 日韩动漫，每页只取前 3 个 id 的话「日本」永远命中不到
+     * 日韩动漫 —— 筛完就只剩几条。没有这个字段的老配置包也能跑，只是挑不准。
+     */
+    val names: Map<String, String> = emptyMap(),
 ) {
     /** 某个大类在这个源上的所有 type_id */
     fun typeIdsOf(cat: String): List<String> =
         cats.entries.filter { it.value == cat }.map { it.key }
+
+    /**
+     * 按地区优先挑子分类：分类名里带地区关键词的排前面，其余照旧兜底。
+     *
+     * 只调整顺序不动集合 —— 真正的过滤还在本地 [areaMatches] 做，
+     * 万一某个源根本没有地区子分类，行为跟以前完全一样。
+     */
+    fun typeIdsOf(cat: String, area: String): List<String> {
+        val ids = typeIdsOf(cat)
+        if (area.isBlank() || names.isEmpty()) return ids
+        val keys = areaKeys(area)
+        if (keys.isEmpty()) return ids
+        val (hit, rest) = ids.partition { id ->
+            val tn = names[id].orEmpty()
+            tn.isNotEmpty() && keys.any { tn.contains(it) }
+        }
+        return hit + rest
+    }
+
+    private fun areaKeys(area: String): List<String> = when (area) {
+        "内地" -> listOf("国产", "大陆", "内地")
+        "中国香港", "香港" -> listOf("港台", "香港")
+        "中国台湾", "台湾" -> listOf("港台", "台湾")
+        "日本" -> listOf("日韩", "日本", "日漫")
+        "韩国" -> listOf("日韩", "韩国", "韩剧")
+        "欧美", "美国", "英国", "法国" -> listOf("欧美")
+        else -> listOf(area)
+    }
 }
 
 @Serializable

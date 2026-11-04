@@ -30,7 +30,9 @@ class LibraryStoreIoTest {
             listOf(
                 LibItem(name = "片", pic = "p.jpg", type = "电影", year = "2024", ep = "第1集", position = 12, duration = 100),
                 LibItem(name = "剧", fav = true, pendingFav = true),
-            )
+            ),
+            // 墓碑也要落盘，否则重启 App 后删除会被 NAS 旧数据拉回来
+            listOf(RemovedItem(name = "删", fav = true, his = true, at = 9L)),
         )
         LibraryJsonFile.write(file, lib)
         val back = LibraryJsonFile.read(file)
@@ -39,6 +41,9 @@ class LibraryStoreIoTest {
         assertEquals(12L, back.find("片")!!.position)
         assertTrue(back.find("剧")!!.fav)
         assertTrue(back.find("剧")!!.pendingFav)
+        assertEquals(1, back.removed.size)
+        assertTrue(back.removed[0].fav)
+        assertTrue(back.removed[0].his)
     }
 
     @Test

@@ -64,14 +64,46 @@ import kotlinx.coroutines.delay
  * 输入防抖 400ms：采集站一次查询要打十几个源，每敲一个字就发一次会把 NAS 打满。
  * 电视上用遥控器输入很痛苦，所以这里同时支持「按确认立刻搜」（不等防抖）。
  */
+/**
+ * 搜索页的状态。
+ *
+ * **必须提到壳（MainActivity）里持有**，不能用页面内的 `remember`：
+ * 点搜索结果进详情页时，搜索页会离开 composition，页面内的状态被丢掉，
+ * 返回时就是一片空白 —— 用户看到的是「结果没了，得重搜」。
+ *
+ * 顺带把网格滚动位置也放进来：返回时停在原来那一屏，而不是跳回顶部。
+ */
+class SearchState {
+    var q by mutableStateOf("")
+    var committed by mutableStateOf("")
+    var loading by mutableStateOf(false)
+    var results by mutableStateOf<List<Vod>>(emptyList())
+    var err by mutableStateOf<String?>(null)
+    var searched by mutableStateOf(false)
+    // 只有「按确认 / 点热词」才算一次真正的搜索，才进历史。
+    // 防抖搜索是逐字触发的，原来每次防抖都记一条历史 —— 打 tyson 会留下
+    // t / ty / tys … 一串半截词，最近搜索列表基本没法用。
+    var explicitSearch by mutableStateOf(false)
+    // 点热词/历史时不希望软键盘弹出来：chip 行消失后焦点会掉回输入框，
+    // 输入框一拿到焦点就开软键盘，正好盖住刚出来的结果。
+    var fromChip by mutableStateOf(false)
+    /** 已经跑完一轮的关键词：从详情页返回时不必重搜（重搜既慢，结果还会闪一下） */
+    var doneFor by mutableStateOf<String?>(null)
+    val grid = androidx.compose.foundation.lazy.grid.LazyGridState()
+}
+
 @Composable
 fun SearchScreen(
     /**
      * 搜索入口由壳注入：优先本地聚合（直连源站），NAS 可用时再补一次。
      * 页面不关心数据从哪来 —— 这也是 NAS 关机还能搜的前提。
+     *
+     * 返回的是**流**：每个源一回来就发一版结果，页面边收边画。
+     * 等全部源到齐再返回的话，最慢那个源要拖满 12 秒，遥控器就只能干等着。
      */
-    search: suspend (String) -> List<Vod>,
+    search: (String) -> kotlinx.coroutines.flow.Flow<List<Vod>>,
     onOpen: (Vod) -> Unit,
+    state: SearchState,
     initialQuery: String = "",
     onBack: () -> Unit = {},
     /** 本机搜索历史（最近 10 条） */
@@ -82,53 +114,60 @@ fun SearchScreen(
     /** 状态栏高度：本页不是沉浸式，顶部要让开 */
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
-    var q by remember { mutableStateOf(initialQuery) }
-    var committed by remember { mutableStateOf(initialQuery) }
-    var loading by remember { mutableStateOf(false) }
-    var results by remember { mutableStateOf<List<Vod>>(emptyList()) }
-    var err by remember { mutableStateOf<String?>(null) }
-    var searched by remember { mutableStateOf(false) }
-    // 只有「按确认 / 点热词」才算一次真正的搜索，才进历史。
-    // 防抖搜索是逐字触发的，原来每次防抖都记一条历史 —— 打 tyson 会留下
-    // t / ty / tys … 一串半截词，最近搜索列表基本没法用。
-    var explicitSearch by remember { mutableStateOf(false) }
-    // 点热词/历史时不希望软键盘弹出来：chip 行消失后焦点会掉回输入框，
-    // 输入框一拿到焦点就开软键盘，正好盖住刚出来的结果。
-    var fromChip by remember { mutableStateOf(false) }
     val firstResult = remember { FocusRequester() }
+
+    // 带着关键词从别的页面进来（且还没有历史状态）时，直接用这个关键词
+    LaunchedEffect(Unit) {
+        if (state.q.isBlank() && initialQuery.isNotBlank()) {
+            state.q = initialQuery
+            state.committed = initialQuery
+        }
+    }
 
     // 结果到了就把焦点交给第一张海报（只在「点词进来」时这么做，
     // 手动打字时必须留在输入框里，否则打一半焦点被抢走）
-    LaunchedEffect(results, fromChip) {
-        if (!fromChip || results.isEmpty()) return@LaunchedEffect
+    LaunchedEffect(state.results, state.fromChip) {
+        if (!state.fromChip || state.results.isEmpty()) return@LaunchedEffect
         repeat(10) {
             if (runCatching { firstResult.requestFocus() }.isSuccess) {
-                fromChip = false
+                state.fromChip = false
                 return@LaunchedEffect
             }
             delay(40)
         }
     }
 
-    LaunchedEffect(committed) {
-        val kw = committed.trim()
+    LaunchedEffect(state.committed) {
+        val kw = state.committed.trim()
         if (kw.isEmpty()) {
-            results = emptyList()
-            searched = false
+            state.results = emptyList()
+            state.searched = false
+            state.err = null
+            state.doneFor = null
             return@LaunchedEffect
         }
-        delay(400)                      // 停下再查，别打满 NAS
-        if (explicitSearch) {
+        // 从详情页返回：这一轮早就跑完了，原样保留结果，别再搜一遍
+        if (kw == state.doneFor) return@LaunchedEffect
+        delay(300)                      // 停下再查
+        if (state.explicitSearch) {
             onHistoryCommit(kw)
-            explicitSearch = false
+            state.explicitSearch = false
         }
-        loading = true
-        err = null
-        runCatching { search(kw) }
-            .onSuccess { results = it }
-            .onFailure { err = it.message }
-        loading = false
-        searched = true
+        state.loading = true
+        state.err = null
+        state.searched = false
+        runCatching {
+            search(kw).collect { partial ->
+                if (partial.isEmpty()) return@collect
+                state.results = partial
+                // 首批结果一到就撤掉骨架屏，剩下的边收边往网格里补
+                state.loading = false
+                state.searched = true
+            }
+        }.onFailure { state.err = it.message }
+        state.loading = false
+        state.searched = true
+        state.doneFor = kw
     }
 
     Column(
@@ -154,21 +193,21 @@ fun SearchScreen(
         ) {
             Box(Modifier.weight(1f)) {
                 SearchField(
-                    value = q,
+                    value = state.q,
                     // 删空时立刻回到空态：等 LaunchedEffect 重启要过一帧，
                     // 中间那一帧会闪出「没找到「」，换个片名试试」
                     onValueChange = {
-                        q = it
-                        committed = it
-                        if (it.isBlank()) searched = false
+                        state.q = it
+                        state.committed = it
+                        if (it.isBlank()) state.searched = false
                     },
-                    onSearch = { explicitSearch = true; committed = q },
+                    onSearch = { state.explicitSearch = true; state.committed = state.q },
                 )
             }
         }
 
         // 历史：每条右侧一个 ×，右上角「清空」
-        if (!searched && q.isBlank() && history.isNotEmpty()) {
+        if (!state.searched && state.q.isBlank() && history.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = ProomSpace.md),
                 verticalAlignment = Alignment.CenterVertically,
@@ -183,7 +222,12 @@ fun SearchScreen(
                 items(history) { w ->
                     HistoryChip(
                         w,
-                        onPick = { explicitSearch = true; fromChip = true; q = w; committed = w },
+                        onPick = {
+                            state.explicitSearch = true
+                            state.fromChip = true
+                            state.q = w
+                            state.committed = w
+                        },
                         onRemove = { onHistoryRemove(w) },
                     )
                 }
@@ -194,7 +238,7 @@ fun SearchScreen(
         }
 
         // 电视上遥控器打字太痛苦，给几个热门词，点一下直接搜
-        if (!searched && q.isBlank()) {
+        if (!state.searched && state.q.isBlank()) {
             // 用 LazyRow：5 个词在窄屏上放不下，横滑而不是被裁掉
             Row(
                 Modifier.fillMaxWidth().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = ProomSpace.md),
@@ -207,7 +251,12 @@ fun SearchScreen(
                 contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX),
             ) {
                 items(HOT_WORDS) { w ->
-                    HotChip(w) { explicitSearch = true; fromChip = true; q = w; committed = w }
+                    HotChip(w) {
+                        state.explicitSearch = true
+                        state.fromChip = true
+                        state.q = w
+                        state.committed = w
+                    }
                 }
             }
         }
@@ -220,7 +269,7 @@ fun SearchScreen(
             val columns = ((maxWidth - TvLayout.insetX * 2) / 130.dp).toInt().coerceIn(3, 8)
             when {
                 // 骨架屏而不是转圈：网格形状先立住，结果回来直接换内容，不会整页跳
-                loading -> LazyVerticalGrid(
+                state.loading -> LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
                     contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(gap),
@@ -231,9 +280,9 @@ fun SearchScreen(
                     }
                 }
 
-                err != null -> {
+                state.err != null -> {
                     // 取一次再判断：err 是 Compose state，两次读之间可能被置空
-                    val e = err.orEmpty()
+                    val e = state.err.orEmpty()
                     // 「源都没响应」和「没这部片」不是一句话，别混着说
                     Center(
                         when {
@@ -245,17 +294,19 @@ fun SearchScreen(
                     )
                 }
 
-                searched && results.isEmpty() -> Center("没找到「$committed」，换个片名试试")
+                state.searched && state.results.isEmpty() ->
+                    Center("没找到「${state.committed}」，换个片名试试")
 
-                !searched -> Center("输入片名后按确认，会同时问所有片源")
+                !state.searched -> Center("输入片名后按确认，会同时问所有片源")
 
                 else -> LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
+                    state = state.grid,
                     horizontalArrangement = Arrangement.spacedBy(gap),
                     verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
                     contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, bottom = ProomSpace.xxl),
                 ) {
-                    itemsIndexed(results) { i, vod ->
+                    itemsIndexed(state.results) { i, vod ->
                         PosterCard(
                             title = vod.name,
                             meta = metaLine(vod.year, vod.type),

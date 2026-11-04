@@ -1,3 +1,5 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.projectionroom.ui.screen
 
 import android.app.Activity
@@ -28,8 +30,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
@@ -159,6 +159,24 @@ internal const val PLAYER_UA =
     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/120.0 Mobile Safari/537.36"
 
+/**
+ * 采集站要的请求头。
+ *
+ * Referer 用源站根域（不是页面地址）：CDN 只校验「来源域名对不对」，
+ * 多带一截路径反而可能被当成盗链。以前靠 NAS 的 /api/proxy 代补，
+ * 现在播放器自己带 —— NAS 关机也能播。
+ */
+internal fun playbackHeaders(url: String): Map<String, String> {
+    val origin = runCatching {
+        val u = java.net.URI(url)
+        if (u.scheme == null || u.host == null) "" else "${u.scheme}://${u.host}/"
+    }.getOrNull().orEmpty()
+    return buildMap {
+        put("User-Agent", PLAYER_UA)
+        if (origin.isNotBlank()) put("Referer", origin)
+    }
+}
+
 /** 进程内的初始朝向：进播放器前记一次，退出时还原到它 */
 private object OrientationMemory {
     var initial: Int? = null
@@ -238,10 +256,10 @@ private fun applyVolume(context: Context, v: Float) {
  * 时长还没探到时（刚起播 / 直播回看 / 源没给 duration）不要印 "/ 00:00"：
  * 「24:39 / 00:00」看起来像这片只有零秒、或者进度条坏了，直接用 "--:--"。
  */
-private fun progressText(position: Long, duration: Long): String =
+internal fun progressText(position: Long, duration: Long): String =
     "${formatTime(position)} / ${if (duration > 0) formatTime(duration) else "--:--"}"
 
-private fun formatTime(ms: Long): String {
+internal fun formatTime(ms: Long): String {
     if (ms <= 0) return "00:00"
     val total = ms / 1000
     val h = total / 3600
@@ -383,7 +401,8 @@ fun PlayerScreen(
     // 所以切档位 = 换一台播放器。续播点用数组而不是 state：effect 里读写它不该触发重组
     val resumeAt = remember { LongArray(1) }
     val decoderMode = PlaybackPrefs.decoder
-    val exo = remember(decoderMode) { PlaybackEngine.build(context, decoderMode) }
+
+    val exo = remember(decoderMode, live) { PlaybackEngine.build(context, decoderMode, live) }
     var stats by remember { mutableStateOf(MediaStats()) }
     var buffering by remember { mutableStateOf(true) }
     var playbackError by remember(playUrl) { mutableStateOf<String?>(null) }
@@ -850,18 +869,9 @@ fun PlayerScreen(
                 .build()
             // 直连源站：采集站的 m3u8 大多校验 Referer/UA，不带头会 403。
             // 以前靠 NAS 的 /api/proxy 代补，现在播放器自己带 —— NAS 关机也能播。
-            val origin = runCatching {
-                val u = java.net.URI(url)
-                "${u.scheme}://${u.host}/"
-            }.getOrNull().orEmpty()
             val factory = DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
-                .setDefaultRequestProperties(
-                    buildMap {
-                        put("User-Agent", PLAYER_UA)
-                        if (origin.isNotBlank()) put("Referer", origin)
-                    }
-                )
+                .setDefaultRequestProperties(playbackHeaders(url))
             // 外挂字幕来自 SAF 的 content://，DefaultHttpDataSource 读不了；
             // 用 DefaultDataSource 包一层：http(s) 仍走上面那套 UA/Referer，content/file 走本地分支。
             // 只包这一层，视频请求的行为完全不变。
@@ -910,6 +920,7 @@ fun PlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 buffering = false
+                logPlaybackError(error)
                 // 同一个台的备用源先试：采集站一个台常给 3~4 条地址，
                 // 第一条挂了不等于这个台看不了
                 if (live && curSrc + 1 < curSrcs.size) {
@@ -2997,10 +3008,14 @@ private fun PlayerInfoSheet(
                 InfoLine("带宽估计", bitrateText(stats.bandwidthBps))
                 InfoLine(
                     "丢帧",
-                    if (stats.rendered + stats.dropped > 0) {
-                        "${stats.dropped} / ${stats.rendered + stats.dropped}"
-                    } else {
-                        "—"
+                    buildString {
+                        if (stats.rendered + stats.dropped > 0) {
+                            append("${stats.dropped} / ${stats.rendered + stats.dropped}")
+                        } else {
+                            append("—")
+                        }
+                        // 卡顿次数比「当前缓不缓冲」有用：调完缓冲策略要看它有没有真的降下来
+                        if (stats.stalls > 0) append(" · 卡顿 ${stats.stalls} 次")
                     },
                 )
                 if (site.isNotBlank()) {
@@ -3022,11 +3037,21 @@ private fun PlayerInfoSheet(
         Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.1f)))
         Spacer(Modifier.height(if (tv) 13.dp else 10.dp))
 
-        Text(
-            "解码方式",
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = if (tv) 16.sp else ProomSp(11.sp),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "解码方式",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = if (tv) 16.sp else ProomSp(11.sp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                decoder.desc,
+                color = Color.White.copy(alpha = 0.3f),
+                fontSize = if (tv) 13.sp else ProomSp(9.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Spacer(Modifier.height(if (tv) 10.dp else 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(if (tv) 12.dp else 8.dp)) {
             DecoderMode.values().forEach { m ->
@@ -3035,7 +3060,7 @@ private fun PlayerInfoSheet(
         }
         Spacer(Modifier.height(if (tv) 10.dp else 7.dp))
         Text(
-            "${decoder.desc}；切换后从当前位置续播",
+            "切换后从当前位置续播",
             color = Color.White.copy(alpha = 0.34f),
             fontSize = if (tv) 14.sp else ProomSp(10.sp),
         )
@@ -3673,5 +3698,35 @@ private fun SkipPill(
                 )
             }
         }
+    }
+}
+
+/**
+ * 把 PlaybackException 的 cause 链摊平打出来。
+ *
+ * `PlaybackException` 本身只会说「Source error」，真正能定位的
+ * （哪个 URL、HTTP 状态码、Range 从哪个字节开始）全在 cause 里：
+ * `HttpDataSourceException` 带着 DataSpec，416/403 这类问题看这一行就够了。
+ * 只在出错时打，热路径上没有开销。
+ */
+private fun logPlaybackError(error: androidx.media3.common.PlaybackException) {
+    runCatching {
+        val sb = StringBuilder("playback error code=").append(error.errorCodeName)
+        var cause: Throwable? = error
+        var depth = 0
+        while (cause != null && depth < 8) {
+            sb.append("\n  ← ").append(cause.javaClass.simpleName)
+                .append(": ").append(cause.message?.replace('\n', ' ')?.take(160))
+            if (cause is androidx.media3.datasource.HttpDataSource.HttpDataSourceException) {
+                val spec = cause.dataSpec
+                sb.append("\n      uri=").append(spec.uri)
+                    .append("\n      pos=").append(spec.position)
+                    .append(" len=").append(spec.length)
+                    .append(" key=").append(spec.key)
+            }
+            cause = cause.cause
+            depth++
+        }
+        android.util.Log.w("Player", sb.toString())
     }
 }

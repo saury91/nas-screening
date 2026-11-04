@@ -39,26 +39,54 @@ data class LibItem(
         get() = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
 }
 
+/**
+ * 本机已删除、但还没推送到 NAS 的条目。
+ *
+ * 没有这层墓碑，删除只是把本机那条清空：下一次同步从 NAS 拉回旧数据，
+ * 删掉的收藏/记录又会长出来。同步成功后墓碑才移除。
+ */
 @Serializable
-data class LibFile(val items: List<LibItem> = emptyList()) {
+data class RemovedItem(
+    val name: String,
+    /** 取消收藏还没送达 NAS */
+    val fav: Boolean = false,
+    /** 删除播放记录还没送达 NAS */
+    val his: Boolean = false,
+    val at: Long = 0,
+)
 
-    fun favorites(): List<Vod> = items.filter { it.fav }
-        .sortedByDescending { it.at }
-        .map { Vod(name = it.name, pic = it.pic, type = it.type, year = it.year) }
+@Serializable
+data class LibFile(
+    val items: List<LibItem> = emptyList(),
+    val removed: List<RemovedItem> = emptyList(),
+) {
 
-    fun history(): List<Vod> = items
-        // 直播不写观看记录（进了播放器就会记，但「继续观看 CCTV10」没有意义，
-        // 也没法从中间接着看）。这里是清掉旧版本留下的那几条 ——
-        // 老记录把「直播」记在 type 上、ep 是空的，两个字段都要判。
-        .filter { (it.position > 0 || it.ep.isNotBlank()) && it.ep != "直播" && it.type != "直播" }
-        .sortedByDescending { it.at }
-        .map {
-            Vod(
-                name = it.name, pic = it.pic, year = it.year,
-                type = if (it.ep.isNotBlank()) it.ep else it.type,
-                progress = it.progress,
-            )
-        }
+    fun favorites(): List<Vod> {
+        val blocked = removed.filter { it.fav }.mapTo(HashSet()) { it.name }
+        return items.filter { it.fav && it.name !in blocked }
+            .sortedByDescending { it.at }
+            .map { Vod(name = it.name, pic = it.pic, type = it.type, year = it.year) }
+    }
+
+    fun history(): List<Vod> {
+        val blocked = removed.filter { it.his }.mapTo(HashSet()) { it.name }
+        return items
+            // 直播不写观看记录（进了播放器就会记，但「继续观看 CCTV10」没有意义，
+            // 也没法从中间接着看）。这里是清掉旧版本留下的那几条 ——
+            // 老记录把「直播」记在 type 上、ep 是空的，两个字段都要判。
+            .filter {
+                (it.position > 0 || it.ep.isNotBlank()) &&
+                    it.ep != "直播" && it.type != "直播" && it.name !in blocked
+            }
+            .sortedByDescending { it.at }
+            .map {
+                Vod(
+                    name = it.name, pic = it.pic, year = it.year,
+                    type = if (it.ep.isNotBlank()) it.ep else it.type,
+                    progress = it.progress,
+                )
+            }
+    }
 
     fun find(name: String): LibItem? = items.firstOrNull { it.name == name }
 }
@@ -85,6 +113,14 @@ object LibraryStore {
     ): LibFile = LibraryOps
         .touchHistory(load(ctx), vod, ep, position, duration, System.currentTimeMillis())
         .also { save(ctx, it) }
+
+    /** 取消收藏：本地立刻消失，同步器随后把删除推到 NAS */
+    fun removeFav(ctx: Context, name: String): LibFile =
+        LibraryOps.removeFav(load(ctx), name, System.currentTimeMillis()).also { save(ctx, it) }
+
+    /** 删除播放记录：收藏若还在，条目保留；同步器随后把记录从 NAS 删掉 */
+    fun removeHistory(ctx: Context, name: String): LibFile =
+        LibraryOps.removeHistory(load(ctx), name, System.currentTimeMillis()).also { save(ctx, it) }
 
     /** 同步器用：标记某些条目的某类改动已经送达 */
     fun markSynced(ctx: Context, lib: LibFile, names: Set<String>, fav: Boolean, his: Boolean): LibFile =
@@ -140,7 +176,36 @@ internal object LibraryOps {
         }
         val items = if (old != null) lib.items.map { if (it.name == vod.name) next else it }
         else lib.items + next
-        return LibFile(items)
+        // 重新收藏 = 撤销之前的删除，否则墓碑会一直把 NAS 上的收藏挡回去
+        val removed = if (next.fav) clearRemoved(lib.removed, vod.name, fav = true, his = false)
+        else lib.removed
+        return LibFile(items, removed)
+    }
+
+    fun removeFav(lib: LibFile, name: String, now: Long): LibFile {
+        val items = lib.items.mapNotNull {
+            if (it.name != name) it
+            else {
+                val next = it.copy(fav = false, pendingFav = false, at = now)
+                // 还有播放记录就留着（记录卡里还会出现），否则整条删掉
+                if (next.position > 0 || next.ep.isNotBlank()) next else null
+            }
+        }
+        return LibFile(items, markRemoved(lib.removed, name, now, fav = true, his = false))
+    }
+
+    fun removeHistory(lib: LibFile, name: String, now: Long): LibFile {
+        val items = lib.items.mapNotNull {
+            if (it.name != name) it
+            else {
+                val next = it.copy(
+                    ep = "", position = 0, duration = 0, pendingHis = false, at = now,
+                )
+                // 收藏还在的话只清进度，收藏卡不能跟着消失
+                if (next.fav) next else null
+            }
+        }
+        return LibFile(items, markRemoved(lib.removed, name, now, fav = false, his = true))
     }
 
     fun touchHistory(
@@ -164,7 +229,8 @@ internal object LibraryOps {
         )
         val items = if (old != null) lib.items.map { if (it.name == vod.name) next else it }
         else lib.items + next
-        return LibFile(items)
+        // 又看了一遍 = 撤销「删除记录」，不然刚看的东西不会出现在记录里
+        return LibFile(items, clearRemoved(lib.removed, vod.name, fav = false, his = true))
     }
 
     fun markSynced(lib: LibFile, names: Set<String>, fav: Boolean, his: Boolean): LibFile {
@@ -176,6 +242,42 @@ internal object LibraryOps {
                 )
             } else it
         }
-        return LibFile(items)
+        return LibFile(items, lib.removed)
+    }
+
+    /** 删除成功或用户重新操作后，把墓碑上对应的那一位清掉 */
+    private fun clearRemoved(
+        list: List<RemovedItem>,
+        name: String,
+        fav: Boolean,
+        his: Boolean,
+    ): List<RemovedItem> {
+        if (list.none { it.name == name && ((fav && it.fav) || (his && it.his)) }) return list
+        return list.mapNotNull {
+            if (it.name != name) it
+            else {
+                val next = it.copy(
+                    fav = if (fav) false else it.fav,
+                    his = if (his) false else it.his,
+                )
+                if (next.fav || next.his) next else null
+            }
+        }
+    }
+
+    private fun markRemoved(
+        list: List<RemovedItem>,
+        name: String,
+        now: Long,
+        fav: Boolean,
+        his: Boolean,
+    ): List<RemovedItem> {
+        val old = list.firstOrNull { it.name == name }
+        val next = (old ?: RemovedItem(name = name)).copy(
+            fav = old?.fav == true || fav,
+            his = old?.his == true || his,
+            at = now,
+        )
+        return list.filterNot { it.name == name } + next
     }
 }

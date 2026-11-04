@@ -22,11 +22,36 @@ object LibrarySync {
         // 里面的 LibraryStore.replace 会写整个 library.json（StrictMode 抓到的就是它）
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             var cur = lib
+            // 先推删除：否则下面的 pull 会把 NAS 上还没删掉的旧条目又拉回来
+            runCatching { cur = pushRemoved(ctx, api, cur) }
             runCatching { cur = pushFavorites(ctx, api, cur) }
             runCatching { cur = pushHistory(ctx, api, cur) }
             runCatching { cur = pull(ctx, api, cur) }
             cur
         }
+    }
+
+    private suspend fun pushRemoved(ctx: Context, api: NasApi, lib: LibFile): LibFile {
+        if (lib.removed.isEmpty()) return lib
+        val favDone = mutableSetOf<String>()
+        val hisDone = mutableSetOf<String>()
+        for (item in lib.removed) {
+            if (item.fav) {
+                runCatching { api.deleteFavorite(item.name) }
+                    .onSuccess { if (it) favDone += item.name }
+            }
+            if (item.his) {
+                runCatching { api.deleteHistory(item.name) }
+                    .onSuccess { if (it) hisDone += item.name }
+            }
+        }
+        if (favDone.isEmpty() && hisDone.isEmpty()) return lib
+        val left = lib.removed.mapNotNull {
+            val fav = it.fav && it.name !in favDone
+            val his = it.his && it.name !in hisDone
+            if (fav || his) it.copy(fav = fav, his = his) else null
+        }
+        return LibraryStore.replace(ctx, lib.copy(removed = left))
     }
 
     private suspend fun pushFavorites(ctx: Context, api: NasApi, lib: LibFile): LibFile {
