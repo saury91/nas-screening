@@ -3,6 +3,8 @@ package com.projectionroom.ui.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -77,31 +80,29 @@ internal fun PlayerTrackSheet(
     // 横屏只有 390dp 高：面板必须能滚，不能像倍速面板那样直接排下去
     val maxH = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
     val rowWidth = if (isTv) 300.dp else 214.dp
-    val firstFocus = remember { FocusRequester() }
+    val firstFocus = rememberSheetFirstFocus()
+    val closeFocus = remember { FocusRequester() }
 
-    // 打开就把焦点领进面板：遥控器上不这样做，用户要先按方向键才「进得来」
-    LaunchedEffect(Unit) {
-        repeat(3) {
-            delay(80)
-            runCatching { firstFocus.requestFocus() }
-        }
-    }
-
+    // 遮罩层只吃触摸、不进焦点树：遮罩一旦可聚焦，遥控器就会掉进这一整屏的
+    // 「隐形按钮」里；电视上根本没有「点遮罩」这个动作。
     Box(
         modifier
             .fillMaxSize()
-            .focusProperties { canFocus = false }
-            .clickable(onClick = onClose),
+            .pointerInput(Unit) { detectTapGestures { onClose() } },
         contentAlignment = Alignment.Center,
     ) {
         Column(
             Modifier
                 .width(if (isTv) 400.dp else 300.dp)
                 .heightIn(max = maxH)
+                // 面板自成一「组」：方向键在面板内走完自己的一圈，
+                // 不会从最上面的行一路跳到面板外背后的控件上
+                .focusGroup()
                 .clip(shape)
                 .background(Color.Black.copy(alpha = 0.93f))
                 .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
-                .clickable(enabled = false) {}
+                // 只拦点击、不进焦点树：clickable 会让面板本体成为没有环的可聚焦节点
+                .pointerInput(Unit) { detectTapGestures { } }
                 .padding(vertical = if (isTv) 16.dp else 10.dp),
         ) {
             Row(
@@ -117,8 +118,12 @@ internal fun PlayerTrackSheet(
                 Spacer(Modifier.weight(1f))
                 Box(
                     Modifier.size(if (isTv) 44.dp else 30.dp)
+                        // ✕ 在标题行、和下面那列行不在同一条轴上，方向键的几何搜索
+                        // 找不到它。显式接一条：首行 ↑ 到 ✕，✕ ↓ 回首行
+                        .focusRequester(closeFocus)
+                        .focusProperties { down = firstFocus }
+                        .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f, inset = true)
                         .clip(CircleShape)
-                        .tvFocusRing(CircleShape)
                         .clickable(onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -136,7 +141,9 @@ internal fun PlayerTrackSheet(
                 PanelRow(
                     label = "关闭",
                     selected = !subtitleOn,
-                    modifier = Modifier.focusRequester(firstFocus),
+                    modifier = Modifier
+                        .focusProperties { up = closeFocus }
+                        .focusRequester(firstFocus),
                     width = rowWidth,
                 ) { onPickText(null) }
                 textTracks.forEach { t ->
@@ -272,9 +279,9 @@ private fun ScaleChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(8.dp)
     Box(
         Modifier
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(shape)
             .background(if (selected) ProomColor.accent else Color.White.copy(alpha = 0.10f))
-            .tvFocusRing(shape, zoom = 1f)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {

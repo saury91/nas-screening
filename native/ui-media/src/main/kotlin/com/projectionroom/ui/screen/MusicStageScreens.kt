@@ -59,6 +59,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -471,7 +472,12 @@ private fun StageHeader(
     }
     Box(Modifier.fillMaxWidth().height(56.dp)) {
         Box(
-            Modifier.align(Alignment.CenterStart).size(48.dp).clip(CircleShape).clickable(onClick = onBack),
+            Modifier
+                .align(Alignment.CenterStart)
+                .size(48.dp)
+                .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f, inset = true)
+                .clip(CircleShape)
+                .clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
             Icon(TabIcons.Back, "返回", tint = ProomColor.text, modifier = Modifier.size(24.dp))
@@ -497,7 +503,6 @@ private fun SleepBtn(size: Dp, onClick: () -> Unit, focusable: Boolean = true) {
         Modifier
             .size(size)
             .focusProperties { canFocus = focusable }
-            .clip(CircleShape)
             .tvFocusRing(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -526,7 +531,6 @@ private fun FavBtn(size: Dp, focusable: Boolean = true, onClick: (() -> Unit)? =
         Modifier
             .size(size)
             .focusProperties { canFocus = focusable }
-            .clip(CircleShape)
             .tvFocusRing(CircleShape)
             .clickable { if (onClick != null) onClick() else MusicBox.toggleFav() },
         contentAlignment = Alignment.Center,
@@ -550,7 +554,6 @@ private fun FxBtn(size: Dp, onFx: () -> Unit, focusable: Boolean = true) {
         Modifier
             .size(size)
             .focusProperties { canFocus = focusable }
-            .clip(CircleShape)
             .tvFocusRing(CircleShape)
             .clickable(onClick = onFx),
         contentAlignment = Alignment.Center,
@@ -573,7 +576,6 @@ private fun StopBtn(size: Dp, focusable: Boolean = true, onClick: () -> Unit) {
         Modifier
             .size(size)
             .focusProperties { canFocus = focusable }
-            .clip(CircleShape)
             .tvFocusRing(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -1010,7 +1012,6 @@ private fun StageIconBtn(
             // 44dp 在一米外的遥控器手势下偏小；50dp 既是可点区也是焦点环直径
             .size(50.dp)
             .focusProperties { canFocus = focusable }
-            .clip(CircleShape)
             .tvFocusRing(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -1146,10 +1147,27 @@ private fun HairProgress(
                 Offset(0f, cy), Offset(size.width, cy), stroke, StrokeCap.Round,
             )
             drawLine(ProomColor.accent, Offset(0f, cy), Offset(x, cy), stroke, StrokeCap.Round)
-            // 金点。焦点时放大到 15dp 并补一圈白环 —— 白 = 焦点，三米外也认得出来
+            // 焦点时放大并补一圈白环 —— 白 = 焦点，三米外也认得出来。
+            // 光晕原来是金的，和视频进度条不一致，现在两边都是「白晕 + 深缝 + 白环」
             val dotPx = dot.dp.toPx()
             if (glow > 0.01f) {
-                drawCircle(ProomColor.accent.copy(alpha = 0.16f * glow), (dotPx + 11.dp.toPx()) / 2f, Offset(x, cy))
+                drawCircle(
+                    Color.White.copy(alpha = 0.14f * glow),
+                    (dotPx + 18.dp.toPx()) / 2f,
+                    Offset(x, cy),
+                )
+                // 深缝：点本身是白的，白环贴上去会糊成一坨
+                drawCircle(
+                    Color.Black.copy(alpha = 0.5f * glow),
+                    (dotPx + 12.dp.toPx()) / 2f,
+                    Offset(x, cy),
+                )
+                drawCircle(
+                    Color.White.copy(alpha = 0.95f * glow),
+                    (dotPx + 8.dp.toPx()) / 2f,
+                    Offset(x, cy),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()),
+                )
             }
             drawCircle(if (glow > 0.5f) Color.White else ProomColor.accent, dotPx / 2f, Offset(x, cy))
             if (glow > 0.5f) {
@@ -1182,8 +1200,8 @@ private fun StageQueueSheet(wide: Boolean, onClose: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.55f))
-                .focusProperties { canFocus = false }
-                .clickable(onClick = onClose),
+                // 遮罩只吃触摸、不进焦点树，否则遥控器会掉进整屏的「隐形按钮」
+                .pointerInput(Unit) { detectTapGestures { onClose() } },
         )
         Column(
             if (wide) {
@@ -1209,7 +1227,14 @@ private fun StageQueueSheet(wide: Boolean, onClose: () -> Unit) {
                 Text("播放列表", style = ProomType.title, color = ProomColor.text)
                 Text("  ${MusicBox.queue.size} 首", style = ProomType.meta, color = ProomColor.muted)
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.size(if (wide) 44.dp else 34.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .size(if (wide) 44.dp else 34.dp)
+                        .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f, inset = true)
+                        .clip(CircleShape)
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Text("✕", style = ProomType.title, color = ProomColor.muted)
                 }
             }
@@ -1219,9 +1244,13 @@ private fun StageQueueSheet(wide: Boolean, onClose: () -> Unit) {
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(ProomShape.sm))
+                            .tvFocusRing(
+                                RoundedCornerShape(ProomShape.sm),
+                                ringWidth = 2.dp,
+                                zoom = 1f,
+                                inset = true,
+                            )
                             .background(if (on) ProomColor.accentSoft else Color.Transparent)
-                            .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
                             .then(if (i == 0) Modifier.focusRequester(firstFocus) else Modifier)
                             .clickable { MusicBox.playAt(context, i) }
                             .padding(horizontal = if (wide) 14.dp else 10.dp, vertical = if (wide) 12.dp else 10.dp),
@@ -1269,8 +1298,8 @@ private fun StageFxSheet(onClose: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.5f))
-                .focusProperties { canFocus = false }
-                .clickable(onClick = onClose),
+                // 同上：遮罩只吃触摸
+                .pointerInput(Unit) { detectTapGestures { onClose() } },
         )
         Column(
             Modifier
@@ -1278,7 +1307,8 @@ private fun StageFxSheet(onClose: () -> Unit) {
                 .width(260.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(ProomColor.bgSoft)
-                .clickable(enabled = false) {}
+                // 只拦点击、不进焦点树：可聚焦的面板本体没有环，光标会「消失」
+                .pointerInput(Unit) { detectTapGestures { } }
                 .padding(18.dp),
         ) {
             Text("音效", style = ProomType.title, color = ProomColor.text, fontSize = ProomSp(16.sp))
@@ -1296,9 +1326,13 @@ private fun StageFxSheet(onClose: () -> Unit) {
                         Row(
                             Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(ProomShape.sm))
+                                .tvFocusRing(
+                                    RoundedCornerShape(ProomShape.sm),
+                                    ringWidth = 2.dp,
+                                    zoom = 1f,
+                                    inset = true,
+                                )
                                 .background(if (on) ProomColor.accentSoft else Color.Transparent)
-                                .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
                                 .then(
                                     if (rowIdx == 0 && colIdx == 0) Modifier.focusRequester(firstFocus)
                                     else Modifier
@@ -1325,6 +1359,13 @@ private fun StageFxSheet(onClose: () -> Unit) {
             Row(
                 Modifier
                     .fillMaxWidth()
+                    // 这一行原来完全没有焦点态：遥控器停在这，屏幕上是「没有光标」
+                    .tvFocusRing(
+                        RoundedCornerShape(ProomShape.sm),
+                        ringWidth = 2.dp,
+                        zoom = 1f,
+                        inset = true,
+                    )
                     .clip(RoundedCornerShape(ProomShape.sm))
                     .clickable { AudioFx.setLoudnessOn(!AudioFx.loudness) }
                     .padding(horizontal = 10.dp, vertical = 10.dp),
@@ -1461,8 +1502,8 @@ private fun StageSleepSheet(onClose: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.5f))
-                .focusProperties { canFocus = false }
-                .clickable(onClick = onClose),
+                // 同上：遮罩只吃触摸
+                .pointerInput(Unit) { detectTapGestures { onClose() } },
         )
         Column(
             Modifier
@@ -1470,7 +1511,8 @@ private fun StageSleepSheet(onClose: () -> Unit) {
                 .width(260.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(ProomColor.bgSoft)
-                .clickable(enabled = false) {}
+                // 只拦点击、不进焦点树：可聚焦的面板本体没有环，光标会「消失」
+                .pointerInput(Unit) { detectTapGestures { } }
                 .padding(18.dp),
         ) {
             Text("睡眠定时", style = ProomType.title, color = ProomColor.text, fontSize = ProomSp(16.sp))
@@ -1486,9 +1528,13 @@ private fun StageSleepSheet(onClose: () -> Unit) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(ProomShape.sm))
+                        .tvFocusRing(
+                            RoundedCornerShape(ProomShape.sm),
+                            ringWidth = 2.dp,
+                            zoom = 1f,
+                            inset = true,
+                        )
                         .background(if (on) ProomColor.accentSoft else Color.Transparent)
-                        .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
                         .then(if (idx == 0) Modifier.focusRequester(firstFocus) else Modifier)
                         .clickable { SleepTimer.start(m); onClose() }
                         .padding(horizontal = 10.dp, vertical = 12.dp),
@@ -1507,9 +1553,13 @@ private fun StageSleepSheet(onClose: () -> Unit) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(ProomShape.sm))
+                    .tvFocusRing(
+                        RoundedCornerShape(ProomShape.sm),
+                        ringWidth = 2.dp,
+                        zoom = 1f,
+                        inset = true,
+                    )
                     .background(if (trackEnd) ProomColor.accentSoft else Color.Transparent)
-                    .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
                     .clickable { SleepTimer.startTrackEnd(); onClose() }
                     .padding(horizontal = 10.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1529,8 +1579,12 @@ private fun StageSleepSheet(onClose: () -> Unit) {
                     fontSize = ProomSp(13.sp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(ProomShape.sm))
-                        .tvFocusRing(RoundedCornerShape(ProomShape.sm), ringWidth = 2.dp, zoom = 1f)
+                        .tvFocusRing(
+                            RoundedCornerShape(ProomShape.sm),
+                            ringWidth = 2.dp,
+                            zoom = 1f,
+                            inset = true,
+                        )
                         .clickable { SleepTimer.cancel(); onClose() }
                         .padding(horizontal = 10.dp, vertical = 12.dp),
                 )

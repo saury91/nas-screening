@@ -85,6 +85,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -131,7 +132,10 @@ import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.component.tvFocusRing
 import com.projectionroom.ui.theme.LocalProomTv
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvSpace
+import com.projectionroom.ui.theme.TvIcon
 import com.projectionroom.ui.theme.ProomSp
+import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
 import kotlinx.coroutines.delay
 import java.util.Locale
@@ -916,6 +920,9 @@ fun PlayerScreen(
     val curSrc by rememberUpdatedState(srcIndex)
     val curSideSub by rememberUpdatedState(sideSub)
 
+    /** 第 [i] 条线路有多少集；至少给 1，`coerceIn(0, n - 1)` 才有合法上界 */
+    fun lineEpCount(i: Int): Int = (vod.lines.getOrNull(i)?.episodes?.size ?: 0).coerceAtLeast(1)
+
     DisposableEffect(exo) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -932,8 +939,13 @@ fun PlayerScreen(
                 // 采集站给的直链经常过期，用户不该自己一条条试
                 if (!live && curLineIndex + 1 < vod.lines.size) {
                     failedLines += 1
-                    lineIndex = curLineIndex + 1
-                    epIndex = 0
+                    val next = curLineIndex + 1
+                    lineIndex = next
+                    // 换**线路**不是换**集**。原来这里写死 epIndex = 0，线上表现是
+                    // 「详情页点第 2 集 → 实际播第 1 集」：第 2 集的直链过期触发换线，
+                    // 集数跟着被清零，标题栏也老实显示「第 1 集」，用户只会以为选集按钮坏了。
+                    // 新线路集数不够时才往回收，别越界成黑屏
+                    epIndex = epIndex.coerceIn(0, lineEpCount(next) - 1)
                     playbackError = null
                 } else {
                     playbackError = if (live) "这个台的源都播不动" else if (failedLines > 0) "所有线路都播不动" else "这条线路播不动"
@@ -1016,7 +1028,8 @@ fun PlayerScreen(
         } else if (!live && lineIndex + 1 < vod.lines.size) {
             failedLines += 1
             lineIndex += 1
-            epIndex = 0
+            // 同上：起播超时换线路也不许换集，否则「点第 2 集」在这条路径上同样退化成第 1 集
+            epIndex = epIndex.coerceIn(0, lineEpCount(lineIndex) - 1)
             playbackError = null
         } else {
             playbackError = if (live) "这个台的源都播不动" else "这条线路播不动"
@@ -1077,7 +1090,13 @@ fun PlayerScreen(
     // 否则方向键会被一层看不见的按钮吃掉，表现为「按了没反应」。
     // 收回焦点必须用 requestFocus(rootFocus) 而不是 clearFocus()：后者让整棵树
     // 都没有焦点，遥控器的按键就再也进不到 onPreviewKeyEvent 了。
-    LaunchedEffect(controlsVisible) {
+    // 浮层（播放设置 / 播放信息 / 睡眠定时 / 投屏 / 选集抽屉）自己管焦点。
+    // 这些浮层一打开控制层就会收起，这里的「焦点还给根节点」会立刻把刚进面板的
+    // 焦点抢回根节点；根节点再把方向键当成「唤出控制层」吃掉 —— 表现为面板里
+    // 怎么按都不动、行上的焦点环永远画不出来。
+    val overlayOpen = trackOpen || infoOpen || sleepOpen || castOpen || sidePanel || panel != Panel.None
+    LaunchedEffect(controlsVisible, overlayOpen) {
+        if (overlayOpen) return@LaunchedEffect
         if (!controlsVisible) {
             // 控制层收起时一并退出调进度模式，否则左右键会继续被它接管
             seekMode = false
@@ -1398,7 +1417,7 @@ fun PlayerScreen(
                         line?.let { "第 ${epIndex + 1} 集 · ${it.site}" } ?: ""
                     },
                     color = Color.White.copy(alpha = 0.55f),
-                    fontSize = if (isTv) 16.sp else ProomSp(11.sp),
+                    fontSize = if (isTv) ProomType.meta.fontSize else ProomSp(11.sp),
                     modifier = Modifier.padding(top = 10.dp),
                 )
                 // 转圈时最想知道的是「到底有没有在下载」：0 KB/s 和 8 MB/s
@@ -1410,7 +1429,7 @@ fun PlayerScreen(
                         else -> "连接中…"
                     },
                     color = Color.White.copy(alpha = 0.34f),
-                    fontSize = if (isTv) 14.sp else ProomSp(10.sp),
+                    fontSize = if (isTv) ProomType.label.fontSize else ProomSp(10.sp),
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
@@ -1658,7 +1677,9 @@ fun PlayerScreen(
                                 srcIndex = it
                             } else if (it != lineIndex) {
                                 lineIndex = it
-                                epIndex = 0
+                                // 手动换线路同样是「换源不换集」：用户在第 3 集卡住了才来
+                                // 换线路，换完又把他扔回第 1 集，等于让他重新点一遍
+                                epIndex = epIndex.coerceIn(0, lineEpCount(it) - 1)
                             }
                             sidePanel = false
                         },
@@ -1688,7 +1709,7 @@ fun PlayerScreen(
                         },
                         onLine = {
                             lineIndex = it
-                            epIndex = 0
+                            epIndex = epIndex.coerceIn(0, lineEpCount(it) - 1)
                             panel = Panel.None
                         },
                         onDismiss = { panel = Panel.None },
@@ -1894,8 +1915,11 @@ private fun PlayerTopBar(
             Modifier
                 .fillMaxWidth()
                 .background(
+                    // 线性渐变必须一路收干净到透明：试过「前 70% 恒 0.9、最后 30% 掉到 0」，
+                    // 台标只淡了一点点，反而在顶栏底边切出一道硬边（视频稍亮就是一横条）。
+                    // 台标是画面的一部分，压不到零；靠「返回」胶囊自己的底色挡住就够了
                     Brush.verticalGradient(
-                        listOf(Color.Black.copy(alpha = 0.62f), Color.Transparent)
+                        listOf(Color.Black.copy(alpha = 0.86f), Color.Transparent)
                     )
                 )
                 .statusBarsPadding()
@@ -1906,14 +1930,16 @@ private fun PlayerTopBar(
                 title = listOfNotNull(title, subtitle.takeIf { it.isNotBlank() })
                     .joinToString(" · ")
                     .ifBlank { null },
-                // 视频画面不是暗底：文字用亮色，再垫一层半透明底，
-                // 否则直播左上角的台标会和「返回」重叠到看不清（CCTV 那排尤其明显）
+                // 视频画面不是暗底：文字用亮色，再垫一层半透明底。
+                // 左上角是所有片源默认烧台标的位置（CCTV、GagaOOLala…），「返回」
+                // 必然压在上面；0.45 的黑挡不住亮灰台标，字号一小就糊成一团，
+                // 抬到 0.72 让胶囊真正成为一块底，台标只从胶囊外侧露出来
                 hintColor = Color.White.copy(alpha = 0.92f),
-                hintBackdrop = Color.Black.copy(alpha = 0.45f),
+                hintBackdrop = Color.Black.copy(alpha = 0.72f),
                 trailing = {
                     if (!liveChannel.isNullOrBlank()) {
                         Box(
-                            Modifier.size(TvLayout.minTouch).clip(CircleShape).tvFocusRing(CircleShape)
+                            Modifier.size(TvLayout.minTouch).tvFocusRing(CircleShape).clip(CircleShape)
                                 .clickable(onClick = onToggleFav),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -1921,7 +1947,7 @@ private fun PlayerTopBar(
                                 imageVector = if (favOn) TabIcons.HeartOn else TabIcons.Heart,
                                 contentDescription = if (favOn) "取消收藏这个台" else "收藏这个台",
                                 tint = if (favOn) ProomColor.accent else Color.White,
-                                modifier = Modifier.size(23.dp),
+                                modifier = Modifier.size(TvIcon.toolbar),
                             )
                         }
                     }
@@ -1936,7 +1962,7 @@ private fun PlayerTopBar(
             .fillMaxWidth()
             .background(
                 Brush.verticalGradient(
-                    listOf(Color.Black.copy(alpha = 0.62f), Color.Transparent)
+                    listOf(Color.Black.copy(alpha = 0.86f), Color.Transparent)
                 )
             )
             .statusBarsPadding()
@@ -1977,14 +2003,14 @@ private fun PlayerTopBar(
         // 和手势/内容层叠在一起，点起来很飘
         if (!liveChannel.isNullOrBlank()) {
             Box(
-                Modifier.size(48.dp).clip(CircleShape).tvFocusRing(CircleShape).clickable(onClick = onToggleFav),
+                Modifier.size(48.dp).tvFocusRing(CircleShape).clip(CircleShape).clickable(onClick = onToggleFav),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = if (favOn) TabIcons.HeartOn else TabIcons.Heart,
                     contentDescription = if (favOn) "取消收藏这个台" else "收藏这个台",
                     tint = if (favOn) ProomColor.accent else Color.White,
-                    modifier = Modifier.size(21.dp),
+                    modifier = Modifier.size(TvIcon.toolbar),
                 )
             }
         }
@@ -2076,7 +2102,7 @@ private fun PlayerBottomBar(
                 Text(
                     liveTitle,
                     color = Color.White,
-                    fontSize = if (tv) 22.sp else ProomSp(14.sp),
+                    fontSize = if (tv) ProomType.title.fontSize else ProomSp(14.sp),
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -2093,7 +2119,7 @@ private fun PlayerBottomBar(
                     Text(
                         if (liveCounter.isBlank()) "直播中" else "直播中 · $liveCounter",
                         color = Color.White.copy(alpha = 0.62f),
-                        fontSize = if (tv) 16.sp else ProomSp(11.sp),
+                        fontSize = if (tv) ProomType.meta.fontSize else ProomSp(11.sp),
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
@@ -2159,7 +2185,10 @@ private fun PlayerBottomBar(
                 )
                 Box(
                     Modifier
-                        .size(52.dp)
+                        .size(TvLayout.minTouch)
+                        // 投屏条的青色是「状态色」（正在投给谁），不是焦点色；
+                        // 焦点仍然只由白环表达，之前这颗按钮压根没有环
+                        .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f, inset = true)
                         .clip(CircleShape)
                         .background(Brush.linearGradient(listOf(CastCyanLight, CastCyan)))
                         .clickable(onClick = onTogglePlay),
@@ -2183,7 +2212,102 @@ private fun PlayerBottomBar(
                 }
                 CastTextButton(if (live) "换源" else "选集", onSettings)
             }
+        } else if (tv) {
+            // 电视：三组绝对定位 —— 左「时间 · 跳过片头」、中「上一集/播放/下一集」、右「工具」。
+            //
+            // 原来是一条 Row 加两个 weight：左侧只有一个时间码，右侧塞了 6 个按钮，
+            // 重量差了一倍多，于是播放键被推到偏左半屏的位置，整条控制层看着是歪的。
+            // 现在播放键钉死在屏幕正中，左右两侧的「视觉重量」也大致对得上。
+            Box(Modifier.fillMaxWidth().height(80.dp)) {
+                Row(
+                    Modifier.align(Alignment.CenterStart),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (!live) {
+                        Text(
+                            text = progressText(
+                                if (dragging) (dragValue * duration).toLong() else position,
+                                duration,
+                            ),
+                            color = Color.White.copy(alpha = 0.72f),
+                            // 电视上时间码是唯一的「进度」读数，15sp 起步；
+                            // 等宽数字：秒数跳动时时间码不会左右抖
+                            style = ProomType.meta.copy(fontFeatureSettings = "tnum"),
+                        )
+                    }
+                    // 跳过片头放左侧、贴着时间码：右侧那排图标是「设置类」的，
+                    // 把一个带文字的暖色药丸混进去，一排圆钮的节奏就断了；
+                    // 而且片头区间一过它就消失，放在左侧不会让右侧的钮整体位移
+                    onSkipIntro?.let {
+                        Spacer(Modifier.width(TvSpace.s16))
+                        SkipIntroChip(it)
+                    }
+                }
+
+                Row(
+                    Modifier.align(Alignment.Center),
+                    horizontalArrangement = Arrangement.spacedBy(TvSpace.s12),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircleIcon(
+                        PlayerIcons.Prev, if (live) "上一台" else "上一集", onPrev,
+                        enabled = hasPrev,
+                        size = 52.dp,
+                    )
+                    PlayPauseButton(
+                        isPlaying = isPlaying,
+                        boxSize = 64.dp,
+                        iconSize = 30.dp,
+                        playFocus = playFocus,
+                        onSeekFocus = onSeekFocus,
+                        onTogglePlay = onTogglePlay,
+                    )
+                    CircleIcon(
+                        PlayerIcons.Next, if (live) "下一台" else "下一集", onNext,
+                        enabled = hasNext,
+                        size = 52.dp,
+                    )
+                }
+
+                Row(
+                    Modifier.align(Alignment.CenterEnd),
+                    horizontalArrangement = Arrangement.spacedBy(TvSpace.s12),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
+                    if (!live) {
+                        CircleTextChip(speedLabel(speed), onSpeed, size = 52.dp)
+                        // 定时开着时图标变金：不然「有没有设过」完全看不出来
+                        val sleepOn = SleepTimer.mode != SleepTimer.Mode.Off
+                        CircleIcon(
+                            PlayerIcons.Timer,
+                            if (sleepOn) "睡眠定时 · ${SleepTimer.remainingText()}" else "睡眠定时",
+                            onSleep,
+                            tint = if (sleepOn) ProomColor.accent else null,
+                            size = 52.dp,
+                        )
+                    }
+                    // 直播也留这个入口：体育台的双语解说、赛事字幕都在音轨/字幕轨里
+                    CircleIcon(
+                        PlayerIcons.Subtitle,
+                        "字幕与音轨",
+                        onTracks,
+                        tint = if (subtitleOn) ProomColor.accent else null,
+                        size = 52.dp,
+                    )
+                    // 直播也留这个入口：IPTV 卡不卡、码流多大，同样要能看见
+                    CircleIcon(PlayerIcons.Info, "播放信息", onInfo, size = 52.dp)
+                    CircleIcon(
+                        PlayerIcons.More,
+                        if (live) "换源" else "选集与线路",
+                        onSettings,
+                        size = 52.dp,
+                    )
+                }
+            }
         } else {
+            // 手机：屏幕只有 360~420dp，三组并排放不下，保持「时间 — 中间 — 右侧」的挤排，
+            // 右侧工具也只留最常用的四个
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (!live) {
                     Text(
@@ -2192,48 +2316,31 @@ private fun PlayerBottomBar(
                             duration,
                         ),
                         color = Color.White.copy(alpha = 0.72f),
-                        // 电视上时间码是唯一的「进度」读数，15sp 起步，别跟着手机缩
-                        fontSize = if (tv) 16.sp else ProomSp(11.sp),
+                        style = ProomType.meta.copy(
+                            fontSize = ProomSp(11.sp),
+                            fontFeatureSettings = "tnum",
+                        ),
                     )
                 }
 
                 Spacer(Modifier.weight(1f))
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(if (tv) 16.dp else 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircleIcon(
                         PlayerIcons.Prev, if (live) "上一台" else "上一集", onPrev,
                         enabled = hasPrev,
                     )
-                    // 主按钮：白色实心圆，比两侧大一号；电视上它是默认焦点
-                    Box(
-                        Modifier
-                            .size(if (tv) 72.dp else 44.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.92f))
-                            .then(if (playFocus != null) Modifier.focusRequester(playFocus) else Modifier)
-                            // 上键进「调进度」模式：不搬焦点（进度条进不了焦点树），
-                            // 只切换一个状态，松手即回播放/暂停
-                            .onPreviewKeyEvent { e ->
-                                if (e.type != KeyEventType.KeyDown || e.key != Key.DirectionUp) {
-                                    return@onPreviewKeyEvent false
-                                }
-                                onSeekFocus(true)
-                                true
-                            }
-                            .tvFocusRing(CircleShape, color = ProomColor.accent)
-                            .clickable(onClick = onTogglePlay),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) PlayerIcons.Pause else PlayerIcons.Play,
-                            contentDescription = if (isPlaying) "暂停" else "播放",
-                            tint = Color.Black,
-                            modifier = Modifier.size(if (tv) 34.dp else 22.dp),
-                        )
-                    }
+                    PlayPauseButton(
+                        isPlaying = isPlaying,
+                        boxSize = 44.dp,
+                        iconSize = 22.dp,
+                        playFocus = playFocus,
+                        onSeekFocus = onSeekFocus,
+                        onTogglePlay = onTogglePlay,
+                    )
                     CircleIcon(
                         PlayerIcons.Next, if (live) "下一台" else "下一集", onNext,
                         enabled = hasNext,
@@ -2243,32 +2350,18 @@ private fun PlayerBottomBar(
                 Spacer(Modifier.weight(1f))
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(if (tv) 20.dp else 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // 放最左：从下一集按右键第一下就落到它上面，不用一路数到行尾
-                    onSkipIntro?.let { SkipIntroChip(it) }
-                    // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
                     if (!live) {
                         CircleTextChip(speedLabel(speed), onSpeed)
-                        // 定时开着时图标变金：不然「有没有设过」完全看不出来
-                        val sleepOn = SleepTimer.mode != SleepTimer.Mode.Off
-                        CircleIcon(
-                            PlayerIcons.Timer,
-                            if (sleepOn) "睡眠定时 · ${SleepTimer.remainingText()}" else "睡眠定时",
-                            onSleep,
-                            tint = if (sleepOn) ProomColor.accent else null,
-                        )
                     }
-                    // 直播也留这个入口：体育台的双语解说、赛事字幕都在音轨/字幕轨里
                     CircleIcon(
                         PlayerIcons.Subtitle,
                         "字幕与音轨",
                         onTracks,
                         tint = if (subtitleOn) ProomColor.accent else null,
                     )
-                    // 直播也留这个入口：IPTV 卡不卡、码流多大，同样要能看见
-                    CircleIcon(PlayerIcons.Info, "播放信息", onInfo)
                     CircleIcon(
                         PlayerIcons.More,
                         if (live) "换源" else "选集与线路",
@@ -2381,16 +2474,23 @@ private fun PlayerSeekBar(
             strokeWidth = trackH,
             cap = androidx.compose.ui.graphics.StrokeCap.Round,
         )
-        // 和音乐播放器那条细线进度条同一套聚焦语言：光晕 + 一圈描边 + 手柄放大
+        // 和全站同一套焦点语言：白晕 + 深缝 + 白环。
+        // 手柄本身是白色实心，白环直接贴上去会糊成一坨，所以中间必须留一道深缝 —
+        // 和「金底 + 白环」的处理完全一样。早先这里用金环，是播放器页最后一处金色焦点。
         if (halo > 0.01f) {
             drawCircle(
-                color = ProomColor.accent.copy(alpha = 0.18f * halo),
+                color = Color.White.copy(alpha = 0.13f * halo),
+                radius = (handle + 22f).dp.toPx(),
+                center = center,
+            )
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.55f * halo),
                 radius = (handle + 11f).dp.toPx(),
                 center = center,
             )
             drawCircle(
-                color = ProomColor.accent.copy(alpha = 0.95f * halo),
-                radius = (handle + 3f).dp.toPx(),
+                color = Color.White.copy(alpha = 0.95f * halo),
+                radius = (handle + 7.5f).dp.toPx(),
                 center = center,
                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()),
             )
@@ -2407,21 +2507,25 @@ private fun PlayerSeekBar(
 
 /** 倍速的小圆钮：尺寸/底色与 CircleIcon 完全一致，只有中间放的是文字 */
 @Composable
-private fun CircleTextChip(text: String, onClick: () -> Unit) {
+private fun CircleTextChip(text: String, onClick: () -> Unit, size: Dp? = null) {
     val tv = LocalProomTv.current
+    val box = size ?: if (tv) 56.dp else 48.dp
     Box(
         Modifier
-            .size(if (tv) 56.dp else 48.dp)
+            .size(box)
             .tvFocusRing(CircleShape)
             .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.32f))
+            .background(Color.Black.copy(alpha = 0.30f))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
+            // 「1×」是读数不是图标：要和时间码一个量级，别用正文字号撑满整个圆
             color = Color.White.copy(alpha = 0.92f),
-            fontSize = if (tv) 18.sp else ProomSp(12.sp),
+            fontSize = if (size != null) ProomSp(13.sp) else if (tv) ProomType.body.fontSize else ProomSp(12.sp),
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
         )
     }
@@ -2438,21 +2542,22 @@ private fun SkipIntroChip(onClick: () -> Unit) {
     val tv = LocalProomTv.current
     Box(
         Modifier
-            .height(if (tv) 56.dp else 48.dp)
+            // 44dp 高：比那排 52dp 圆钮矮一档。它站在时间码旁边、是「贴着进度的一个动作」，
+            // 做成一整颗圆钮反而会让左侧看起来比右侧重
+            .height(if (tv) 44.dp else 40.dp)
+            .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f)
             .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.42f))
-            // 常驻一道淡金边：不然它和旁边那排黑圆钮混成一片，
-            // 「这里是能直接跳的」看不出来
-            .border(1.dp, ProomColor.accent.copy(alpha = 0.55f), CircleShape)
-            .tvFocusRing(CircleShape, color = ProomColor.accent)
+            // 品牌金半透明底：整条控制层只有播放键和它是暖色，
+            // 「可以跳过」和「这是设置」一眼就分开，不用凑近看图标
+            .background(ProomColor.accent.copy(alpha = 0.18f))
             .clickable(onClick = onClick)
-            .padding(horizontal = if (tv) 22.dp else 16.dp),
+            .padding(horizontal = if (tv) 18.dp else 14.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = "跳过片头",
-            color = Color.White,
-            fontSize = if (tv) 18.sp else ProomSp(12.sp),
+            color = ProomColor.accent,
+            fontSize = if (tv) ProomSp(13.sp) else ProomSp(12.sp),
             fontWeight = FontWeight.Medium,
             maxLines = 1,
         )
@@ -2470,7 +2575,7 @@ private fun SideGauge(
         // 图标给个圆形底：纯白线条压在亮的画面上经常看不见
         Box(
             Modifier
-                .size(34.dp)
+                .size(TvIcon.display)
                 .clip(CircleShape)
                 .background(Color.Black.copy(alpha = 0.38f)),
             contentAlignment = Alignment.Center,
@@ -2479,10 +2584,10 @@ private fun SideGauge(
                 imageVector = icon,
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(19.dp),
+                modifier = Modifier.size(TvIcon.control),
             )
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(TvSpace.s12))
         Box(
             Modifier
                 .width(3.dp)
@@ -2502,7 +2607,7 @@ private fun SideGauge(
         Text(
             "${(value.coerceIn(0f, 1f) * 100).roundToInt()}",
             color = Color.White.copy(alpha = 0.75f),
-            fontSize = ProomSp(11.sp),
+            fontSize = ProomType.label.fontSize,
         )
     }
 }
@@ -2531,8 +2636,15 @@ private fun SideSettingsPanel(
     modifier: Modifier = Modifier,
 ) {
     val tv = LocalProomTv.current
+    // ✕ 在标题行、和下面的网格不在同一条轴上，一维焦点搜索找不到它。
+    // 显式接一条双向链，否则遥控器只能靠返回键关抽屉
+    val closeFocus = remember { FocusRequester() }
+    // 提到外层：✕ 的「下」要指向当前线路那一格，声明顺序得在 ✕ 之前
+    val currentFocus = remember { FocusRequester() }
     Column(
         modifier
+            // 方向键只在抽屉内循环，不会跑到背后控制条的按钮上
+            .focusGroup()
             // 电视上抽屉要更宽：322dp 里塞 4 列选集，每格只有 60dp，18sp 的集数放不下。
             // 480dp 时扣掉左右内边距，两列线路每格只剩 196dp（约 8 个字），
             // 「艾旦|蓝光·线路2」还是差最后一个字；504dp 刚好装下
@@ -2558,13 +2670,15 @@ private fun SideSettingsPanel(
             Text(
                 title,
                 color = Color.White,
-                fontSize = if (tv) 26.sp else ProomSp(15.sp),
+                fontSize = if (tv) ProomType.title.fontSize else ProomSp(15.sp),
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.weight(1f))
             Box(
-                Modifier.size(if (tv) TvLayout.minTouch else 34.dp).clip(CircleShape)
-                    .tvFocusRing(CircleShape).clickable(onClick = onClose),
+                Modifier.size(if (tv) TvLayout.minTouch else 34.dp)
+                    .focusRequester(closeFocus)
+                    .focusProperties { down = currentFocus }
+                    .tvFocusRing(CircleShape).clip(CircleShape).clickable(onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -2580,7 +2694,6 @@ private fun SideSettingsPanel(
         // 直播只有线路这一个维度，就直接铺线路，不摆一个单 tab。
         var tab by remember { mutableStateOf(0) }
         val listState = rememberLazyListState()
-        val currentFocus = remember { FocusRequester() }
         // 打开抽屉时焦点必须跟着进来。打开它的是控制条上的「⋯」，焦点留在那里的话，
         // 上下左右还在「暂停 / 倍速 / 更多」之间打转，抽屉看起来就是个死面板 ——
         // 选不了、也按不到关闭。落点选当前线路那一格：线路动辄二三十条，从头按太费劲。
@@ -2598,8 +2711,16 @@ private fun SideSettingsPanel(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SideTab("$lineTab ${lines.size}", tab == 0, Modifier.weight(1f)) { tab = 0 }
-                SideTab("$epTab ${episodes.size}", tab == 1, Modifier.weight(1f)) { tab = 1 }
+                SideTab(
+                    "$lineTab ${lines.size}",
+                    tab == 0,
+                    Modifier.weight(1f).focusProperties { up = closeFocus },
+                ) { tab = 0 }
+                SideTab(
+                    "$epTab ${episodes.size}",
+                    tab == 1,
+                    Modifier.weight(1f).focusProperties { up = closeFocus },
+                ) { tab = 1 }
             }
         }
 
@@ -2664,16 +2785,16 @@ private fun SideTab(text: String, selected: Boolean, modifier: Modifier = Modifi
     Box(
         modifier
             .height(if (tv) 56.dp else 34.dp)
+            .tvFocusRing(RoundedCornerShape(8.dp), ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(RoundedCornerShape(8.dp))
             .background(if (selected) Color.White.copy(alpha = 0.16f) else Color.Transparent)
-            .tvFocusRing(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
             color = if (selected) Color.White else Color.White.copy(alpha = 0.5f),
-            fontSize = if (tv) 18.sp else ProomSp(12.sp),
+            fontSize = if (tv) ProomType.body.fontSize else ProomSp(12.sp),
         )
     }
 }
@@ -2683,7 +2804,7 @@ private fun PanelSection(text: String) {
     Text(
         text,
         color = Color.White.copy(alpha = 0.45f),
-        fontSize = ProomSp(11.sp),
+        fontSize = ProomType.label.fontSize,
         modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
     )
 }
@@ -2700,6 +2821,8 @@ private fun SideChip(
     Box(
         modifier
             .height(if (tv) 56.dp else 34.dp)
+            // 环必须排在 clip 之前：反过来会被自身圆角裁掉，面板里整片看不见
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(shape)
             .background(
                 if (selected) ProomColor.accentSoft else Color.White.copy(alpha = 0.08f)
@@ -2707,7 +2830,6 @@ private fun SideChip(
             .then(
                 if (selected) Modifier.border(1.dp, ProomColor.accent, shape) else Modifier
             )
-            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)
             .clickable(onClick = onClick)
             .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
@@ -2715,7 +2837,7 @@ private fun SideChip(
         Text(
             text,
             color = if (selected) ProomColor.accent else Color.White.copy(alpha = 0.86f),
-            fontSize = if (tv) 18.sp else ProomSp(12.sp),
+            fontSize = if (tv) ProomType.body.fontSize else ProomSp(12.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -2730,6 +2852,8 @@ private fun CastTextButton(text: String, onClick: () -> Unit) {
     Box(
         Modifier
             .height(48.dp)
+            // 玻璃条上的文字键原来只有点击没有焦点态
+            .tvFocusRing(RoundedCornerShape(24.dp), ringWidth = 2.dp, zoom = 1f)
             .clip(RoundedCornerShape(24.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
@@ -2746,17 +2870,27 @@ private fun CircleIcon(
     onClick: () -> Unit,
     enabled: Boolean = true,
     tint: Color? = null,
+    /** 底栏里传 52dp 把一排放整齐；不传就按 10-foot 的 56dp / 手机 48dp */
+    size: Dp? = null,
 ) {
     // 电视上 40dp 的圆钮在 3 米外只有指甲盖大：抬到 56dp，图标同步放大
     val tv = LocalProomTv.current
+    val box = size ?: if (tv) 56.dp else 48.dp
     Box(
         Modifier
             // 手机侧原来是 40dp 的裸图标：热区不够，且压在亮画面上（星空、白底字幕）
             // 几乎看不见。48dp + 一层半透明底，和电视侧一样有「这是个按钮」的样子
-            .size(if (tv) 56.dp else 48.dp)
+            .size(box)
+            .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f)
             .clip(CircleShape)
-            .background(Color.Black.copy(alpha = if (enabled) 0.32f else 0.16f))
-            .tvFocusRing(CircleShape)
+            .background(Color.Black.copy(alpha = if (enabled) 0.30f else 0.16f))
+            // 一道 1dp 的淡边：纯黑圆压在暗场景里是「糊」的，压在白墙镜头上是「洞」，
+            // 有了这道边，两种画面上都能读成「圆钮」
+            .border(
+                1.dp,
+                Color.White.copy(alpha = if (enabled) 0.10f else 0.05f),
+                CircleShape,
+            )
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -2764,7 +2898,54 @@ private fun CircleIcon(
             imageVector = icon,
             contentDescription = label,
             tint = tint ?: Color.White.copy(alpha = if (enabled) 0.92f else 0.28f),
-            modifier = Modifier.size(if (tv) 28.dp else 24.dp),
+            modifier = Modifier.size(box * 0.5f),
+        )
+    }
+}
+
+/**
+ * 播放/暂停主键：品牌金实心圆，比两侧大一号，电视上是默认焦点。
+ *
+ * 早先是白底 + 金环，改成统一白环后白底白环必然糊在一起，所以底色定性为金 ——
+ * 焦点态不再换底色，只加白环。
+ */
+@Composable
+private fun PlayPauseButton(
+    isPlaying: Boolean,
+    boxSize: Dp,
+    iconSize: Dp,
+    playFocus: FocusRequester? = null,
+    onSeekFocus: (Boolean) -> Unit = {},
+    onTogglePlay: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(boxSize)
+            // 环必须写在 clip **之前**：clip 会裁掉它之后的所有绘制，
+            // 外扩的白环就长在金圆外面，写在 clip 之后整个环都看不见（只剩金圆）。
+            // 这里不用 inset：金圆本身是实心亮色，内收环会压成一圈「甜甜圈」，
+            // 而两侧的 52dp 黑圆钮用的都是外扩环 —— 一排按钮的焦点形态必须一致
+            .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f)
+            .clip(CircleShape)
+            .background(ProomColor.accent)
+            .then(if (playFocus != null) Modifier.focusRequester(playFocus) else Modifier)
+            // 上键进「调进度」模式：不搬焦点（进度条进不了焦点树），
+            // 只切换一个状态，松手即回播放/暂停
+            .onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown || e.key != Key.DirectionUp) {
+                    return@onPreviewKeyEvent false
+                }
+                onSeekFocus(true)
+                true
+            }
+            .clickable(onClick = onTogglePlay),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (isPlaying) PlayerIcons.Pause else PlayerIcons.Play,
+            contentDescription = if (isPlaying) "暂停" else "播放",
+            tint = Color.Black,
+            modifier = Modifier.size(iconSize),
         )
     }
 }
@@ -2775,9 +2956,9 @@ private fun TextChip(text: String, onClick: () -> Unit) {
     // 命中的是文本的排版区域，实际按下去经常点不到（尤其带 padding 的短词）
     Box(
         Modifier
+            .tvFocusRing(RoundedCornerShape(8.dp), ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(RoundedCornerShape(8.dp))
             .background(Color.White.copy(alpha = 0.10f))
-            .tvFocusRing(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
@@ -2802,6 +2983,7 @@ private fun LockButton(
         modifier
             // 锁定态是用户唯一能点的东西，40dp 在沙发上看太飘
             .size(48.dp)
+            .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f)
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = if (locked) 0.55f else 0.35f))
             .clickable(onClick = onToggle),
@@ -2811,7 +2993,7 @@ private fun LockButton(
             imageVector = if (locked) PlayerIcons.Lock else PlayerIcons.Unlock,
             contentDescription = if (locked) "解锁" else "锁定",
             tint = Color.White.copy(alpha = 0.9f),
-            modifier = Modifier.size(19.dp),
+            modifier = Modifier.size(TvIcon.control),
         )
     }
 }
@@ -2830,18 +3012,20 @@ private fun PlayerPanel(
     onDismiss: () -> Unit,
 ) {
     val speeds = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
+    val firstFocus = rememberSheetFirstFocus()
     Box(
         modifier
             .fillMaxWidth()
             .fillMaxHeight()
-            .focusProperties { canFocus = false }
-            .clickable(onClick = onDismiss),
+            // 遮罩只吃触摸、不进焦点树：可聚焦的遮罩会让遥控器掉进整屏的「隐形按钮」
+            .pointerInput(Unit) { detectTapGestures { onDismiss() } },
     ) {
         Column(
             Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 16.dp, bottom = 96.dp)
                 .width(200.dp)
+                .focusGroup()
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color.Black.copy(alpha = 0.86f))
                 .padding(vertical = 10.dp),
@@ -2849,14 +3033,15 @@ private fun PlayerPanel(
             Text(
                 title,
                 color = Color.White.copy(alpha = 0.5f),
-                fontSize = ProomSp(11.sp),
+                fontSize = ProomType.label.fontSize,
                 modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
             )
             if (title == "倍速") {
-                speeds.forEach { s ->
+                speeds.forEachIndexed { i, s ->
                     PanelRow(
                         label = if (s == 1f) "1×（正常）" else "$s×",
                         selected = s == speed,
+                        modifier = if (i == 0) Modifier.focusRequester(firstFocus) else Modifier,
                     ) { onSpeed(s) }
                 }
             } else {
@@ -2865,6 +3050,11 @@ private fun PlayerPanel(
                         PanelRow(
                             label = label,
                             selected = lines.indexOf(label) == selectedLine,
+                            modifier = if (lines.indexOf(label) == 0) {
+                                Modifier.focusRequester(firstFocus)
+                            } else {
+                                Modifier
+                            },
                         ) { onLine(lines.indexOf(label)) }
                     }
                 }
@@ -2886,25 +3076,28 @@ private fun PlayerSleepSheet(
     onClose: () -> Unit,
 ) {
     val options = listOf(15, 30, 45, 60)
+    val firstFocus = rememberSheetFirstFocus()
     Box(
         modifier
             .fillMaxSize()
-            .focusProperties { canFocus = false }
-            .clickable(onClick = onClose),
+            // 遮罩只吃触摸、不进焦点树（同 PlayerPanel）
+            .pointerInput(Unit) { detectTapGestures { onClose() } },
         contentAlignment = Alignment.Center,
     ) {
         Column(
             Modifier
                 .width(220.dp)
+                .focusGroup()
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color.Black.copy(alpha = 0.9f))
-                .clickable(enabled = false) {}
+                // 吃掉落在面板空白处的点击，别穿透到遮罩上直接关掉
+                .pointerInput(Unit) { detectTapGestures { } }
                 .padding(vertical = 10.dp),
         ) {
             Text(
                 "睡眠定时",
                 color = Color.White.copy(alpha = 0.5f),
-                fontSize = ProomSp(11.sp),
+                fontSize = ProomType.label.fontSize,
                 modifier = Modifier.padding(start = 14.dp, bottom = 2.dp),
             )
             Text(
@@ -2914,10 +3107,11 @@ private fun PlayerSleepSheet(
                 fontSize = ProomSp(10.5.sp),
                 modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
             )
-            options.forEach { m ->
+            options.forEachIndexed { i, m ->
                 PanelRow(
                     label = "$m 分钟",
                     selected = SleepTimer.mode == SleepTimer.Mode.Timer && SleepTimer.minutes == m,
+                    modifier = if (i == 0) Modifier.focusRequester(firstFocus) else Modifier,
                 ) { SleepTimer.start(m); onClose() }
             }
             if (!live) {
@@ -2952,9 +3146,16 @@ private fun PlayerInfoSheet(
 ) {
     val tv = LocalProomTv.current
     val shape = RoundedCornerShape(16.dp)
+    // 打开就把焦点领进面板，且方向键只在面板内走：
+    // 不然焦点留在背后的控制条上，✕ 和解码方式那几个 chip 永远指不到
+    val firstFocus = rememberSheetFirstFocus()
+    // ✕ 在标题行、和下面那排 chip 不在同一条轴上，一维焦点搜索找不到它。
+    // 显式接一条双向链：chip 行 ↑ 到 ✕，✕ ↓ 回 chip 行
+    val closeFocus = remember { FocusRequester() }
     Column(
         modifier
             .width(if (tv) 540.dp else 384.dp)
+            .focusGroup()
             .clip(shape)
             .background(Color.Black.copy(alpha = 0.93f))
             .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
@@ -2967,13 +3168,14 @@ private fun PlayerInfoSheet(
             Text(
                 "播放信息",
                 color = Color.White,
-                fontSize = if (tv) 22.sp else ProomSp(14.sp),
+                fontSize = if (tv) ProomType.title.fontSize else ProomSp(14.sp),
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.weight(1f))
             Box(
                 Modifier.size(if (tv) TvLayout.minTouch else 30.dp)
-                    .clip(CircleShape)
+                    .focusRequester(closeFocus)
+                    .focusProperties { down = firstFocus }
                     .tvFocusRing(CircleShape)
                     .clickable(onClick = onClose),
                 contentAlignment = Alignment.Center,
@@ -3041,7 +3243,7 @@ private fun PlayerInfoSheet(
             Text(
                 "解码方式",
                 color = Color.White.copy(alpha = 0.5f),
-                fontSize = if (tv) 16.sp else ProomSp(11.sp),
+                fontSize = if (tv) ProomType.meta.fontSize else ProomSp(11.sp),
             )
             Spacer(Modifier.width(8.dp))
             Text(
@@ -3054,8 +3256,18 @@ private fun PlayerInfoSheet(
         }
         Spacer(Modifier.height(if (tv) 10.dp else 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(if (tv) 12.dp else 8.dp)) {
-            DecoderMode.values().forEach { m ->
-                SideChip(m.label, m == decoder, Modifier.weight(1f)) { onPickDecoder(m) }
+            DecoderMode.values().forEachIndexed { i, m ->
+                SideChip(
+                    m.label,
+                    m == decoder,
+                    Modifier.weight(1f).then(
+                        if (i == 0) {
+                            Modifier.focusProperties { up = closeFocus }.focusRequester(firstFocus)
+                        } else {
+                            Modifier
+                        }
+                    ),
+                ) { onPickDecoder(m) }
             }
         }
         Spacer(Modifier.height(if (tv) 10.dp else 7.dp))
@@ -3123,6 +3335,27 @@ private fun bytesText(b: Long): String = when {
 private fun durationText(ms: Long): String =
     if (ms <= 0) "—" else "%.1f 秒".format(Locale.US, ms / 1000.0)
 
+/**
+ * 浮层打开就把焦点领进面板 —— 每个面板原来都各漏一遍这件事。
+ *
+ * 两个坑，都踩过：
+ *  1. 请求器必须排在可聚焦修饰符（clickable / focusable）之前，挂在链尾时
+ *     调用不报错也不落地，面板打开后焦点其实还留在背后的控制条上；
+ *  2. 面板刚组合的那一两帧还没挂进焦点树，单次请求常常静默失败，
+ *     所以要连续重试到 1 秒左右。
+ */
+@Composable
+internal fun rememberSheetFirstFocus(): FocusRequester {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        repeat(10) {
+            delay(100)
+            runCatching { first.requestFocus() }
+        }
+    }
+    return first
+}
+
 @Composable
 internal fun PanelRow(
     label: String,
@@ -3132,14 +3365,16 @@ internal fun PanelRow(
     onClick: () -> Unit,
 ) {
     Row(
-        Modifier
+        // 外部传入的 modifier 放最前：focusRequester 必须排在可聚焦修饰符之前，
+        // 挂在链尾时 requestFocus() 不报错也不会落地，面板打开拿不到焦点
+        modifier
             .fillMaxWidth()
             // 面板行原本在电视上完全看不出焦点：遥控器上下按，只有选中项在变色，
-            // 「光标现在停在哪儿」是隐形的。zoom 用 1f，避免整行放大后被面板裁边
-            .tvFocusRing(RoundedCornerShape(8.dp), zoom = 1f, color = ProomColor.accent)
+            // 「光标现在停在哪儿」是隐形的。zoom 用 1f，避免整行放大后被面板裁边；
+            // 行与行紧贴、面板自身还有 clip，外扩环会被裁掉，所以内收
+            .tvFocusRing(RoundedCornerShape(8.dp), ringWidth = 2.dp, zoom = 1f, inset = true)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp)
-            .then(modifier),
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -3186,19 +3421,18 @@ private fun CastSheet(
     // 倍速/线路面板之前就是这么翻车的。
     val cfg = androidx.compose.ui.platform.LocalConfiguration.current
     val maxH = (cfg.screenHeightDp * 0.88f).dp
+    val firstFocus = rememberSheetFirstFocus()
 
     Box(
         Modifier
             .fillMaxSize()
-            // 遮罩只「吃掉」点击，不做关闭：点投屏图标那一下，down 落在图标上、
+            // 遮罩只「吃掉」触摸，不做关闭：点投屏图标那一下，down 落在图标上、
             // up 可能落到刚合成出来的遮罩上，遮罩一旦执行关闭就成了「开了立刻关」。
             // 关面板只认右上角那个 ✕。
+            // 用 pointerInput 而不是 clickable：遮罩一旦可聚焦，遥控器往边上按
+            // 就会掉进这一整屏的「隐形按钮」里，怎么按都没反应。
             .background(Color.Black.copy(alpha = 0.55f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {},
-            ),
+            .pointerInput(Unit) { detectTapGestures { } },
     ) {
         Column(
             Modifier
@@ -3210,14 +3444,13 @@ private fun CastSheet(
                 .widthIn(max = 460.dp)
                 .fillMaxWidth()
                 .heightIn(max = maxH)
+                .focusGroup()
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color(0xFF16181D))
-                // 拦掉面板内部的点击，不然点标题也会把面板关掉
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
-                )
+                // 拦掉面板内部的点击，不然点标题也会把面板关掉。
+                // 用 pointerInput 而不是 clickable：clickable 会让面板本体变成一个
+                // 没有焦点环的可聚焦节点，遥控器落到空白处就「看不见光标」
+                .pointerInput(Unit) { detectTapGestures { } }
                 .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 14.dp),
         ) {
             // 手填地址的输入行由头部的图标按钮唤起，状态得提到这一层
@@ -3244,7 +3477,7 @@ private fun CastSheet(
                             else -> "找到 ${devices.size + nasDevices.size + lanDevices.size} 台设备"
                         },
                         color = Color.White.copy(alpha = 0.45f),
-                        fontSize = ProomSp(11.sp),
+                        fontSize = ProomType.label.fontSize,
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
@@ -3256,6 +3489,12 @@ private fun CastSheet(
                         color = ProomColor.accent,
                         fontSize = ProomSp(12.sp),
                         modifier = Modifier
+                            .tvFocusRing(
+                                RoundedCornerShape(8.dp),
+                                ringWidth = 2.dp,
+                                zoom = 1f,
+                                inset = true,
+                            )
                             .clip(RoundedCornerShape(8.dp))
                             .clickable(onClick = onRescan)
                             .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -3274,8 +3513,10 @@ private fun CastSheet(
                 }
                 Box(
                     Modifier
+                        .focusRequester(firstFocus)
                         // 和旁边的扫码/填地址同一档热区，不然「关面板」是最难点的那个
                         .size(48.dp)
+                        .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f, inset = true)
                         .clip(CircleShape)
                         .clickable(onClick = onClose),
                     contentAlignment = Alignment.Center,
@@ -3301,6 +3542,13 @@ private fun CastSheet(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 2.dp)
+                                // 设备行上下紧贴，环内收
+                                .tvFocusRing(
+                                    RoundedCornerShape(10.dp),
+                                    ringWidth = 2.dp,
+                                    zoom = 1f,
+                                    inset = true,
+                                )
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
                                     if (active) ProomColor.accentSoft else Color.White.copy(alpha = 0.06f)
@@ -3338,7 +3586,7 @@ private fun CastSheet(
                                 Text(
                                     sub,
                                     color = Color.White.copy(alpha = 0.45f),
-                                    fontSize = ProomSp(11.sp),
+                                    fontSize = ProomType.label.fontSize,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(top = 2.dp),
@@ -3373,6 +3621,13 @@ private fun CastSheet(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 2.dp)
+                                // 设备行上下紧贴，环内收
+                                .tvFocusRing(
+                                    RoundedCornerShape(10.dp),
+                                    ringWidth = 2.dp,
+                                    zoom = 1f,
+                                    inset = true,
+                                )
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
                                     if (active) ProomColor.accentSoft else Color.White.copy(alpha = 0.06f)
@@ -3408,7 +3663,7 @@ private fun CastSheet(
                                 Text(
                                     sub,
                                     color = Color.White.copy(alpha = 0.45f),
-                                    fontSize = ProomSp(11.sp),
+                                    fontSize = ProomType.label.fontSize,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(top = 2.dp),
@@ -3430,6 +3685,13 @@ private fun CastSheet(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 2.dp)
+                                // 设备行上下紧贴，环内收
+                                .tvFocusRing(
+                                    RoundedCornerShape(10.dp),
+                                    ringWidth = 2.dp,
+                                    zoom = 1f,
+                                    inset = true,
+                                )
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
                                     if (active) ProomColor.accentSoft else Color.White.copy(alpha = 0.06f)
@@ -3463,7 +3725,7 @@ private fun CastSheet(
                                         sub,
                                         color = if (d.isOwn) ProomColor.accent.copy(alpha = 0.7f)
                                         else Color.White.copy(alpha = 0.4f),
-                                        fontSize = ProomSp(11.sp),
+                                        fontSize = ProomType.label.fontSize,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.padding(top = 2.dp),
@@ -3499,7 +3761,16 @@ private fun CastSheet(
                             fontSize = ProomSp(13.sp),
                         ),
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(ProomColor.accent),
-                        modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                        // 电视上这块也能拿焦点（会弹 IME），焦点态跟着统一成白环
+                        modifier = Modifier
+                            .weight(1f)
+                            .tvFocusRing(
+                                RoundedCornerShape(8.dp),
+                                ringWidth = 2.dp,
+                                zoom = 1f,
+                                inset = true,
+                            )
+                            .padding(vertical = 12.dp),
                         decorationBox = { inner ->
                             if (manual.isEmpty()) {
                                 Text(
@@ -3511,30 +3782,44 @@ private fun CastSheet(
                             inner()
                         },
                     )
-                    Text(
-                        "连接",
-                        color = ProomColor.accent,
-                        fontSize = ProomSp(13.sp),
-                        modifier = Modifier
+                    // 原来直接给 Text 加 clickable：命中区只有字面排版框，
+                    // 电视上也没有焦点态。统一包一层 Box 拿焦点环
+                    Box(
+                        Modifier
+                            .tvFocusRing(
+                                RoundedCornerShape(8.dp),
+                                ringWidth = 2.dp,
+                                zoom = 1f,
+                                inset = true,
+                            )
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { onManual(manual) }
                             .padding(horizontal = 10.dp, vertical = 8.dp),
-                    )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("连接", color = ProomColor.accent, fontSize = ProomSp(13.sp))
+                    }
                 }
             }
 
             if (casting) {
-                Text(
-                    "停止投屏",
-                    color = Color(0xFFFF6B6B),
-                    fontSize = ProomSp(13.sp),
-                    modifier = Modifier
+                Box(
+                    Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp)
+                        .tvFocusRing(
+                            RoundedCornerShape(10.dp),
+                            ringWidth = 2.dp,
+                            zoom = 1f,
+                            inset = true,
+                        )
                         .clip(RoundedCornerShape(10.dp))
                         .clickable(onClick = onStop)
                         .padding(vertical = 12.dp),
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("停止投屏", color = Color(0xFFFF6B6B), fontSize = ProomSp(13.sp))
+                }
             }
         }
     }
@@ -3562,6 +3847,8 @@ private fun CastIconButton(
     Box(
         Modifier
             .size(48.dp)
+            // 投屏面板里的图标钮，原来按到上面没有任何变化
+            .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f)
             .clip(CircleShape)
             .semantics { contentDescription = label }
             .clickable(onClick = onClick),
@@ -3664,11 +3951,13 @@ private fun SkipPill(
     val shape = RoundedCornerShape(24.dp)
     Row(
         modifier
+            // 和全站同一口径：白环 + 柔光，不再用「1dp 细边 → 2dp 金边」自己滚一套
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(shape)
             .background(Color.Black.copy(alpha = 0.74f))
             .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) ProomColor.accent else Color.White.copy(alpha = 0.20f),
+                width = 1.dp,
+                color = Color.White.copy(alpha = if (focused) 0f else 0.20f),
                 shape = shape,
             )
             .focusable()

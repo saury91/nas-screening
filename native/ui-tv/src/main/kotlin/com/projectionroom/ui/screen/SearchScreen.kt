@@ -1,6 +1,8 @@
 package com.projectionroom.ui.screen
 
 import androidx.compose.foundation.background
+import com.projectionroom.ui.component.tvFocusRing
+import com.projectionroom.ui.component.tvFocusBloom
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -52,7 +54,10 @@ import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.PosterCard
 import com.projectionroom.ui.util.metaLine
 import com.projectionroom.ui.theme.ProomColor
-import com.projectionroom.ui.theme.ProomSpace
+import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.TvIcon
+import com.projectionroom.ui.theme.TvSize
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
@@ -186,7 +191,7 @@ fun SearchScreen(
                 // 返回胶囊和搜索框同色、同一条左边线，贴在一起像两个输入框
                 .padding(
                     start = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
-                    top = 10.dp,
+                    top = TvSpace.s12,
                     end = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
                 ),
             verticalAlignment = Alignment.CenterVertically,
@@ -209,14 +214,14 @@ fun SearchScreen(
         // 历史：每条右侧一个 ×，右上角「清空」
         if (!state.searched && state.q.isBlank() && history.isNotEmpty()) {
             Row(
-                Modifier.fillMaxWidth().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = ProomSpace.md),
+                Modifier.fillMaxWidth().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = TvSpace.s16),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("最近搜索", style = ProomType.label, color = ProomColor.muted)
             }
             LazyRow(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
+                Modifier.fillMaxWidth().padding(top = TvSpace.s8),
+                horizontalArrangement = Arrangement.spacedBy(TvSpace.s8),
                 contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX),
             ) {
                 items(history) { w ->
@@ -241,13 +246,13 @@ fun SearchScreen(
         if (!state.searched && state.q.isBlank()) {
             // 用 LazyRow：5 个词在窄屏上放不下，横滑而不是被裁掉
             Row(
-                Modifier.fillMaxWidth().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = ProomSpace.md),
+                Modifier.fillMaxWidth().padding(start = TvLayout.insetX, end = TvLayout.insetX, top = TvSpace.s16),
             ) {
                 Text("热门", style = ProomType.label, color = ProomColor.muted)
             }
             LazyRow(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(ProomSpace.sm),
+                Modifier.fillMaxWidth().padding(top = TvSpace.s8),
+                horizontalArrangement = Arrangement.spacedBy(TvSpace.s8),
                 contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX),
             ) {
                 items(HOT_WORDS) { w ->
@@ -261,19 +266,19 @@ fun SearchScreen(
             }
         }
 
-        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).padding(top = ProomSpace.lg)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).padding(top = TvSpace.s20)) {
             // 和片库页同一条算法：列数从安全区内的可用宽度反算。
             // 原来这里写死 3 列 + 20dp 边距，搜索框比它多缩进 28dp，
             // 一屏里两个左边线对不齐，而且 960dp 上 3 列的大卡片远看只有 3 张。
-            val gap = 14.dp
+            val gap = TvSpace.s16
             val columns = ((maxWidth - TvLayout.insetX * 2) / 130.dp).toInt().coerceIn(3, 8)
             when {
                 // 骨架屏而不是转圈：网格形状先立住，结果回来直接换内容，不会整页跳
                 state.loading -> LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
-                    contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, top = 4.dp),
+                    contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, top = TvSpace.s4),
                     horizontalArrangement = Arrangement.spacedBy(gap),
-                    verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
+                    verticalArrangement = Arrangement.spacedBy(TvSpace.s20),
                 ) {
                     items(9) {
                         com.projectionroom.ui.component.PosterSkeleton()
@@ -303,8 +308,8 @@ fun SearchScreen(
                     columns = GridCells.Fixed(columns),
                     state = state.grid,
                     horizontalArrangement = Arrangement.spacedBy(gap),
-                    verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
-                    contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, bottom = ProomSpace.xxl),
+                    verticalArrangement = Arrangement.spacedBy(TvSpace.s20),
+                    contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, bottom = TvSpace.s32),
                 ) {
                     itemsIndexed(state.results) { i, vod ->
                         PosterCard(
@@ -325,31 +330,32 @@ fun SearchScreen(
 @Composable
 private fun SearchField(value: String, onValueChange: (String) -> Unit, onSearch: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(50)
+    // 输入框统一 sm（10dp）：原来这里是 50% 胶囊，而「换一台 NAS」的地址框是 10dp、
+    // 顶栏搜索框是 14dp —— 三个输入框三种形状。胶囊只留给会换页的动作按钮。
+    val shape = RoundedCornerShape(ProomShape.sm)
 
-    // 聚焦时不再画一圈 2dp 亮金边 —— 那是「输入框报错」的视觉语言。
-    // 改成「底色抬一档 + 1dp 半透明描边」，安静但看得见。
+    // 全站统一：焦点只由白环表达，输入框自己的 1dp 描边保持中性色不变，
+    // 底色抬一档作为辅助
     Row(
         Modifier
             .fillMaxWidth()
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)
             .clip(shape)
             .background(if (focused) ProomColor.surface2 else ProomColor.surface)
-            .border(
-                1.dp,
-                if (focused) ProomColor.accent.copy(alpha = 0.55f) else ProomColor.line,
-                shape,
-            )
+            .border(1.dp, ProomColor.line, shape)
             .onFocusChanged { focused = it.isFocused }
-            .heightIn(min = 56.dp)
-            .padding(horizontal = 20.dp),
+            // 输入框和返回胶囊、chip 同一档高度（48dp）：之前借用 videoControl(56)，
+            // 数值看着没问题，但语义是「视频控件」，于是这一屏比其它页高出一截
+            .heightIn(min = TvSize.control)
+            .padding(horizontal = TvSpace.s20),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 左边一个小放大镜：形状上是「搜索」，比占位文字更早被认出来
-        androidx.compose.foundation.Canvas(Modifier.size(20.dp)) {
-            val w = 1.6.dp.toPx()
+        androidx.compose.foundation.Canvas(Modifier.size(TvIcon.control)) {
+            val w = 1.8.dp.toPx()
             val c = androidx.compose.ui.geometry.Offset(size.width * 0.42f, size.height * 0.42f)
             val r = size.minDimension * 0.31f
-            val tint = if (focused) ProomColor.accent else ProomColor.muted
+            val tint = if (focused) ProomColor.text else ProomColor.muted
             drawCircle(tint, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = w))
             drawLine(
                 tint,
@@ -359,7 +365,7 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit, onSearch
                 cap = androidx.compose.ui.graphics.StrokeCap.Round,
             )
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(TvSpace.s12))
 
         // 选中文本时不画那个黄色「水滴手柄」：搜索框里几乎用不到，
         // 但它会在聚焦瞬间跳出来，很脏。只保留半透明的高亮底色。
@@ -378,7 +384,7 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit, onSearch
                 cursorBrush = SolidColor(ProomColor.accent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-                modifier = Modifier.weight(1f).padding(vertical = 13.dp),
+                modifier = Modifier.weight(1f).padding(vertical = TvSpace.s12),
                 decorationBox = { inner ->
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (value.isEmpty()) {
@@ -397,18 +403,23 @@ private val HOT_WORDS = listOf("繁花", "沙丘", "庆余年", "奥本海默", 
 /** 历史词：点正文搜，点 × 删这一条 —— 不用长按，也不藏进二级菜单 */
 @Composable
 private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit) {
-    val shape = RoundedCornerShape(ProomSpace.md)
+    // chip 统一 10dp 圆角（规范 §6.1）
+    val shape = RoundedCornerShape(ProomShape.sm)
     var pickFocused by remember { mutableStateOf(false) }
     var removeFocused by remember { mutableStateOf(false) }
     // 正文和 × 是两个独立焦点目标，各自都要看得见 —— 原来这整颗 chip
     // 在遥控器上完全静默，22dp 的 × 更是既看不见也点不准
     Row(
         Modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = TvLayout.minTouch)
             .clip(shape)
             .background(if (pickFocused || removeFocused) ProomColor.surface2 else ProomColor.surface)
-            .then(if (pickFocused) Modifier.border(2.dp, Color.White, shape) else Modifier)
-            .padding(start = 15.dp, end = 4.dp),
+            .then(
+                if (pickFocused) {
+                    Modifier.tvFocusBloom(shape, bloom = 1f, ringWidth = 2.dp, color = Color.White, inset = true)
+                } else Modifier
+            )
+            .padding(start = TvSpace.s16, end = TvSpace.s4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -420,7 +431,7 @@ private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit)
             modifier = Modifier
                 .onFocusChanged { pickFocused = it.isFocused }
                 .clickable(onClick = onPick)
-                .padding(vertical = 10.dp),
+                .padding(vertical = TvSpace.s12),
         )
         Box(
             Modifier
@@ -428,7 +439,17 @@ private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit)
                 .size(TvLayout.minTouch)
                 .clip(CircleShape)
                 .then(if (removeFocused) Modifier.background(ProomColor.accentSoft) else Modifier)
-                .then(if (removeFocused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
+                .then(
+                    if (removeFocused) {
+                        Modifier.tvFocusBloom(
+                            CircleShape,
+                            bloom = 1f,
+                            ringWidth = 2.dp,
+                            color = Color.White,
+                            inset = true,
+                        )
+                    } else Modifier
+                )
                 .onFocusChanged { removeFocused = it.isFocused }
                 .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center,
@@ -436,7 +457,7 @@ private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit)
             Text(
                 "×",
                 color = if (removeFocused) ProomColor.accent else ProomColor.muted,
-                fontSize = ProomSp(18.sp),
+                style = ProomType.body,
             )
         }
     }
@@ -446,22 +467,22 @@ private fun HistoryChip(label: String, onPick: () -> Unit, onRemove: () -> Unit)
 @Composable
 private fun ClearChip(onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(ProomSpace.md)
+    val shape = RoundedCornerShape(ProomShape.sm)
     Box(
         Modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = TvLayout.minTouch)
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, color = Color.White, inset = true)
             .clip(shape)
             .then(if (focused) Modifier.background(ProomColor.surface2) else Modifier)
-            .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp),
+            .padding(horizontal = TvSpace.s16),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             "清空",
             style = ProomType.meta,
-            color = if (focused) ProomColor.accent else ProomColor.muted,
+            color = if (focused) ProomColor.text else ProomColor.muted,
             maxLines = 1,
             softWrap = false,
         )
@@ -471,18 +492,19 @@ private fun ClearChip(onClick: () -> Unit) {
 @Composable
 private fun HotChip(label: String, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(ProomSpace.md)
+    // chip 统一 10dp 圆角（规范 §6.1）
+    val shape = RoundedCornerShape(ProomShape.sm)
     Box(
         Modifier
+            // 金边在这一页会和「已选中的分类」撞语义，焦点统一走白色
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, color = Color.White, inset = true)
             .clip(shape)
             .background(if (focused) ProomColor.surface2 else ProomColor.surface)
-            // 金边在这一页会和「已选中的分类」撞语义，焦点统一走白色
-            .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             // 13/8 只有 34dp 高，遥控器上下换行时很容易越过去
-            .heightIn(min = 44.dp)
-            .padding(horizontal = 18.dp, vertical = 9.dp),
+            .heightIn(min = TvLayout.minTouch)
+            .padding(horizontal = TvSpace.s16, vertical = TvSpace.s8),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = ProomType.meta, color = ProomColor.text, maxLines = 1, softWrap = false)

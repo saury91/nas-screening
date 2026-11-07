@@ -57,9 +57,11 @@ fun TvPlayingBadge(
         modifier
             // 和返回胶囊同一档最小可点高度，顶栏左右两端才是一条水平线
             .heightIn(min = TvLayout.minTouch)
+            // 顶栏里和「返回」「设置」并排，外扩会顶到邻居，环内收
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(shape)
-            .background(if (focused) ProomColor.accentSoft else ProomColor.surface)
-            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
+            // 焦点只提亮同一色相，不给淡金（淡金 = 选中）
+            .background(if (focused) ProomColor.surface2 else ProomColor.surface)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 9.dp),
@@ -71,7 +73,7 @@ fun TvPlayingBadge(
             Text(
                 text,
                 style = ProomType.meta,
-                color = if (focused) ProomColor.accent else ProomColor.text,
+                color = ProomColor.text,
             )
         }
     }

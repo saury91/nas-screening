@@ -71,6 +71,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.projectionroom.ui.theme.ProomRoot
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvLayout
 import com.projectionroom.app.ConfigStore
 import com.projectionroom.app.DetailCache
 import com.projectionroom.app.Discovery
@@ -326,7 +327,11 @@ class MainActivity : ComponentActivity() {
                 .getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
         }
         val d = resources.displayMetrics.density
-        var barTop = ((sysInsets?.top ?: statusBarPx()) / d).dp
+        // 顶部让位 = 系统栏高度与电视过扫描安全区（27dp）取大者。
+        // 电视上 sysInset 通常是 0，之前顶栏就贴在屏幕最上沿：55~100 寸的电视普遍有
+        // 2%~5% 过扫描，那一条会被切掉一半。27dp 也正好是 PlayerScreen 用的下沿留白，
+        // 上下对称，观众感知到的「画面边距」才是一圈的。
+        var barTop = maxOf(((sysInsets?.top ?: statusBarPx()) / d).dp, TvLayout.insetY)
         var barBottom = ((sysInsets?.bottom ?: 0) / d).dp
 
         // 关键：让 Compose 的内容**画到系统栏后面**。
@@ -1169,6 +1174,7 @@ class MainActivity : ComponentActivity() {
                                         screen = Screen.MusicPlayer(s)
                                     },
                                     onBack = { screen = Screen.Home },
+                                    onOpenSettings = { screen = Screen.Settings(from = s) },
                                     topInset = barTop,
                                     nav = rootNav(tabIndex),
                                 )
@@ -1225,16 +1231,32 @@ class MainActivity : ComponentActivity() {
                             },
                         )
 
-                        is Screen.Mine -> TvMineScreen(
-                            favorites = favs,
-                            history = hist,
-                            onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
-                            onBack = { screen = s.from },
-                            onImportFromPhone = { screen = Screen.Pair(from = s) },
-                            // 「我的」顶栏那颗「设置」：之前没接，点了没反应（设置页整个不可达）
-                            onSettings = { screen = Screen.Settings(from = s) },
-                            topInset = barTop,
-                        )
+                        is Screen.Mine -> {
+                            // 底部状态条里的缓存占用要读目录：算出来之前先显示「—」
+                            var mineCache by remember { mutableStateOf("—") }
+                            LaunchedEffect(Unit) {
+                                mineCache = withContext(Dispatchers.IO) { cacheSizeText() }
+                            }
+                            TvMineScreen(
+                                favorites = favs,
+                                history = hist,
+                                device = com.projectionroom.ui.screen.MineDevice(
+                                    nasUrl = baseUrl.orEmpty(),
+                                    version = versionName.orEmpty(),
+                                    configVersion = bundle?.version.orEmpty(),
+                                    sourceCount = (bundle?.sources?.size ?: 0) + extra.sources.size,
+                                    channelCount = (bundle?.live?.channels?.size ?: 0) + extra.live.size,
+                                    cacheSize = mineCache,
+                                ),
+                                onOpen = { vod -> screen = Screen.Detail(vod = vod, from = s) },
+                                onBack = { screen = s.from },
+                                onBrowse = { screen = Screen.Browse(slug = "movie", from = s) },
+                                onImportFromPhone = { screen = Screen.Pair(from = s) },
+                                // 「我的」顶栏那颗「设置」：之前没接，点了没反应（设置页整个不可达）
+                                onSettings = { screen = Screen.Settings(from = s) },
+                                topInset = barTop,
+                            )
+                        }
 
                         is Screen.Connect -> {
                             var connBusy by remember { mutableStateOf(false) }
@@ -1810,6 +1832,23 @@ class MainActivity : ComponentActivity() {
             ) {
                 AppRoute.castDemoUrl = intent.getStringExtra("url").orEmpty()
                 AppRoute.castDemoOpenSheet = true
+            }
+            // 投屏「接收端」页：CastPlayActivity 没有导出，adb 起不来。
+            // 没有手机时也要能单独验这一屏的版式和焦点，所以留这条联调口
+            "castplay" -> if ((applicationInfo.flags and
+                    android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            ) {
+                // 直接 startActivity：launch() 会先判断进程在不在前台，
+                // 联调时正好在 onCreate 那么一刻，判断为「不在前台」就走通知兜底了
+                runCatching {
+                    startActivity(
+                        com.projectionroom.app.cast.CastPlayActivity.intent(
+                            this,
+                            intent.getStringExtra("url").orEmpty(),
+                            intent.getStringExtra("title").orEmpty().ifBlank { "投屏联调" },
+                        )
+                    )
+                }
             }
         }
         intent?.removeExtra(EXTRA_SCREEN)

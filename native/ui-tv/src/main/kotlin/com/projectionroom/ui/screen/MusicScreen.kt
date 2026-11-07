@@ -49,7 +49,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,17 +57,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.ui.component.SkeletonBlock
+import com.projectionroom.ui.component.tvFocusRing
+import com.projectionroom.ui.component.tvFocusBloom
 import com.projectionroom.ui.component.TabIcons
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.scale
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvRatio
+import com.projectionroom.ui.theme.TvIcon
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.TvLayout
+import com.projectionroom.ui.theme.textBlockHeight
 import kotlin.time.Duration.Companion.minutes
 import com.projectionroom.ui.component.RemoteImage
 
@@ -96,6 +100,8 @@ fun MusicScreen(
     onPlayTracks: (List<NasApi.Track>, Int) -> Unit = { _, _ -> },
     /** 返回。音乐现在是一级 tab，电视上不再需要返回入口；保留给其它调用方 */
     onBack: (() -> Unit)? = null,
+    /** 打开设置页。没配音乐接口时，空态要给一个直接能按的出口 */
+    onOpenSettings: (() -> Unit)? = null,
     topInset: androidx.compose.ui.unit.Dp = 0.dp,
     /** 一级导航（tab 条）。非空时顶栏由它接管，页面自己不再画返回 */
     nav: com.projectionroom.ui.component.TvRootNav? = null,
@@ -271,16 +277,16 @@ fun MusicScreen(
                 // 顶栏是布局元素不是浮层：网格紧贴导航时，首屏的区块标题像贴在
                 // 导航底边上，滚动后还会留半截卡片悬在文字下面。留 12dp 呼吸。
                 top = 12.dp,
-                bottom = ProomSpace.xxl,
+                bottom = TvSpace.s32,
             ),
             horizontalArrangement = Arrangement.spacedBy(recGap),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(TvSpace.s16),
         ) {
 
             // 两路都拉完还是空 = 没配音乐接口，给一句话，别让灰块一直转
             val emptyAll = recLoaded && catsLoaded && rec.isEmpty() && cats.isEmpty()
             if (emptyAll) {
-                item(span = { GridItemSpan(maxLineSpan) }) { EmptyMusic() }
+                item(span = { GridItemSpan(maxLineSpan) }) { EmptyMusic(onOpenSettings) }
             } else {
                 // ── 推荐歌单 ──
                 if (rec.isNotEmpty()) {
@@ -307,7 +313,7 @@ fun MusicScreen(
                         "分类歌单",
                         cats.joinToString(" · ") { it.name }
                             .ifBlank { "主题 · 语种 · 风格 · 场景 · 情感" },
-                        top = ProomSpace.lg,
+                        top = TvSpace.s20,
                     )
                 }
 
@@ -369,7 +375,7 @@ private fun MusicCounts(recCount: Int, catCount: Int) {
 @Composable
 private fun SectionHead(title: String, sub: String, top: Dp = 0.dp) {
     Row(
-        Modifier.fillMaxWidth().padding(top = top, bottom = ProomSpace.sm),
+        Modifier.fillMaxWidth().padding(top = top, bottom = TvSpace.s8),
         verticalAlignment = Alignment.Bottom,
     ) {
         Text(title, style = ProomType.title, color = ProomColor.text)
@@ -380,7 +386,7 @@ private fun SectionHead(title: String, sub: String, top: Dp = 0.dp) {
             color = ProomColor.muted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(bottom = 3.dp),
+            modifier = Modifier.padding(bottom = TvSpace.s4),
         )
     }
 }
@@ -392,7 +398,7 @@ private fun GroupTabs(names: List<String>, current: Int, onSelect: (Int) -> Unit
     LazyRow(
         modifier = Modifier.bleed(TvLayout.insetX).height(TvLayout.minTouch),
         contentPadding = PaddingValues(horizontal = TvLayout.insetX),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(TvSpace.s4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         itemsIndexed(names) { i, name ->
@@ -401,36 +407,38 @@ private fun GroupTabs(names: List<String>, current: Int, onSelect: (Int) -> Unit
             Column(
                 Modifier
                     .onFocusChanged { focused = it.isFocused }
-                    .clickable { onSelect(i) }
-                    .clip(RoundedCornerShape(ProomShape.sm))
                     // 底下那条金线只表示「选中」，焦点得另有说法：
                     // 否则光标停在这一行时，五个 tab 看起来和没焦点完全一样。
-                    // 只加 surface2 底色还是太安静（深底上只差一档灰），补一圈白边。
-                    .background(if (focused) ProomColor.surface2 else Color.Transparent)
-                    .then(
-                        if (focused) {
-                            Modifier.border(2.dp, Color.White, RoundedCornerShape(ProomShape.sm))
-                        } else Modifier
+                    // 这里原来手写了一根 2dp 白边框 —— 粗细、间隙都和 App 其他地方的白环
+                    // 不一样（别处是环 + 2dp 深缝），统一交给 tvFocusRing
+                    .tvFocusRing(
+                        RoundedCornerShape(ProomShape.sm),
+                        ringWidth = 2.dp,
+                        zoom = 1f,
+                        inset = true,
                     )
+                    .clickable { onSelect(i) }
+                    .clip(RoundedCornerShape(ProomShape.sm))
+                    .background(if (focused) ProomColor.surface2 else Color.Transparent)
                     // 只有文字那么高的话，遥控器聚焦时看不出这一格的范围
                     .height(TvLayout.minTouch)
-                    .padding(horizontal = 10.dp),
+                    .padding(horizontal = TvSpace.s12),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
                     name,
                     color = if (on) ProomColor.text else ProomColor.muted,
-                    fontSize = ProomSp(15.sp),
+                    style = ProomType.meta,
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                     maxLines = 1,
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(TvSpace.s8))
                 Box(
                     Modifier
                         .height(2.dp)
-                        .width(if (on) 18.dp else 0.dp)
-                        .clip(RoundedCornerShape(1.dp))
+                        .width(if (on) TvSpace.s20 else 0.dp)
+                        .clip(RoundedCornerShape(ProomShape.xs))
                         .background(ProomColor.accent)
                 )
             }
@@ -443,38 +451,33 @@ private fun SubChips(names: List<String>, current: Int, onSelect: (Int) -> Unit)
     LazyRow(
         modifier = Modifier.bleed(TvLayout.insetX).height(TvLayout.minTouch),
         contentPadding = PaddingValues(horizontal = TvLayout.insetX),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(TvSpace.s8),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         itemsIndexed(names) { i, name ->
             val on = i == current
-            val shape = RoundedCornerShape(50)
-            var focused by remember { mutableStateOf(false) }
+            // chip 统一 10dp 圆角（规范 §6.1）
+            val shape = RoundedCornerShape(ProomShape.sm)
             Box(
                 Modifier
                     .height(TvLayout.minTouch)
-                    .onFocusChanged { focused = it.isFocused }
+                    // 原来是手写的「2dp 白边」，没有光晕、也不跟着全站口径；
+                    // 统一走 tvFocusRing，才有那圈蓬松的柔光
+                    .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true)
                     .clip(shape)
                     .background(if (on) ProomColor.accentSoft else ProomColor.surface)
+                    // 选中 = 半透明金边（状态），和聚焦白环互不干扰
                     .then(
-                        when {
-                            // 选中是半透明金边，焦点必须是白的，不然两者混在一起
-                            focused -> Modifier.border(
-                                if (on) 3.dp else 2.dp,
-                                Color.White,
-                                shape,
-                            )
-                            on -> Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.55f), shape)
-                            else -> Modifier
-                        }
+                        if (on) Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.55f), shape)
+                        else Modifier
                     )
                     .clickable { onSelect(i) }
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = TvSpace.s16),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     name,
-                    fontSize = ProomSp(13.sp),
+                    style = ProomType.label,
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
                     color = if (on) ProomColor.accent else ProomColor.dim,
                     maxLines = 1,
@@ -490,12 +493,12 @@ private fun SubChips(names: List<String>, current: Int, onSelect: (Int) -> Unit)
 /**
  * 两行标题的占位高度。
  *
- * 电视字阶的 cardTitle 是 17sp/23dp 行高，两行 46dp —— 原来写死 40dp，
- * 第二行被裁掉半截（歌单名长一点就只剩上半截字）。
+ * 电视字阶的 cardTitle 是 17sp/23dp 行高。写死 40dp 时第二行被裁掉半截；
+ * 后来改成 23×2=46dp 仍然只出一行 —— includeFontPadding 还要再吃 2dp，
+ * 于是 Compose 提前一行打省略号。统一走 textBlockHeight。
  */
 @Composable
-private fun cardTitleHeight(): Dp =
-    with(LocalDensity.current) { ProomType.cardTitle.lineHeight.toDp() * 2 }
+private fun cardTitleHeight(): Dp = textBlockHeight(ProomType.cardTitle, 2)
 
 /** 推荐卡：横滑用，封面大一些 */
 @Composable
@@ -516,11 +519,11 @@ private fun RecCard(p: NasApi.Playlist, width: Dp, onClick: () -> Unit) {
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick),
     ) {
-        Box {
+        Box(
+            // 封面卡没有自身边框，焦点走白环
+            Modifier.tvFocusBloom(shape, bloom = if (focused) 1f else 0f, ringWidth = 2.dp)
+        ) {
             CoverBox(p, width)
-            if (focused) {
-                Box(Modifier.matchParentSize().clip(shape).border(3.dp, ProomColor.accent, shape))
-            }
         }
         Text(
             p.name,
@@ -528,7 +531,7 @@ private fun RecCard(p: NasApi.Playlist, width: Dp, onClick: () -> Unit) {
             color = ProomColor.text,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 7.dp).height(cardTitleHeight()),
+            modifier = Modifier.padding(top = TvSpace.s8).height(cardTitleHeight()),
         )
         Text(
             metaOf(p),
@@ -550,11 +553,11 @@ private fun PlCard(p: NasApi.Playlist, onClick: () -> Unit) {
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick),
     ) {
-        Box {
+        Box(
+            // 封面卡没有自身边框，焦点走白环
+            Modifier.tvFocusBloom(shape, bloom = if (focused) 1f else 0f, ringWidth = 2.dp)
+        ) {
             CoverBox(p, null)
-            if (focused && true) {
-                Box(Modifier.matchParentSize().clip(shape).border(2.dp, ProomColor.accent, shape))
-            }
         }
         Text(
             p.name,
@@ -562,7 +565,7 @@ private fun PlCard(p: NasApi.Playlist, onClick: () -> Unit) {
             color = ProomColor.text,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 7.dp).height(cardTitleHeight()),
+            modifier = Modifier.padding(top = TvSpace.s8).height(cardTitleHeight()),
         )
         Text(
             metaOf(p),
@@ -578,7 +581,7 @@ private fun PlCard(p: NasApi.Playlist, onClick: () -> Unit) {
 private fun CoverBox(p: NasApi.Playlist, width: Dp?) {
     val shape = RoundedCornerShape(ProomShape.md)
     val base = if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()
-    Box(base.aspectRatio(1f).clip(shape).background(ProomColor.card)) {
+    Box(base.aspectRatio(TvRatio.square).clip(shape).background(ProomColor.card)) {
         if (p.cover.isNotBlank()) {
             RemoteImage(
                 model = p.cover,
@@ -592,7 +595,7 @@ private fun CoverBox(p: NasApi.Playlist, width: Dp?) {
                     imageVector = TabIcons.Music,
                     contentDescription = null,
                     tint = ProomColor.lineStrong,
-                    modifier = Modifier.size(30.dp),
+                    modifier = Modifier.size(TvIcon.display),
                 )
             }
         }
@@ -611,16 +614,16 @@ private fun CoverBox(p: NasApi.Playlist, width: Dp?) {
         Text(
             "${p.count} 首",
             color = Color.White.copy(alpha = 0.92f),
-            fontSize = ProomSp(11.sp),
+            style = ProomType.label,
             fontWeight = FontWeight.Medium,
             // 放右上角：歌单封面几乎都是模板图、文字压在中间偏下，
             // 角标放左下会直接糊在人家的标题上
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(6.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .padding(TvSpace.s8)
+                .clip(RoundedCornerShape(ProomShape.xs))
                 .background(Color.Black.copy(alpha = 0.32f))
-                .padding(horizontal = 5.dp, vertical = 2.dp),
+                .padding(horizontal = TvSpace.s8, vertical = TvSpace.s4),
         )
     }
 }
@@ -629,22 +632,37 @@ private fun CoverBox(p: NasApi.Playlist, width: Dp?) {
 
 /**
  * 没配音乐接口时的空态：说清楚是「没配」而不是「坏了」。
+ *
+ * 光说「去设置里填地址」是不够的：电视上用户得自己按回首页、再摸到「我的 → 设置」，
+ * 一半人到这里就退出去了。空态必须自带出口，所以这里直接给一颗「去设置」。
  */
 @Composable
-private fun EmptyMusic() {
+private fun EmptyMusic(onOpenSettings: (() -> Unit)?) {
     Column(
-        Modifier.fillMaxWidth().padding(top = 60.dp, start = 12.dp, end = 12.dp),
+        // 空态不出现在首屏正中间（那会像加载失败），但也不该贴着顶栏：
+        // 60dp 这个裸值换成 s48，和页面底部的收尾留白同一个档
+        Modifier.fillMaxWidth().padding(top = TvSpace.s48, start = TvSpace.s24, end = TvSpace.s24),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("在线音乐没配置", color = ProomColor.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "在线音乐没配置",
+            style = ProomType.title,
+            color = ProomColor.text,
+        )
         Text(
             "安装包不带任何音乐接口。\n在设置里填上聚合接口地址后，推荐歌单和分类才会出现。",
             color = ProomColor.dim,
-            fontSize = 13.sp,
-            lineHeight = 21.sp,
+            style = ProomType.meta,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 10.dp),
+            modifier = Modifier.padding(top = TvSpace.s12),
         )
+        if (onOpenSettings != null) {
+            com.projectionroom.ui.component.TvPillButton(
+                text = "去设置",
+                onClick = onOpenSettings,
+                modifier = Modifier.padding(top = TvSpace.s24),
+            )
+        }
     }
 }
 
@@ -657,9 +675,9 @@ private fun RecSkeleton(width: Dp) {
     ) {
         items(count = 4) {
             Column(Modifier.width(width)) {
-                SkeletonBlock(Modifier.fillMaxWidth().aspectRatio(1f), radius = ProomShape.md)
-                SkeletonBlock(Modifier.fillMaxWidth(0.9f).padding(top = 10.dp), height = 11.dp)
-                SkeletonBlock(Modifier.fillMaxWidth(0.5f).padding(top = 6.dp), height = 10.dp)
+                SkeletonBlock(Modifier.fillMaxWidth().aspectRatio(TvRatio.square), radius = ProomShape.md)
+                SkeletonBlock(Modifier.fillMaxWidth(0.9f).padding(top = TvSpace.s12), height = 12.dp)
+                SkeletonBlock(Modifier.fillMaxWidth(0.5f).padding(top = TvSpace.s8), height = 8.dp)
             }
         }
     }
@@ -668,9 +686,9 @@ private fun RecSkeleton(width: Dp) {
 @Composable
 private fun PlSkeleton() {
     Column(Modifier.fillMaxWidth()) {
-        SkeletonBlock(Modifier.fillMaxWidth().aspectRatio(1f), radius = ProomShape.md)
-        SkeletonBlock(Modifier.fillMaxWidth(0.86f).padding(top = 10.dp), height = 11.dp)
-        SkeletonBlock(Modifier.fillMaxWidth(0.5f).padding(top = 6.dp), height = 10.dp)
+        SkeletonBlock(Modifier.fillMaxWidth().aspectRatio(TvRatio.square), radius = ProomShape.md)
+        SkeletonBlock(Modifier.fillMaxWidth(0.86f).padding(top = TvSpace.s12), height = 12.dp)
+        SkeletonBlock(Modifier.fillMaxWidth(0.5f).padding(top = TvSpace.s8), height = 8.dp)
     }
 }
 
@@ -681,20 +699,20 @@ private fun ListHint(title: String, desc: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.size(44.dp).clip(CircleShape).background(ProomColor.surface),
+            Modifier.size(TvLayout.minTouch).clip(CircleShape).background(ProomColor.surface),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = TabIcons.Music,
                 contentDescription = null,
                 tint = ProomColor.muted,
-                modifier = Modifier.size(21.dp),
+                modifier = Modifier.size(TvIcon.toolbar),
             )
         }
         Spacer(Modifier.height(12.dp))
         Text(title, style = ProomType.body, color = ProomColor.dim)
         if (desc.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(TvSpace.s8))
             Text(desc, style = ProomType.label, color = ProomColor.muted, maxLines = 2)
         }
     }
@@ -757,7 +775,7 @@ private fun HitList(
         else -> LazyColumn(
             state = listState,
             modifier = modifier,
-            contentPadding = PaddingValues(start = inset, end = inset, bottom = ProomSpace.xxl),
+            contentPadding = PaddingValues(start = inset, end = inset, bottom = TvSpace.s32),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             item {
@@ -765,7 +783,7 @@ private fun HitList(
                     "${hits.size} 首单曲 · 按确定键播放",
                     style = ProomType.meta,
                     color = ProomColor.muted,
-                    modifier = Modifier.padding(vertical = 10.dp),
+                    modifier = Modifier.padding(vertical = TvSpace.s12),
                 )
             }
             itemsIndexed(hits, key = { i, t -> "$i-${t.id}" }) { i, t ->
@@ -787,12 +805,12 @@ private fun HintBox(title: String, sub: String, modifier: Modifier = Modifier) {
             .fillMaxSize()
             .padding(
                 start = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
-                top = ProomSpace.xl,
+                top = TvSpace.s24,
             ),
     ) {
         Text(title, style = ProomType.body, color = ProomColor.text)
         if (sub.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(TvSpace.s8))
             Text(sub, style = ProomType.meta, color = ProomColor.muted)
         }
     }
@@ -809,16 +827,18 @@ private fun HitRow(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            // 行与行贴在一起，环内收
+            .tvFocusRing(
+                RoundedCornerShape(ProomShape.sm),
+                ringWidth = 2.dp,
+                zoom = 1f,
+                inset = true,
+            )
+            .clip(RoundedCornerShape(ProomShape.sm))
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .background(if (focused) ProomColor.surface2 else Color.Transparent)
-            .border(
-                1.dp,
-                if (focused) ProomColor.accent.copy(alpha = 0.7f) else Color.Transparent,
-                RoundedCornerShape(10.dp),
-            )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = TvSpace.s16, vertical = TvSpace.s12),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

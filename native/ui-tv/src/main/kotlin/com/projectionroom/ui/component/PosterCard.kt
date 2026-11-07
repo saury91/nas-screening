@@ -1,6 +1,7 @@
 package com.projectionroom.ui.component
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,14 +26,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvRatio
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.textBlockHeight
 import com.projectionroom.ui.component.RemoteImage
 
 /**
@@ -59,6 +61,16 @@ fun PosterCard(
         ProomMotion.focusScaleTv
     } else 1f
     val scale by animateFloatAsState(target, tween(ProomMotion.short, easing = ProomMotion.ease))
+    // 环的展开进度单独一条曲线：弹性带过冲，才有「鼓起来」而不是「描边突然出现」
+    val bloom by animateFloatAsState(
+        targetValue = if (effective) 1f else 0f,
+        animationSpec = if (effective) {
+            spring(dampingRatio = 0.52f, stiffness = 420f)
+        } else {
+            tween(durationMillis = 150)
+        },
+        label = "poster-bloom",
+    )
 
     Column(
         modifier = modifier
@@ -70,13 +82,13 @@ fun PosterCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .scale(scale)          // 焦点放大只作用于海报，文字不跟着变大
-                .aspectRatio(2f / 3.05f)
+                .aspectRatio(TvRatio.poster)
                 .clip(RoundedCornerShape(ProomShape.md))
                 .background(ProomColor.card)
                 .then(
                     if (effective) {
-                        // 3dp：1080p 上一根 2dp 的线压在深色海报边上几乎看不出来
-                        Modifier.border(3.dp, ProomColor.accent, RoundedCornerShape(ProomShape.md))
+                        // 白环 + 同色柔晕：白色只表示「遥控器停在这」，金色留给「已选中」
+                        Modifier.tvFocusBloom(RoundedCornerShape(ProomShape.md), bloom, ringWidth = 2.dp)
                     } else Modifier
                 ),
         ) {
@@ -109,13 +121,13 @@ fun PosterCard(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(3.dp)
+                        .height(TvSpace.s4)
                         .background(ProomColor.lineStrong)
                 ) {
                     Box(
                         Modifier
                             .fillMaxWidth(progress.coerceIn(0f, 1f))
-                            .height(3.dp)
+                            .height(TvSpace.s4)
                             .background(ProomColor.accent)
                     )
                 }
@@ -127,21 +139,21 @@ fun PosterCard(
                     color = ProomColor.text,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp)
+                        .padding(TvSpace.s8)
                         .clip(RoundedCornerShape(ProomShape.sm))
                         .background(ProomColor.surface2)
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                        .padding(horizontal = TvSpace.s8, vertical = TvSpace.s4),
                 )
             }
         }
         // 标题固定占两行高度：Web 版是靠 min-height:2.8em 做的，
         // Compose 里 minLines 在部分版本上不稳定，直接用定高 Box 更保险。
-        // 高度从字阶的行高算：电视上 cardTitle 是 17sp/23dp，写死 40dp 会把第二行裁掉。
-        val titleLine = with(LocalDensity.current) { ProomType.cardTitle.lineHeight.toDp() }
+        // 高度走 textBlockHeight：行高 × 2 会差 2dp（includeFontPadding），
+        // 结果两行永远排不满、第一行末尾就打省略号。
         Box(
             modifier = Modifier
-                .padding(top = ProomSpace.sm)
-                .height(titleLine * 2),
+                .padding(top = TvSpace.s8)
+                .height(textBlockHeight(ProomType.cardTitle, 2)),
         ) {
             Text(
                 text = title,

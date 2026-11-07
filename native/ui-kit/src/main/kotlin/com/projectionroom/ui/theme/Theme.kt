@@ -10,6 +10,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -129,6 +130,21 @@ object TvType {
 }
 
 /**
+ * 文本块的占位高度：行高 × 行数，再补 2dp。
+ *
+ * 为什么不能直接写 `lineHeight * 行数`：Text 默认带 includeFontPadding，
+ * 首行上方和末行下方各有 1~2dp 的空隙，所以两行 23dp 的 cardTitle 实际要
+ * 48dp 才排得下。差这 2dp 时 Compose 不会「溢出」，而是**提前一行**收尾 ——
+ * 片库 6 列里「千古镜鉴2·背阴山之战」只显示「千古镜鉴2·背阴…」就是这么来的：
+ * 卡片明明留了两行高度，却永远只用第一行。
+ *
+ * 凡是「给几行文字留死高度」的地方都走这里，别再手写乘法。
+ */
+@Composable
+fun textBlockHeight(style: TextStyle, lines: Int = 1): Dp =
+    with(LocalDensity.current) { style.lineHeight.toDp() } * lines + 2.dp
+
+/**
  * 电视安全区。55~100 寸的屏普遍有 2%~5% 过扫描，内容压到边会被切掉：
  * 960×540dp 画布下左右留 48dp（5%）、上下留 27dp（5%）。
  */
@@ -138,6 +154,67 @@ object TvLayout {
 
     /** 遥控器可点目标下限。10-foot UI 里所有能聚焦的东西都不该小于这个尺寸 */
     val minTouch = 48.dp
+}
+
+/**
+ * 电视间距：**只有这 8 档，全部是 4 的倍数**。
+ *
+ * 为什么不复用 [ProomSpace]：那套是手机遗留，md=14、xl=26 本身就不是 4 的倍数
+ * （它自己的注释还写着「4dp 的倍数」），电视端跟着用只会把 14/18/22/26 这些
+ * 半档值一直带下去。手机端继续用 ProomSpace，电视端一律用这里。
+ *
+ * 命名直接带数字，避免 xs/sm/md 那套需要脑内换算的映射。
+ */
+object TvSpace {
+    val s4 = 4.dp
+    val s8 = 8.dp
+    val s12 = 12.dp
+    val s16 = 16.dp
+    val s20 = 20.dp
+    val s24 = 24.dp
+    val s32 = 32.dp
+    val s48 = 48.dp
+}
+
+/**
+ * 电视图标四档。图标是「一套图形语言」，尺寸必须是档位而不是随手值：
+ * 16 内联（跟在文字里）/ 20 控件内 / 24 工具条 / 32 展示。
+ *
+ * 之前全项目出现过 14/16/18/19/20/21/22/23/26/30/34 十一档，
+ * 21 和 23 这种 1dp 级差异在 3 米外根本无从分辨，只会让图标看着忽大忽小。
+ */
+object TvIcon {
+    val inline = 16.dp
+    val control = 20.dp
+    val toolbar = 24.dp
+    val display = 32.dp
+}
+
+/**
+ * 电视控件尺寸三档（圆形按钮直径 / 可聚焦块边长）。
+ *
+ * - [control] 48：常规控件、工具按钮、列表里的图标钮
+ * - [videoControl] 56：视频控制层的次键（浮在画面上，要压得住背景）
+ * - [primary] 72：主操作。**同屏只能有一个**
+ *
+ * 规矩：主键至少比次键大 8dp，否则「主」只存在于注释里。
+ */
+object TvSize {
+    val control = 48.dp
+    val videoControl = 56.dp
+    val primary = 72.dp
+}
+
+/** 三种内容比例，全项目只有这三种，其余比例视为违规 */
+object TvRatio {
+    /** 影视海报 2:3.05（沿用 Web 版，别改成 2:3，端间占位会差 2dp/张） */
+    const val poster = 2f / 3.05f
+
+    /** 横版：剧集缩略图、直播台标、频道格 */
+    const val wide = 16f / 9f
+
+    /** 方图：音乐封面 */
+    const val square = 1f
 }
 
 /**
@@ -167,6 +244,9 @@ object ProomShape {
     val lg = 22.dp      // --r-lg
     val md = 14.dp      // --r-md
     val sm = 10.dp      // --r-sm
+
+    /** 细条专用：进度条、分隔线、2~4dp 高的色块。别再用 1/2/3/6 这些裸值 */
+    val xs = 4.dp
 }
 
 object ProomMotion {

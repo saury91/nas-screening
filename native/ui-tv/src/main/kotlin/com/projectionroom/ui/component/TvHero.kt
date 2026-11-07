@@ -49,10 +49,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.TvIcon
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.util.metaLine
 import com.projectionroom.ui.util.plainText
-import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
 import com.projectionroom.ui.component.RemoteImage
@@ -92,7 +93,7 @@ fun TvHero(
     }
     val vod = items[cur.coerceIn(0, items.lastIndex)]
 
-    Box(Modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(0.dp))) {
+    Box(Modifier.fillMaxWidth().height(height)) {
         // ── 背景三层 ──
         AnimatedContent(
             targetState = vod.pic,
@@ -108,7 +109,7 @@ fun TvHero(
                     com.projectionroom.ui.component.SoftBackdrop(
                         model = pic,
                         modifier = Modifier.fillMaxSize(),
-                        decodeWidth = 22.dp,
+                        decodeWidth = TvIcon.toolbar,
                         brightness = 0.62f,
                     )
                 }
@@ -147,20 +148,23 @@ fun TvHero(
                     .weight(1f)
                     .fillMaxHeight()
                     // 文字和按钮作为一个整体垂直居中；圆点指示器要占走底部一条，
-                    // 所以底部留白比顶部多，视觉重心才不会被圆点拽下去
-                    .padding(bottom = if (items.size > 1) 30.dp else 0.dp),
+                    // 所以底部留白比顶部多，视觉重心才不会被圆点拽下去。
+                    // 首页 Hero 从 0.68 收到 0.65（给底部卡片标题让安全区）之后，
+                    // s24 只剩 4dp 让位，圆点会贴上按钮下沿 —— 各让一步：
+                    // 内容再往上抬 8dp，圆点再往下沉 8dp。
+                    .padding(bottom = if (items.size > 1) TvSpace.s32 else 0.dp),
                 verticalArrangement = Arrangement.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.width(6.dp).height(6.dp).clip(CircleShape).background(ProomColor.accent))
+                    Box(Modifier.width(TvSpace.s8).height(TvSpace.s8).clip(CircleShape).background(ProomColor.accent))
                     Text(
                         text = "私人放映 · 今日推荐",
                         style = ProomType.eyebrow,
                         color = ProomColor.accent,
-                        modifier = Modifier.padding(start = 8.dp),
+                        modifier = Modifier.padding(start = TvSpace.s8),
                     )
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(TvSpace.s8))
                 Text(
                     text = vod.name,
                     color = ProomColor.text,
@@ -170,14 +174,14 @@ fun TvHero(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(TvSpace.s4))
                 Text(
                     text = metaLine(vod.score, vod.year, vod.area, vod.type, sep = "   "),
                     style = ProomType.meta,
                     color = ProomColor.dim,
                 )
                 if (vod.desc.plainText().isNotBlank()) {
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(TvSpace.s8))
                     Text(
                         vod.desc.plainText(),
                         style = ProomType.body,
@@ -188,8 +192,8 @@ fun TvHero(
                         modifier = Modifier.fillMaxWidth(0.66f),
                     )
                 }
-                Spacer(Modifier.height(20.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Spacer(Modifier.height(TvSpace.s12))
+                Row(horizontalArrangement = Arrangement.spacedBy(TvSpace.s12)) {
                     HeroButton(
                         "立即播放",
                         primary = true,
@@ -205,7 +209,7 @@ fun TvHero(
                 }
             }
 
-            Spacer(Modifier.width(ProomSpace.xxl))
+            Spacer(Modifier.width(TvSpace.s32))
 
             // 右侧竖版海报：带一点偏移，别和文字挤在同一基线
             Box(
@@ -238,17 +242,17 @@ fun TvHero(
             Row(
                 Modifier
                     .align(Alignment.BottomStart)
-                    .padding(start = TvLayout.insetX, bottom = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(start = TvLayout.insetX, bottom = TvSpace.s16),
+                horizontalArrangement = Arrangement.spacedBy(TvSpace.s8),
             ) {
                 repeat(items.size.coerceAtMost(8)) { i ->
                     val on = i == cur
                     Box(
                         Modifier
                             // 3dp 的细条在三米外看不见，等于没有页码
-                            .height(5.dp)
+                            .height(ProomShape.xs)
                             .width(if (on) 32.dp else 16.dp)
-                            .clip(RoundedCornerShape(3.dp))
+                            .clip(RoundedCornerShape(50))
                             .background(if (on) ProomColor.accent else Color.White.copy(alpha = 0.24f))
                     )
                 }
@@ -276,7 +280,7 @@ private fun HeroButton(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(ProomSpace.md)
+    val shape = RoundedCornerShape(ProomShape.md)
     Box(
         Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
@@ -285,28 +289,23 @@ private fun HeroButton(
                     Modifier.focusProperties { up = upTarget }
                 } else Modifier
             )
+            // 主按钮底色恒定金：聚焦不再翻白 —— 翻白之后白环贴在自己的白底上就没了，
+            // 而且「金=主操作、白=焦点」两套颜色同屏打架。焦点只由白环表达
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)
             .clip(shape)
-            // 主按钮聚焦时整块翻白：金底 + 2dp 白边在电视上看不出区别，
-            // 首页这一颗是遥控器最先落到的位置，必须一眼确认
             .background(
                 when {
-                    primary && focused -> Color.White
                     primary -> ProomColor.accent
                     focused -> Color.White.copy(alpha = 0.24f)
                     else -> Color.White.copy(alpha = 0.12f)
                 }
-            )
-            .then(
-                if (focused && !primary) {
-                    Modifier.border(2.dp, ProomColor.accent, shape)
-                } else Modifier
             )
             .onFocusChanged {
                 focused = it.isFocused
                 onFocus(it.isFocused)
             }
             .clickable(onClick = onClick)
-            .padding(horizontal = 26.dp, vertical = 13.dp),
+            .padding(horizontal = TvSpace.s24, vertical = TvSpace.s12),
     ) {
         Text(
             label,

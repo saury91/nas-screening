@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.ui.component.PlayerIcons
 import com.projectionroom.ui.component.TabIcons
+import com.projectionroom.ui.component.tvFocusRing
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.LocalProomTv
@@ -263,10 +264,10 @@ private fun MiniBtn(
     Box(
         Modifier
             .size(if (tv) 48.dp else 38.dp)
-            .clip(shape)
             // 手机上这些按钮是纯触摸目标，套焦点环只会显脏
+            .then(if (tv) Modifier.tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true) else Modifier)
+            .clip(shape)
             .then(if (tv && focused) Modifier.background(ProomColor.surface2) else Modifier)
-            .then(if (tv && focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -274,7 +275,7 @@ private fun MiniBtn(
         Icon(
             imageVector = icon,
             contentDescription = desc,
-            tint = if (tv && focused) ProomColor.accent else Color.White.copy(alpha = 0.88f),
+            tint = if (tv && focused) Color.White else Color.White.copy(alpha = 0.88f),
             modifier = Modifier.size(if (tv) 22.dp else 18.dp),
         )
     }

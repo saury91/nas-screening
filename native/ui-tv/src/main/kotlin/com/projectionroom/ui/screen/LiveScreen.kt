@@ -1,9 +1,8 @@
 package com.projectionroom.ui.screen
 
 import kotlinx.coroutines.flow.Flow
+import com.projectionroom.ui.component.tvFocusRing
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -60,9 +59,11 @@ import com.projectionroom.ui.component.ChannelTile
 import com.projectionroom.ui.component.SkeletonBlock
 import com.projectionroom.ui.component.TabIcons
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvRatio
+import com.projectionroom.ui.theme.TvIcon
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
 import com.projectionroom.ui.theme.ProomSp
@@ -195,10 +196,10 @@ fun LiveScreen(
                 state = gridState,
                 modifier = Modifier.fillMaxSize().weight(1f),
                 contentPadding = PaddingValues(
-                    start = TvLayout.insetX, end = TvLayout.insetX, top = 14.dp, bottom = ProomSpace.xxl,
+                    start = TvLayout.insetX, end = TvLayout.insetX, top = TvSpace.s16, bottom = TvSpace.s32,
                 ),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+                horizontalArrangement = Arrangement.spacedBy(TvSpace.s12),
+                verticalArrangement = Arrangement.spacedBy(TvSpace.s16),
             ) {
                 when {
                     loading && all.isEmpty() -> items(12) { ChannelSkeleton() }
@@ -307,7 +308,7 @@ private fun LiveHeader(
                     maxLines = 1,
                 )
             }
-            Spacer(Modifier.width(ProomSpace.lg))
+            Spacer(Modifier.width(TvSpace.s20))
             // 「搜索」之前是个传进来却没人用的死参数 —— 电视上根本没有入口
             com.projectionroom.ui.component.TvPillButton("搜索", onOpenSearch)
         },
@@ -325,11 +326,11 @@ private fun GroupRail(
 ) {
     // 之前把 40 个分组平铺成 8 行 chip，首屏直接被筛选用掉 40%。
     // 这里收敛成一行横滑：分组再多也只占一行，滚动时始终可见。
-    Box(Modifier.fillMaxWidth()) {
+    Box(Modifier.fillMaxWidth().padding(top = TvSpace.s24)) {
         LazyRow(
             // 分组条从安全区起步：40dp 会压到过扫描区里，左右还得和页头对齐
             contentPadding = PaddingValues(horizontal = TvLayout.insetX),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(TvSpace.s8),
             modifier = Modifier.fillMaxWidth().height(TvLayout.minTouch),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -344,8 +345,8 @@ private fun GroupRail(
         Box(
             Modifier
                 .align(Alignment.CenterEnd)
-                .width(28.dp)
-                .height(44.dp)
+                .width(TvSpace.s32)
+                .height(TvLayout.minTouch)
                 .background(
                     Brush.horizontalGradient(
                         listOf(Color.Transparent, ProomColor.bg)
@@ -358,37 +359,27 @@ private fun GroupRail(
 @Composable
 private fun LiveChip(label: String, on: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(50)
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(140), label = "live-chip")
+    // chip 统一 10dp 圆角（规范 §6.1）
+    val shape = RoundedCornerShape(ProomShape.sm)
     Box(
         Modifier
             // 48dp 高：低于这个数在电视上换行时极易点错（原来写的是 34dp，注释和代码不一致）
             .heightIn(min = TvLayout.minTouch)
-            .scale(scale)
+            // 不再放大 6%：chip 之间只有 8dp 间距，放大后左右各吃掉 1.5dp，
+            // 一排 chip 会互相叠着抖动；同一屏的浏览页 filter 本来也不缩放
+            // chip 换行紧贴，环内收；金色只表示选中，焦点一律走白
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, color = Color.White, inset = true)
             .clip(shape)
             .background(if (on) ProomColor.accentSoft else ProomColor.surface)
-            .then(
-                when {
-                    // 焦点落在「已经选中」的那颗 chip 上时，原来只是把 1dp 半透明金边
-                    // 换成 2dp 金边 —— 3 米外和选中态一模一样，看不出遥控器在哪。
-                    // 焦点统一给白边：金色只表示选中，白色只表示焦点。
-                    focused -> Modifier.border(
-                        if (on) 3.dp else 2.dp,
-                        Color.White,
-                        shape,
-                    )
-                    on -> Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.55f), shape)
-                    else -> Modifier
-                }
-            )
+            .then(if (on) Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.55f), shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = TvSpace.s16),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
-            fontSize = ProomSp(13.sp),
+            style = ProomType.label,
             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
             color = if (on) ProomColor.accent else ProomColor.dim,
             maxLines = 1,
@@ -402,10 +393,18 @@ private fun LiveChip(label: String, on: Boolean, onClick: () -> Unit) {
 @Composable
 private fun ChannelCard(ch: NasApi.LiveChannel, showGroup: Boolean, onClick: () -> Unit) {
     // 台标块 + 名字 + 分组，和「我的」里的收藏/记录共用同一个组件
+    //
+    // 清晰度从台名里摘出来放到副标题：一行只有 163dp，
+    // 「CCTV-Storm Football (1080p)」这种名字被省略号切成「CCTV-Storm Footb…」，
+    // 一行 5 个台里 3 个看不出是哪个。台名只留识别部分，画质交给第二行。
+    val sub = listOf(
+        if (showGroup) plainLabel(ch.group).ifBlank { "未分组" } else "",
+        qualityOf(ch.name),
+    ).filter { it.isNotBlank() }.joinToString(" · ")
     ChannelTile(
         // 源里有些台的名字就是个数字（"3"、"4"），补个前缀才读得出是台
         name = displayName(ch.name),
-        subtitle = if (showGroup) plainLabel(ch.group).ifBlank { "未分组" } else "",
+        subtitle = sub,
         logo = ch.logo,
         // 多线路是可用性信号（这条挂了换下一条），单线路就不用标了
         badge = if (ch.urls.size > 1) "${ch.urls.size} 源" else "",
@@ -416,14 +415,14 @@ private fun ChannelCard(ch: NasApi.LiveChannel, showGroup: Boolean, onClick: () 
 @Composable
 private fun ChannelSkeleton() {
     Column(Modifier.fillMaxWidth()) {
-        SkeletonBlock(Modifier.fillMaxWidth().aspectRatio(16f / 9f), radius = ProomShape.md)
+        SkeletonBlock(Modifier.fillMaxWidth().aspectRatio(TvRatio.wide), radius = ProomShape.md)
         SkeletonBlock(
-            Modifier.fillMaxWidth(0.78f).padding(top = 9.dp),
+            Modifier.fillMaxWidth(0.78f).padding(top = TvSpace.s8),
             height = 11.dp,
-            radius = 5.dp,
+            radius = ProomShape.xs,
         )
         SkeletonBlock(
-            Modifier.fillMaxWidth(0.42f).padding(top = 5.dp),
+            Modifier.fillMaxWidth(0.42f).padding(top = TvSpace.s4),
             height = 9.dp,
             radius = 4.dp,
         )
@@ -438,39 +437,43 @@ private fun LiveMessage(title: String, desc: String, action: String, onAction: (
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.size(46.dp).clip(CircleShape).background(ProomColor.surface),
+            Modifier.size(TvLayout.minTouch).clip(CircleShape).background(ProomColor.surface),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = TabIcons.Live,
                 contentDescription = null,
                 tint = ProomColor.muted,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(TvIcon.toolbar),
             )
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(TvSpace.s16))
         Text(title, style = ProomType.body, color = ProomColor.dim)
         if (desc.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(TvSpace.s8))
             Text(
                 desc,
                 style = ProomType.label,
                 color = ProomColor.muted,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 32.dp),
+                modifier = Modifier.padding(horizontal = TvSpace.s32),
             )
         }
         if (action.isNotBlank()) {
             Spacer(Modifier.height(16.dp))
             Box(
                 Modifier
+                    // 空态下唯一能按的按钮，原来没有任何焦点反馈
+                    .tvFocusRing(RoundedCornerShape(50), ringWidth = 2.dp, zoom = 1f)
                     .clip(RoundedCornerShape(50))
                     .background(ProomColor.surface)
                     .clickable(onClick = onAction)
-                    .padding(horizontal = 18.dp, vertical = 9.dp),
+                    // 15sp + 上下 8dp 只有 36dp 高，低于 48dp 可点目标（规范 §5）
+                    .heightIn(min = TvLayout.minTouch)
+                    .padding(horizontal = TvSpace.s20),
             ) {
-                Text(action, fontSize = ProomSp(13.sp), fontWeight = FontWeight.Medium, color = ProomColor.text)
+                Text(action, style = ProomType.label, fontWeight = FontWeight.Medium, color = ProomColor.text)
             }
         }
     }
@@ -594,6 +597,15 @@ private object LiveCache {
 
 /** 台名只有数字时补「频道」前缀，避免列表上出现光秃秃一个数 */
 private fun displayName(raw: String): String {
-    val n = raw.trim()
+    // 尾部的「(1080p)/(720p)」挪去副标题，台名只留识别部分
+    val n = raw.trim().replace(QUALITY_SUFFIX, "").trim()
     return if (n.isNotEmpty() && n.all { it.isDigit() }) "频道 $n" else n
 }
+
+/** 从台名尾部取出清晰度：「CCTV-16 HD (1080p)」→「1080p」，没有则空串 */
+private fun qualityOf(raw: String): String =
+    QUALITY_SUFFIX.find(raw.trim())?.groupValues?.getOrNull(1).orEmpty()
+
+/** 采集源里清晰度写法不统一：全角/半角括号、p 与 i、后面还可能带空格 */
+private val QUALITY_SUFFIX =
+    Regex("""\s*[（(]\s*(\d{3,4}\s*[piPI])\s*[)）]\s*$""")

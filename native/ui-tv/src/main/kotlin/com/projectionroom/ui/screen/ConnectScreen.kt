@@ -1,6 +1,7 @@
 package com.projectionroom.ui.screen
 
 import androidx.compose.foundation.background
+import com.projectionroom.ui.component.tvFocusRing
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,8 +36,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvSize
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 
 /**
@@ -81,11 +84,11 @@ fun ConnectScreen(
 
         Column(
             Modifier.widthIn(max = 560.dp)
-                .padding(horizontal = ProomSpace.xl, vertical = ProomSpace.md),
+                .padding(horizontal = TvSpace.s24, vertical = TvSpace.s16),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("放映室", style = ProomType.eyebrow, color = ProomColor.accent)
-            Spacer(Modifier.height(ProomSpace.sm))
+            Spacer(Modifier.height(TvSpace.s8))
             Text(
                 if (current != null) "换一台 NAS" else "连上你的 NAS",
                 style = ProomType.headline,
@@ -93,11 +96,11 @@ fun ConnectScreen(
             )
             // 原来这里还有一行「当前 · 10.0.2.2:8899」—— 和下面预填好的地址框
             // 说的是同一件事。540dp 的画布上这一行正好把「先跳过」挤到屏幕外。
-            Spacer(Modifier.height(ProomSpace.md))
+            Spacer(Modifier.height(TvSpace.s16))
 
             if (searching) {
                 CircularProgressIndicator(color = ProomColor.accent, strokeWidth = 2.dp)
-                Spacer(Modifier.height(ProomSpace.md))
+                Spacer(Modifier.height(TvSpace.s16))
                 Text("正在局域网里找放映室…", style = ProomType.body, color = ProomColor.dim)
             } else {
                 Text(
@@ -106,7 +109,7 @@ fun ConnectScreen(
                     style = ProomType.body,
                     color = ProomColor.muted,
                 )
-                Spacer(Modifier.height(ProomSpace.sm))
+                Spacer(Modifier.height(TvSpace.s8))
 
                 // 手动地址：只在自动发现失败时才出现。
                 // 电视上不用系统的软键盘（遥控器在软键盘上挪一个字母要按十几次），
@@ -114,9 +117,11 @@ fun ConnectScreen(
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            .heightIn(min = TvSize.control)
                             .background(ProomColor.surface, RoundedCornerShape(ProomShape.sm))
                             .border(1.dp, ProomColor.line, RoundedCornerShape(ProomShape.sm))
-                            .padding(horizontal = ProomSpace.md, vertical = 12.dp),
+                            .padding(horizontal = TvSpace.s16, vertical = TvSpace.s12),
+                        contentAlignment = Alignment.CenterStart,
                     ) {
                         Text(
                             text.ifEmpty { "192.0.2.10:8899" },
@@ -125,7 +130,7 @@ fun ConnectScreen(
                         )
                     }
 
-                    Spacer(Modifier.height(ProomSpace.md))
+                    Spacer(Modifier.height(TvSpace.s16))
                     NumberPad(
                         onKey = { ch ->
                             text = when (ch) {
@@ -135,11 +140,11 @@ fun ConnectScreen(
                         },
                     )
 
-                Spacer(Modifier.height(ProomSpace.md))
+                Spacer(Modifier.height(TvSpace.s16))
 
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(ProomSpace.md),
+                    horizontalArrangement = Arrangement.spacedBy(TvSpace.s16),
                 ) {
                     ConnectButton("再找一次", primary = false, Modifier.weight(1f), onRetry)
                     ConnectButton("连接", primary = true, Modifier.weight(1f)) {
@@ -150,7 +155,7 @@ fun ConnectScreen(
                 // 没有 NAS 也能用：片源清单存在本地，直接进 App。
                 // 地址入口留在「我的 → 设置」，不需要每次启动都被拦在这里。
                 if (onSkip != null) {
-                    Spacer(Modifier.height(ProomSpace.md))
+                    Spacer(Modifier.height(TvSpace.s16))
                     // 这一行是「进不了 NAS 也要能用」的出口，可聚焦却没有任何焦点态，
                     // 遥控器停上来时和普通灰色说明文字一模一样
                     var skipFocused by remember { mutableStateOf(false) }
@@ -158,20 +163,22 @@ fun ConnectScreen(
                     Text(
                         "先跳过，稍后在「设置」里填地址",
                         style = ProomType.meta,
-                        color = if (skipFocused) ProomColor.accent else ProomColor.muted,
+                        color = ProomColor.muted,
                         modifier = Modifier
+                            // 白环统一口径：这条「先跳过」原来靠文字变金 + 金边，
+                            // 和金底的键盘键混在一起分不清是选中还是焦点
+                            .tvFocusRing(skipShape, ringWidth = 2.dp, zoom = 1f, inset = true)
                             .clip(skipShape)
                             .then(if (skipFocused) Modifier.background(ProomColor.surface2) else Modifier)
-                            .then(if (skipFocused) Modifier.border(2.dp, ProomColor.accent, skipShape) else Modifier)
                             .onFocusChanged { skipFocused = it.isFocused }
                             .clickable(onClick = onSkip)
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                            .padding(horizontal = TvSpace.s16, vertical = TvSpace.s8),
                     )
                 }
             }
 
             if (!version.isNullOrBlank()) {
-                Spacer(Modifier.height(ProomSpace.md))
+                Spacer(Modifier.height(TvSpace.s16))
                 Text(
                     "v$version · 片源与设置都在 NAS 上",
                     style = ProomType.label,
@@ -193,6 +200,13 @@ private fun ConnectButton(
     val shape = RoundedCornerShape(ProomShape.sm)
     Box(
         modifier
+            // 主按钮是金底，金环贴上去会糊，焦点走白；次按钮是深灰底，走金
+            .tvFocusRing(
+                shape,
+                ringWidth = 2.dp,
+                zoom = 1f,
+                color = if (primary) Color.White else ProomColor.accent,
+            )
             .background(
                 when {
                     primary -> ProomColor.accent
@@ -201,16 +215,7 @@ private fun ConnectButton(
                 },
                 shape,
             )
-            .border(
-                if (focused) 2.dp else 1.dp,
-                when {
-                    focused && primary -> Color.White
-                    focused -> ProomColor.accent
-                    primary -> ProomColor.accent
-                    else -> ProomColor.line
-                },
-                shape,
-            )
+            .border(1.dp, if (primary) ProomColor.accent else ProomColor.line, shape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
@@ -240,9 +245,9 @@ private fun NumberPad(onKey: (String) -> Unit) {
     )
     // 键盘铺满整列宽度（等分三格），而不是固定 88dp 宽挤在左边 ——
     // 输入框有 500 多 dp 宽，键盘只占一半看起来像没画完
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(TvSpace.s8)) {
         rows.forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TvSpace.s8)) {
                 row.forEach { key ->
                     PadKey(if (key == "\b") "⌫" else key, Modifier.weight(1f)) { onKey(key) }
                 }
@@ -260,9 +265,12 @@ private fun PadKey(label: String, modifier: Modifier = Modifier, onClick: () -> 
             // 74×36 的数字键对遥控器光标太小；48dp 高才够到可点目标下限，
             // 再高（52dp）四行就会把底部的「先跳过」顶出画布
             .height(48.dp)
+            // 键盘按键彼此紧贴，环内收。
+            // 原来聚焦会把底色翻成金色、文字翻深 —— 那是「底色也在表达焦点」，
+            // 和全站「底色说是什么、白环说停在哪」冲突。改成同色相提亮 + 白环
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(shape)
-            .background(if (focused) ProomColor.accent else ProomColor.surface)
-            .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)
+            .background(if (focused) ProomColor.surface2 else ProomColor.surface)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -270,7 +278,7 @@ private fun PadKey(label: String, modifier: Modifier = Modifier, onClick: () -> 
         Text(
             label,
             style = ProomType.cardTitle,
-            color = if (focused) Color(0xFF1B1206) else ProomColor.text,
+            color = ProomColor.text,
         )
     }
 }

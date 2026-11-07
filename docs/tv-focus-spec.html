@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>放映室 · TV 焦点发泡规范 v2</title>
+<style>
+:root{--bg:#07080B;--soft:#0C0E13;--surface:rgba(255,255,255,.055);--surface2:rgba(255,255,255,.09);
+--line:rgba(255,255,255,.085);--text:#F4F5F7;--dim:#B3B8C3;--muted:#8A919E;--accent:#FFCF7A;
+--asoft:rgba(255,207,122,.14);--ink:#1B1206;--bad:#FF9A9A;--ok:#7EE2A8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);line-height:1.6;
+font-family:-apple-system,"PingFang SC","Helvetica Neue",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1300px;margin:0 auto;padding:52px 44px 80px}
+.eyebrow{font-size:12px;font-weight:600;letter-spacing:3px;color:var(--accent)}
+h1{font-size:36px;font-weight:600;letter-spacing:-.4px;margin:8px 0 10px}
+h2{font-size:23px;font-weight:600;margin:0}
+h3{font-size:15px;font-weight:600;margin:0 0 10px}
+p{margin:0 0 10px;color:var(--dim);font-size:14px}
+.lead{font-size:15.5px;max-width:830px}
+.sec{margin-top:54px;padding-top:30px;border-top:1px solid var(--line)}
+.sec:first-of-type{border-top:none;padding-top:0}
+.sh{display:flex;align-items:baseline;gap:13px;margin-bottom:20px}
+.sn{font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:2px}
+code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--accent)}
+.k{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;padding:2px 6px;
+border:1px solid rgba(255,255,255,.16);border-radius:5px;color:var(--dim)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.panel{background:var(--soft);border:1px solid var(--line);border-radius:14px;padding:22px}
+.stage{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.cell{width:158px}
+.cap{font-size:11.5px;color:var(--muted);margin-top:10px;text-align:center;line-height:1.5}
+.poster{width:158px;height:220px;border-radius:14px;position:relative;
+background:linear-gradient(155deg,#2A2118,#171A22 55%,#0E1016);
+display:flex;align-items:flex-end;padding:12px;transition:all .22s}
+.poster::before{content:"";position:absolute;inset:0;border-radius:14px;
+box-shadow:inset 0 0 0 1px rgba(255,255,255,.085)}
+.poster b{font-size:13px;font-weight:600;position:relative}
+.badge{position:absolute;top:9px;left:9px;font-size:10px;font-weight:600;padding:2px 7px;
+border-radius:5px;background:rgba(0,0,0,.55);color:var(--dim);z-index:2}
+/* ── 发泡焦点 ── */
+.bloom-g{box-shadow:0 0 0 1px #FFCF7A,0 0 0 3px rgba(255,207,122,.5),
+0 0 14px 3px rgba(255,207,122,.32),0 0 34px 9px rgba(255,207,122,.10);transform:scale(1.04);z-index:3}
+.bloom-w{box-shadow:0 0 0 1px #fff,0 0 0 3px rgba(255,255,255,.38),
+0 0 16px 5px rgba(255,255,255,.20),0 0 38px 12px rgba(255,255,255,.07);transform:scale(1.04);z-index:3}
+@keyframes bfpulse{
+0%,15%{box-shadow:0 0 0 1px rgba(255,207,122,.85);transform:scale(1)}
+50%,78%{box-shadow:0 0 0 1px #FFCF7A,0 0 0 3px rgba(255,207,122,.5),
+0 0 14px 3px rgba(255,207,122,.32),0 0 34px 9px rgba(255,207,122,.10);transform:scale(1.04)}
+100%{box-shadow:0 0 0 1px rgba(255,207,122,.85);transform:scale(1)}
+}
+.auto{animation:bfpulse 2.8s cubic-bezier(.34,1.4,.64,1) infinite;z-index:2}
+/* 生长帧 */
+.f1{box-shadow:0 0 0 2px rgba(255,207,122,.8),0 0 8px 1px rgba(255,207,122,.18);transform:scale(1.015)}
+.f2{box-shadow:0 0 0 1px rgba(255,207,122,.9),0 0 0 2.6px rgba(255,207,122,.55),
+0 0 11px 2px rgba(255,207,122,.26);transform:scale(1.035)}
+/* 选中：内描边 + 金底，静止无光晕 */
+.on{background-color:var(--asoft)}
+.on::before{box-shadow:inset 0 0 0 1.5px rgba(255,207,122,.8)}
+.dim{opacity:.36}
+.chips{display:flex;gap:12px;flex-wrap:wrap}
+.chip{padding:9px 19px;border-radius:11px;background:var(--surface);font-size:14px;color:var(--dim);
+box-shadow:inset 0 0 0 1px transparent;transition:all .22s}
+.chip.on{background:var(--asoft);color:var(--accent);font-weight:600;box-shadow:inset 0 0 0 1px rgba(255,207,122,.8)}
+.rows{display:flex;flex-direction:column;gap:10px;max-width:520px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:13px 17px;
+border-radius:10px;background:var(--surface);font-size:14px;transition:all .22s}
+.row .v{color:var(--muted);font-size:12.5px}
+.btns{display:flex;gap:15px;align-items:center}
+.cbtn{width:54px;height:54px;border-radius:50%;background:var(--surface2);display:flex;
+align-items:center;justify-content:center;font-size:18px;transition:all .22s}
+.cbtn.big{width:70px;height:70px;font-size:24px;background:var(--text);color:var(--ink)}
+.eps{display:grid;grid-template-columns:repeat(8,46px);gap:9px}
+.ep{height:46px;border-radius:9px;background:var(--surface);display:flex;align-items:center;
+justify-content:center;font-size:13px;color:var(--dim);transition:all .22s}
+.ep.on{background:var(--asoft);color:var(--accent);font-weight:600;box-shadow:inset 0 0 0 1px rgba(255,207,122,.8)}
+.field{width:440px;padding:13px 15px;border-radius:10px;background:var(--soft);
+box-shadow:inset 0 0 0 1px var(--line);font-size:14.5px;color:var(--text)}
+.caret{display:inline-block;width:2px;height:16px;background:var(--accent);vertical-align:-3px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:10px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-size:11.5px;letter-spacing:.6px;text-transform:uppercase;font-weight:600}
+.note{margin-top:14px;padding:12px 15px;border-radius:10px;background:rgba(255,207,122,.06);
+border-left:2px solid var(--accent);font-size:13px;color:var(--dim)}
+ul{margin:8px 0 0;padding-left:19px;font-size:13.5px;color:var(--dim)}
+li{margin-bottom:5px}
+footer{margin-top:58px;padding-top:20px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+</style></head><body><div class="wrap">
+
+<div class="eyebrow">PROJECTION ROOM · TV FOCUS SPEC v2</div>
+<h1>边框发泡＝聚焦</h1>
+<p class="lead">不用额外套一圈白，也不改组件自己的边框颜色。聚焦时让<b>这根边框自己鼓起来</b>：变粗、向外涨、透出同色柔光、整个元素轻微放大。像气泡从内部顶出来，比套一圈硬线更像"活的"。</p>
+
+<div class="sec">
+<div class="sh"><span class="sn">01</span><h2>规则</h2></div>
+<div class="g2">
+<div class="panel">
+<h3>颜色不动，形态动</h3>
+<p style="margin-bottom:14px">金色边框就保持金色，白色就保持白色。焦点只改三件事：</p>
+<div class="stage">
+<div class="cell"><div class="poster"><span class="badge">静止</span><b>1dp 细边</b></div><div class="cap">① 静息：1dp<br>无光晕、无缩放</div></div>
+<div class="cell"><div class="poster bloom-g"><span class="badge">聚焦</span><b>3dp 鼓起</b></div><div class="cap">② 发泡：3dp + 同色光晕<br>+ 放大 1.04</div></div>
+</div>
+</div>
+<div class="panel">
+<h3>「选中」和「聚焦」怎么分开</h3>
+<p style="margin-bottom:14px">两者可以都是金色，但位置不同、动静不同：</p>
+<div class="stage">
+<div class="cell"><div class="poster on"><span class="badge">选中</span><b>内描边·静</b></div><div class="cap">③ 选中：内描边 1.5dp<br>金底、不发泡</div></div>
+<div class="cell"><div class="poster on bloom-g"><span class="badge">选中+聚焦</span><b>内静外涨</b></div><div class="cap">④ 叠加：内实线 + 外发泡</div></div>
+</div>
+</div>
+</div>
+<div class="note">
+<b>关键：</b>发泡只发生在外侧（向外 2~3dp 生长），不挤压内层；内层金边固定不动。所以「这是当前项」是一条细实线，「我停在这里」是一圈鼓起的柔光，一静一动，不会看混。
+</div>
+</div>
+
+<div class="sec">
+<div class="sh"><span class="sn">02</span><h2>发泡过程</h2></div>
+<p>220 ms 内完成，带 3% 过冲（先鼓过头再收回），这是"弹出来"的手感来源。</p>
+<div class="stage" style="margin-top:20px">
+<div class="cell"><div class="poster"><b>0 ms</b></div><div class="cap">边框 1dp<br>缩放 1.000</div></div>
+<div class="cell"><div class="poster f1"><b>70 ms</b></div><div class="cap">边框 2dp<br>缩放 1.015</div></div>
+<div class="cell"><div class="poster f2"><b>140 ms</b></div><div class="cap">边框 2.6dp<br>缩放 1.045（过冲）</div></div>
+<div class="cell"><div class="poster bloom-g"><b>220 ms</b></div><div class="cap">边框 3dp + 光晕<br>缩放 1.040（定格）</div></div>
+</div>
+<div class="note">线条由细到粗、光晕由无到有、尺寸先过冲再回落，三者同步才叫"发泡"。只放大不增粗像抖动，只增粗不发光像描边加粗，都不够。</div>
+<div style="margin-top:26px;display:flex;gap:24px;align-items:center">
+<div class="poster auto"><span class="badge">实时预览</span><b>循环发泡</b></div>
+<div style="font-size:13px;color:var(--dim);max-width:420px">左边这张卡在循环演示：静息 → 鼓起（带过冲）→ 定格 → 收回。真机上这就是遥控器停上去 0.2 秒内发生的事，然后一直保持鼓起，直到焦点移走。</div>
+</div>
+</div>
+
+<div class="sec">
+<div class="sh"><span class="sn">03</span><h2>Token</h2></div>
+<table>
+<tr><th>属性</th><th>静息 → 聚焦</th><th>说明</th></tr>
+<tr><td>边框宽 · 卡片 / 圆形键</td><td><code>1 dp → 3 dp</code></td><td>生长方向朝外，不改变内部布局</td></tr>
+<tr><td>边框宽 · 列表行 / chip / 输入框</td><td><code>1 dp → 2 dp</code></td><td>密集排列，3dp 会与邻项顶在一起</td></tr>
+<tr><td>外扩距离</td><td><code>0 → 2 dp</code></td><td>给光晕留出溢出空间，环不压内容</td></tr>
+<tr><td>光晕 · 内层</td><td><code>边框色 50%</code>，外扩 3dp</td><td>紧贴边框，负责"实"</td></tr>
+<tr><td>光晕 · 中层</td><td><code>边框色 32%</code>，模糊 14dp</td><td>负责"胀"</td></tr>
+<tr><td>光晕 · 外层</td><td><code>边框色 10%</code>，模糊 34dp</td><td>负责"晕开"，在暗背景上形成气泡边缘</td></tr>
+<tr><td>缩放</td><td><code>1.000 → 1.040</code>（播放主键 1.06）</td><td>行 / 弹窗项保持 1.000，防文字抖动</td></tr>
+<tr><td>缓动</td><td><code>spring(dampingRatio .58, stiffness 380)</code></td><td>视觉时长约 220ms，带 3% 过冲</td></tr>
+<tr><td>移出</td><td><code>160 ms</code> 线性收回，无过冲</td><td>离开时干脆，不要回弹</td></tr>
+</table>
+<div class="note">光晕颜色必须写 <code>borderColor.copy(alpha = …)</code>，由边框色派生。禁止另配一个"发光色"，否则金色项配白光会脏。</div>
+</div>
+
+<div class="sec">
+<div class="sh"><span class="sn">04</span><h2>五种状态</h2></div>
+<div class="stage" style="margin-top:6px">
+<div class="cell"><div class="poster"><span class="badge">默认</span><b>沙丘 2</b></div><div class="cap">① 默认</div></div>
+<div class="cell"><div class="poster bloom-g"><span class="badge">聚焦</span><b>沙丘 2</b></div><div class="cap">② 焦点：边框发泡</div></div>
+<div class="cell"><div class="poster on"><span class="badge">选中</span><b>沙丘 2</b></div><div class="cap">③ 选中：内描边金底</div></div>
+<div class="cell"><div class="poster on bloom-g"><span class="badge">叠加</span><b>沙丘 2</b></div><div class="cap">④ 内静外涨</div></div>
+<div class="cell"><div class="poster dim"><span class="badge">禁用</span><b>沙丘 2</b></div><div class="cap">⑤ 禁用 36%<br>可聚焦不发泡</div></div>
+</div>
+</div>
+
+<div class="sec">
+<div class="sh"><span class="sn">05</span><h2>组件细则</h2></div>
+<h3>分类 chip —— 默认 / 选中 / 聚焦 / 选中＋聚焦</h3>
+<div class="chips" style="margin:13px 0 8px">
+<div class="chip">全部</div><div class="chip on">电影</div>
+<div class="chip bloom-g" style="transform:none">剧集</div><div class="chip on" style="box-shadow:inset 0 0 0 1.5px #FFCF7A,0 0 0 2px rgba(255,207,122,.5),0 0 12px 3px rgba(255,207,122,.28)">动漫</div>
+</div>
+<p>注意第四个：金底 + 内实线不动，外面单独涨一圈柔光，两者同时存在不打架。</p>
+
+<h3 style="margin-top:32px">设置行 —— 仅 2dp，不放大</h3>
+<div class="rows" style="margin-top:12px">
+<div class="row"><span>片源管理</span><span class="v">11 个已启用</span></div>
+<div class="row" style="box-shadow:0 0 0 2px rgba(255,255,255,.45),0 0 10px 2px rgba(255,255,255,.2)"><span>直播源</span><span class="v">4 个订阅</span></div>
+<div class="row"><span>每日自动维护</span><span class="v">04:00</span></div>
+</div>
+<p style="margin-top:10px">行类元素不发泡到 3dp、也不缩放：一缩放，上下三行文字跟着抖，反而显得卡。</p>
+
+<h3 style="margin-top:32px">圆形按钮</h3>
+<div class="btns" style="margin-top:12px">
+<div class="cbtn">‹</div><div class="cbtn bloom-w">▶</div>
+<div class="cbtn big bloom-w">▶</div><div class="cbtn">⏭</div><div class="cbtn dim">CC</div>
+</div>
+<p style="margin-top:10px">白底主键同样发白光：白键在黑底上鼓起来，边缘那一圈白雾很明确，比加描边自然。</p>
+
+<h3 style="margin-top:32px">集数格</h3>
+<div class="eps" style="margin-top:12px">
+<div class="ep">1</div><div class="ep">2</div><div class="ep">3</div><div class="ep on">4</div>
+<div class="ep" style="box-shadow:0 0 0 2px rgba(255,207,122,.55),0 0 10px 2px rgba(255,207,122,.24)">5</div><div class="ep">6</div><div class="ep">7</div><div class="ep">8</div>
+</div>
+<p style="margin-top:10px">第 4 集＝正在播放（金底、静止），第 5 集＝光标（金边鼓起）。同色也能分：一个实、一个涨。</p>
+
+<h3 style="margin-top:32px">输入框</h3>
+<div style="margin-top:12px"><div class="field" style="box-shadow:0 0 0 1px rgba(255,255,255,.5),0 0 12px 3px rgba(255,255,255,.16);color:var(--text)">沙丘<span class="caret"></span></div></div>
+<p style="margin-top:10px">输入框聚焦＝边框鼓 2dp + 白色柔光 + 金色光标。现在 <code>SettingsScreen.kt:381</code> 只有底色，遥控器停上去毫无反馈。</p>
+</div>
+
+<div class="sec">
+<div class="sh"><span class="sn">06</span><h2>行为规则</h2></div>
+<ul>
+<li><b>落焦：</b>进页面必落第一个可交互项；空态落在「重试 / 返回」，不允许无焦点。</li>
+<li><b>不丢焦点：</b>切 tab、开关弹窗、刷新列表后显式 <span class="k">requestFocus</span> 并重试 2~3 次（Compose 焦点树重建期会假成功）。</li>
+<li><b>可见性：</b>聚焦项离滚动边缘 ≥ <span class="k">48 dp</span>，发泡空间要算进去，别被顶栏裁掉。</li>
+<li><b>控制条：</b>3 秒无操作收起，收起后焦点回播放键；焦点移动算操作并重置计时。</li>
+<li><b>弹窗：</b>打开聚焦首个按钮，关闭还给触发元素。</li>
+<li><b>性能：</b>发泡用 <span class="k">drawBehind</span> 多层圆角矩形绘制，动画走 <span class="k">graphicsLayer</span>，不要每帧重组。</li>
+</ul>
+</div>
+
+<div class="sec">
+<div class="sh"><span class="sn">07</span><h2>要做的事</h2></div>
+<table>
+<tr><th>项</th><th>数量</th><th>处理</th></tr>
+<tr><td>已有边框的聚焦项</td><td>66 处</td><td>不换色，只把硬描边换成"发泡"绘制，统一走一个入口</td></tr>
+<tr><td>完全无焦点反馈</td><td>6 处</td><td>补发泡（设置弹窗输入框与按钮、收藏圆钮、直播空态按钮、CastTextButton、TV 搜索框）</td></tr>
+<tr><td>颜色语义混乱</td><td>9 处</td><td>金环当焦点的地方，保留金色即可，不再需要改白</td></tr>
+<tr><td>死代码</td><td>4 处</td><td><span class="k">focused &amp;&amp; true</span> 恒等式清理</td></tr>
+</table>
+<div class="note">比起上一版「统一白环」，这一版改动更小：66 处现有边框都不用动颜色，只换描边方式；家里人能感知到的变化集中在「停上去会鼓一下」。</div>
+</div>
+
+<footer>放映室 · 焦点发泡规范 v2 · 光晕由边框色派生，不引入新色板 · 配套正文 docs/tv-focus-spec.md</footer>
+</div></body></html>

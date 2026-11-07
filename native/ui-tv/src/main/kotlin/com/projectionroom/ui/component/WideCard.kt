@@ -29,9 +29,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvRatio
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.component.RemoteImage
 
@@ -49,7 +50,7 @@ fun WideCard(
     onClick: () -> Unit = {},
 ) {
     val scale by animateFloatAsState(
-        if (focused && true) ProomMotion.focusScaleTv else 1f,
+        if (focused) ProomMotion.focusScaleTv else 1f,
         tween(ProomMotion.short, easing = ProomMotion.ease),
         label = "widecard",
     )
@@ -60,10 +61,17 @@ fun WideCard(
             Modifier
                 .fillMaxWidth()
                 .scale(scale)
-                .aspectRatio(16f / 9f)
+                .aspectRatio(TvRatio.wide)
+                // 内容卡没有自身边框，焦点走白环；金色留给「已选中/正在播」
+                .then(
+                    Modifier.tvFocusBloom(
+                        shape,
+                        bloom = if (focused) 1f else 0f,
+                        ringWidth = 2.dp,
+                    )
+                )
                 .clip(shape)
                 .background(ProomColor.card)
-                .then(if (focused && true) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
                 .clickable(onClick = onClick),
         ) {
             if (vod.pic.isNotBlank()) {
@@ -90,7 +98,7 @@ fun WideCard(
                     color = Color.White.copy(alpha = 0.92f),
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(start = 8.dp, bottom = 8.dp),
+                        .padding(start = TvSpace.s8, bottom = TvSpace.s8),
                 )
             }
             if (vod.progress > 0f) {
@@ -98,13 +106,13 @@ fun WideCard(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(3.dp)
+                        .height(TvSpace.s4)
                         .background(Color.White.copy(alpha = 0.22f))
                 ) {
                     Box(
                         Modifier
                             .fillMaxWidth(vod.progress.coerceIn(0f, 1f))
-                            .height(3.dp)
+                            .height(TvSpace.s4)
                             .background(ProomColor.accent)
                     )
                 }
@@ -116,7 +124,7 @@ fun WideCard(
             color = ProomColor.text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = ProomSpace.sm),
+            modifier = Modifier.padding(top = TvSpace.s8),
         )
     }
 }

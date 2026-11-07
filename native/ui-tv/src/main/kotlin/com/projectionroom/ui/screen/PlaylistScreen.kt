@@ -1,6 +1,7 @@
 package com.projectionroom.ui.screen
 
 import androidx.compose.animation.core.animateFloatAsState
+import com.projectionroom.ui.component.tvFocusRing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -67,9 +68,11 @@ import com.projectionroom.ui.component.TvPageHeaderSpec
 import com.projectionroom.ui.component.TvNowPlayingBar
 import com.projectionroom.ui.component.TvPlayingBadge
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvRatio
+import com.projectionroom.ui.theme.TvIcon
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
 import com.projectionroom.ui.component.RemoteImage
@@ -217,7 +220,7 @@ fun PlaylistScreen(
                 com.projectionroom.ui.component.SoftBackdrop(
                     model = detail.cover,
                     modifier = Modifier.fillMaxSize(),
-                    decodeWidth = 26.dp,
+                    decodeWidth = TvIcon.toolbar,
                     brightness = 0.66f,
                 )
                 // 渐变要一路压到底色：曲目列表的白字直接压在色雾上，
@@ -263,7 +266,7 @@ fun PlaylistScreen(
                                 detail = detail,
                                 descText = descText,
                                 cover = headerCover,
-                                gap = 22.dp,
+                                gap = TvSpace.s16,
                                 descLines = 2,
                                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                             )
@@ -271,7 +274,7 @@ fun PlaylistScreen(
                                 firstAction = firstAction,
                                 wide = true,
                                 enabled = detail.tracks.isNotEmpty(),
-                                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = TvSpace.s16),
                                 onPlayAll = { onPlayTrack(detail, 0, false) },
                                 onShuffle = {
                                     onPlayTrack(detail, detail.tracks.indices.random(), true)
@@ -310,7 +313,7 @@ fun PlaylistScreen(
                                     "  ${detail.tracks.size}",
                                     style = ProomType.meta,
                                     color = ProomColor.muted,
-                                    modifier = Modifier.padding(bottom = 3.dp),
+                                    modifier = Modifier.padding(bottom = TvSpace.s4),
                                 )
                             }
                             LazyColumn(state = state, modifier = Modifier.weight(1f)) {
@@ -342,11 +345,11 @@ fun PlaylistScreen(
                                 detail = detail,
                                 descText = descText,
                                 cover = headerCover,
-                                gap = if (wide) 22.dp else 16.dp,
+                                gap = TvSpace.s16,
                                 descLines = if (wide) 2 else 3,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = padX, end = padX, top = 4.dp, bottom = 18.dp),
+                                    .padding(start = padX, end = padX, top = TvSpace.s4, bottom = TvSpace.s16),
                             )
                         }
 
@@ -368,7 +371,7 @@ fun PlaylistScreen(
 
                         item {
                             Row(
-                                Modifier.fillMaxWidth().padding(start = padX, end = padX, top = 18.dp, bottom = 6.dp),
+                                Modifier.fillMaxWidth().padding(start = padX, end = padX, top = TvSpace.s16, bottom = TvSpace.s8),
                                 verticalAlignment = Alignment.Bottom,
                             ) {
                                 Text(
@@ -380,7 +383,7 @@ fun PlaylistScreen(
                                     "  ${detail.tracks.size}",
                                     style = ProomType.meta,
                                     color = ProomColor.muted,
-                                    modifier = Modifier.padding(bottom = 3.dp),
+                                    modifier = Modifier.padding(bottom = TvSpace.s4),
                                 )
                             }
                         }
@@ -526,7 +529,7 @@ private fun PlaylistHero(
         Box(
             Modifier
                 .width(cover)
-                .aspectRatio(1f)
+                .aspectRatio(TvRatio.square)
                 .clip(RoundedCornerShape(ProomShape.md))
                 .background(ProomColor.card),
         ) {
@@ -540,7 +543,7 @@ private fun PlaylistHero(
             }
         }
         Spacer(Modifier.width(gap))
-        Column(Modifier.weight(1f).padding(top = 2.dp)) {
+        Column(Modifier.weight(1f).padding(top = TvSpace.s4)) {
             Text(
                 "歌单",
                 style = ProomType.eyebrow,
@@ -635,22 +638,14 @@ private fun PlayAllButton(
             .height(if (big) 48.dp else 42.dp)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .scale(scale)
+            // 主按钮底色恒定金，聚焦不再翻白：焦点只由白环 + 微放大表达
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)
             .clip(shape)
             .background(
                 when {
-                    // 金底 + 白环在电视上分辨不出来（和首页、详情页统一）：
-                    // 主按钮聚焦时整块翻白，文字保持深色，一眼确认按下去会播
-                    filled && focused -> Color.White
                     filled -> ProomColor.accent
                     focused -> ProomColor.surface2
                     else -> ProomColor.surface
-                }
-            )
-            .then(
-                if (focused) {
-                    Modifier.border(if (filled) 3.dp else 2.dp, if (filled) Color.White else ProomColor.accent, shape)
-                } else {
-                    Modifier
                 }
             )
             .onFocusChanged { focused = it.isFocused }
@@ -663,9 +658,9 @@ private fun PlayAllButton(
                     imageVector = PlayerIcons.Play,
                     contentDescription = null,
                     tint = Color(0xFF1B1206),
-                    modifier = Modifier.size(if (big) 18.dp else 14.dp),
+                    modifier = Modifier.size(if (big) TvIcon.control else TvIcon.inline),
                 )
-                Spacer(Modifier.width(if (big) 8.dp else 6.dp))
+                Spacer(Modifier.width(TvSpace.s8))
             }
             Text(
                 text,
@@ -697,7 +692,9 @@ private fun TrackRow(
     Row(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .padding(horizontal = TvSpace.s12, vertical = TvSpace.s4)
+            // 行紧贴堆叠，环内收；金色已被「正在播」占用，焦点一律走白
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, color = Color.White, inset = true)
             .clip(shape)
             .background(
                 when {
@@ -706,22 +703,10 @@ private fun TrackRow(
                     else -> Color.Transparent
                 }
             )
-            .then(
-                if (focused) {
-                    // 正在播的那行已经有金色语义，焦点再用金色会分不清，改用白环
-                    Modifier.border(
-                        if (current) 3.dp else 2.dp,
-                        if (current) Color.White else ProomColor.accent,
-                        shape,
-                    )
-                } else {
-                    Modifier
-                }
-            )
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             // 行高 ~66dp：一屏 4 行（两列 8 首），比 56dp 的行更好按，也不至于一屏只剩 2 行
-            .padding(horizontal = 10.dp, vertical = if (big) 11.dp else 10.dp),
+            .padding(horizontal = TvSpace.s12, vertical = TvSpace.s12),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(if (big) 36.dp else 32.dp), contentAlignment = Alignment.CenterStart) {
@@ -764,22 +749,22 @@ private fun PlaylistSkeleton(topInset: Dp, barH: Dp, padX: Dp, wide: Boolean) {
     Column(Modifier.fillMaxSize().padding(top = topInset + barH + 8.dp)) {
         Row(Modifier.padding(horizontal = padX)) {
             SkeletonBlock(
-                Modifier.width(if (wide) 176.dp else 132.dp).aspectRatio(1f),
+                Modifier.width(if (wide) 176.dp else 132.dp).aspectRatio(TvRatio.square),
                 radius = ProomShape.md,
             )
-            Spacer(Modifier.width(if (wide) 22.dp else 16.dp))
+            Spacer(Modifier.width(TvSpace.s16))
             Column(Modifier.weight(1f)) {
-                SkeletonBlock(Modifier.width(40.dp), height = 10.dp, radius = 5.dp)
+                SkeletonBlock(Modifier.width(40.dp), height = 12.dp, radius = ProomShape.xs)
                 SkeletonBlock(
-                    Modifier.fillMaxWidth(0.6f).padding(top = 10.dp),
-                    height = if (wide) 26.dp else 20.dp,
-                    radius = 6.dp,
+                    Modifier.fillMaxWidth(0.6f).padding(top = TvSpace.s12),
+                    height = if (wide) 24.dp else 20.dp,
+                    radius = ProomShape.xs,
                 )
-                SkeletonBlock(Modifier.fillMaxWidth(0.25f).padding(top = 8.dp), height = 11.dp, radius = 5.dp)
+                SkeletonBlock(Modifier.fillMaxWidth(0.25f).padding(top = TvSpace.s8), height = 12.dp, radius = ProomShape.xs)
                 SkeletonBlock(
-                    Modifier.fillMaxWidth(if (wide) 0.7f else 1f).padding(top = 12.dp),
-                    height = 10.dp,
-                    radius = 5.dp,
+                    Modifier.fillMaxWidth(if (wide) 0.7f else 1f).padding(top = TvSpace.s12),
+                    height = 12.dp,
+                    radius = ProomShape.xs,
                 )
             }
         }
@@ -794,7 +779,7 @@ private fun PlaylistSkeleton(topInset: Dp, barH: Dp, padX: Dp, wide: Boolean) {
                 radius = ProomShape.sm,
             )
             SkeletonBlock(
-                Modifier.width(if (wide) 132.dp else 96.dp).height(if (wide) 52.dp else 42.dp),
+                Modifier.width(if (wide) 132.dp else 96.dp).height(if (wide) 52.dp else TvLayout.minTouch),
                 radius = ProomShape.sm,
             )
         }
@@ -802,8 +787,8 @@ private fun PlaylistSkeleton(topInset: Dp, barH: Dp, padX: Dp, wide: Boolean) {
             Row(Modifier.fillMaxWidth().padding(horizontal = padX)) {
                 repeat(if (wide) 2 else 1) {
                     SkeletonBlock(
-                        Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 6.dp).height(16.dp),
-                        radius = 5.dp,
+                        Modifier.weight(1f).padding(horizontal = TvSpace.s8, vertical = TvSpace.s8).height(16.dp),
+                        radius = ProomShape.xs,
                     )
                 }
             }
@@ -819,21 +804,21 @@ private fun PlaylistError(msg: String, onBack: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         Box(
-            Modifier.size(46.dp).clip(CircleShape).background(ProomColor.surface),
+            Modifier.size(TvLayout.minTouch).clip(CircleShape).background(ProomColor.surface),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = TabIcons.Music,
                 contentDescription = null,
                 tint = ProomColor.muted,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(TvIcon.toolbar),
             )
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(TvSpace.s16))
         Text("歌单读取失败", style = ProomType.body, color = ProomColor.dim)
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(TvSpace.s8))
         Text(msg, style = ProomType.label, color = ProomColor.muted, maxLines = 2)
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(TvSpace.s20))
         // 错误页往往是最需要遥控器操作的一屏（读不出来 → 只能退出），
         // 这颗「返回」原来同样没有焦点态
         var focused by remember { mutableStateOf(false) }
@@ -841,12 +826,12 @@ private fun PlaylistError(msg: String, onBack: () -> Unit) {
         Box(
             Modifier
                 .heightIn(min = TvLayout.minTouch)
+                .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)
                 .clip(shape)
                 .background(if (focused) ProomColor.surface2 else ProomColor.surface)
-                .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
                 .onFocusChanged { focused = it.isFocused }
                 .clickable(onClick = onBack)
-                .padding(horizontal = 18.dp, vertical = 9.dp),
+                .padding(horizontal = TvSpace.s20, vertical = TvSpace.s8),
             contentAlignment = Alignment.Center,
         ) {
             Text("返回", style = ProomType.meta, color = ProomColor.text)

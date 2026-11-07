@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,16 +26,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvRatio
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomMotion
 import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.TvType
+import com.projectionroom.ui.theme.textBlockHeight
 import com.projectionroom.ui.component.RemoteImage
 
 /**
@@ -60,7 +64,7 @@ fun ChannelTile(
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(ProomShape.md)
     val scale by animateFloatAsState(
-        targetValue = if (focused && true) ProomMotion.focusScaleTv else 1f,
+        targetValue = if (focused) ProomMotion.focusScaleTv else 1f,
         animationSpec = tween(ProomMotion.short, easing = ProomMotion.ease),
         label = "chScale",
     )
@@ -75,16 +79,25 @@ fun ChannelTile(
             Modifier
                 .fillMaxWidth()
                 .scale(scale)
-                .aspectRatio(16f / 9f)
-                .clip(shape)
-                // 没有台标时用「按频道名生成的深色调」打底：
-                // 一屏几十个格子如果都是同一个黑灰，看起来就是"大面积空白"，
-                // 每个台给一点自己的色相，既统一又不再是一片死黑。
-                .background(
-                    Brush.linearGradient(tileColors(name))
-                )
+                .aspectRatio(TvRatio.wide)
+                // 频道格是内容卡，没有自身边框，焦点走白环
                 .then(
-                    if (focused && true) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier
+                    Modifier.tvFocusBloom(
+                        shape,
+                        bloom = if (focused) 1f else 0f,
+                        ringWidth = 2.dp,
+                    )
+                )
+                .clip(shape)
+                // 没有台标时用**中性底色**打底。
+                //
+                // 曾经按频道名 hash 出一对彩色渐变（hsl 随机色相）：设计意图是「一屏
+                // 别全是一片死黑」，实际是一个 5 列的直播页出现 20 种色相 —— 绿/红/棕/紫
+                // 的方块排在一起，既不像台标也不像占位，更像一半封面加载失败。
+                // 台标缺失是常态，占位就该安静：surface2 → card 的明度差已经够把格子从
+                // 背景里分出来（规范 §9：分层靠明度，不靠色相）。
+                .background(
+                    Brush.linearGradient(listOf(ProomColor.surface2, ProomColor.card))
                 ),
         ) {
             if (logo.isNotBlank()) {
@@ -93,18 +106,33 @@ fun ChannelTile(
                     model = logo,
                     contentDescription = name,
                     contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(10.dp),
+                    modifier = Modifier.fillMaxSize().padding(TvSpace.s12),
                 )
             } else {
                 val mark = channelMark(name)
-                Text(
-                    text = mark,
-                    color = Color.White.copy(alpha = 0.18f),
-                    fontSize = markSize(mark),
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    modifier = Modifier.align(Alignment.Center),
-                )
+                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    // 水印字号随格子高度走（规范 §3 唯一的展示型例外），但必须钳在字阶
+                    // 区间里：之前是 32/28/24/20 四档裸 sp，「CCTV16」的 16 只有 20sp，
+                    // 在 92dp 高的格子里比下方的卡片标题还小，等于没有台标。
+                    val ratio = when {
+                        mark.length <= 1 -> 0.46f
+                        mark.length == 2 -> 0.36f
+                        mark.length == 3 -> 0.28f
+                        else -> 0.22f
+                    }
+                    val density = LocalDensity.current
+                    val minSp = TvType.title.fontSize.value
+                    val maxSp = TvType.display.fontSize.value
+                    val markSp = with(density) { (maxHeight * ratio).toSp().value }
+                        .coerceIn(minSp, maxSp)
+                    Text(
+                        text = mark,
+                        color = ProomColor.text.copy(alpha = 0.16f),
+                        fontSize = markSp.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
             }
             if (badge.isNotBlank()) {
                 Text(
@@ -114,10 +142,10 @@ fun ChannelTile(
                     maxLines = 1,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(6.dp)
+                        .padding(TvSpace.s8)
                         .clip(RoundedCornerShape(ProomShape.sm))
                         .background(ProomColor.surface2)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(horizontal = TvSpace.s8, vertical = TvSpace.s4),
                 )
             }
         }
@@ -127,12 +155,14 @@ fun ChannelTile(
             color = ProomColor.text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 7.dp),
+            modifier = Modifier.padding(top = TvSpace.s8),
         )
         // 行高固定：副标题即使不显示也占位，切换筛选时整页不会上下跳。
-        // 高度跟着字阶走 —— 写死 16dp 时电视上的 13sp 副标题会被裁掉半个字。
-        val subLine = with(LocalDensity.current) { ProomType.label.lineHeight.toDp() }
-        Box(Modifier.height(subLine)) {
+        // 高度 = 一行文字 + 上间距，**间距要在高度里让出来** ——
+        // 之前 Box 只有 18dp 行高、里面再 padding(top=4dp)，实际只剩 14dp，
+        // 13sp 的副标题被压掉小半个字。
+        val subLine = textBlockHeight(ProomType.label, 1)
+        Box(Modifier.height(subLine + TvSpace.s4)) {
             if (subtitle.isNotBlank()) {
                 Text(
                     text = subtitle,
@@ -140,20 +170,11 @@ fun ChannelTile(
                     color = ProomColor.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 1.dp),
+                    modifier = Modifier.padding(top = TvSpace.s4),
                 )
             }
         }
     }
-}
-
-/** 按频道名生成一对深色（同色相、不同明度），保证每个台的底色有细微差别 */
-private fun tileColors(name: String): List<Color> {
-    val h = (name.hashCode() and 0x7FFFFFFF) % 360
-    return listOf(
-        Color.hsl(h.toFloat(), 0.22f, 0.16f),
-        Color.hsl(h.toFloat(), 0.18f, 0.09f),
-    )
 }
 
 /** CCTV5 / CCTV-5 / CCTV 5+ 取数字，其余取前几个字符 */
@@ -172,15 +193,11 @@ internal fun channelMark(name: String): String {
     return n.take(2)
 }
 
-/** 字号随字数收档：字母少的可以大，多了必须缩，否则会溢出块外 */
-internal fun markSize(mark: String) = when {
-    mark.length <= 1 -> 34.sp
-    mark.length == 2 -> 28.sp
-    mark.length == 3 -> 24.sp
-    else -> 19.sp
-}
 
-private val CCTV_MARK = Regex("^CCTV[-\\s]?(\\d{1,2}\\+?)$", RegexOption.IGNORE_CASE)
+
+// 「CCTV-16 HD (1080p)」这种后面还挂着清晰度/画质的写法也要取到 16：
+// 原来的正则要求整串以数字结尾，匹配不到就退化成 takeWhile，20 个格子全写 "CCTV"
+private val CCTV_MARK = Regex("^CCTV[-\\s]?(\\d{1,2}\\+?)(?=$|[\\s(（\\-])", RegexOption.IGNORE_CASE)
 
 /** 直播页给裸数字台名补的展示名：「频道 3」 */
 private val FALLBACK_MARK = Regex("^频道\\s*(\\d+)$")

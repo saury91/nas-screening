@@ -38,8 +38,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
 import com.projectionroom.ui.theme.ProomSp
@@ -102,11 +102,11 @@ fun PairScreen(
                 if (qr != null) {
                     Image(qr, contentDescription = "配对二维码", modifier = Modifier.fillMaxSize())
                 } else {
-                    Text("二维码生成失败", color = Color.Black, fontSize = ProomSp(14.sp))
+                    Text("二维码生成失败", style = ProomType.body, color = Color.Black)
                 }
             }
 
-            Spacer(Modifier.width(44.dp))
+            Spacer(Modifier.width(TvSpace.s48))
 
             // 360dp 的正文列在 18sp 下每行只剩 12~14 个字，说明文字被折成
             // 「手机路径：我 / 的 → 设置 → …」这种断法，读起来要来回扫
@@ -128,14 +128,14 @@ fun PairScreen(
                     "投屏时也能扫这张：手机播放页 → 投屏 → 扫码连接电视。",
                     style = ProomType.body,
                     color = ProomColor.cast.copy(alpha = 0.85f),
-                    modifier = Modifier.padding(top = 6.dp),
+                    modifier = Modifier.padding(top = TvSpace.s8),
                 )
-                Spacer(Modifier.height(ProomSpace.lg))
+                Spacer(Modifier.height(TvSpace.s20))
                 Text("配对码", style = ProomType.label, color = ProomColor.muted)
                 Text(
                     code.chunked(2).joinToString(" "),
                     color = ProomColor.accent,
-                    fontSize = ProomSp(34.sp),
+                    style = ProomType.display,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 2.sp,
                 )
@@ -143,9 +143,9 @@ fun PairScreen(
                     if (address.isBlank()) "没拿到局域网地址" else address,
                     style = ProomType.label,
                     color = ProomColor.muted,
-                    modifier = Modifier.padding(top = 2.dp),
+                    modifier = Modifier.padding(top = TvSpace.s4),
                 )
-                Spacer(Modifier.height(ProomSpace.lg))
+                Spacer(Modifier.height(TvSpace.s20))
 
                 val (line, color) = when (state) {
                     PairState.Waiting -> "等待手机连接…" to ProomColor.muted
@@ -159,7 +159,7 @@ fun PairScreen(
                         "配对码只在这个页面有效，退出即作废",
                         style = ProomType.label,
                         color = ProomColor.muted,
-                        modifier = Modifier.padding(top = 6.dp),
+                        modifier = Modifier.padding(top = TvSpace.s8),
                     )
                 }
             }

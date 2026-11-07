@@ -42,10 +42,13 @@ import androidx.compose.ui.unit.dp
 import com.projectionroom.shared.catalog.NasApi
 import com.projectionroom.shared.model.Vod
 import com.projectionroom.ui.component.PosterCard
+import com.projectionroom.ui.component.tvFocusRing
+import com.projectionroom.ui.component.tvFocusBloom
 import com.projectionroom.ui.component.PosterSkeleton
 import com.projectionroom.ui.util.metaLine
 import com.projectionroom.ui.theme.ProomColor
-import com.projectionroom.ui.theme.ProomSpace
+import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
 
@@ -182,7 +185,7 @@ fun BrowseScreen(
         // 后者把左右安全区也算进了卡片里，最后一列还会贴着屏幕边缘、和顶栏对不齐；
         // 屏越宽误差越大（4K 盒子上一行能差出 20 多 dp）。
         // 960dp 画布上得到 6 列、每张约 132dp —— 沙发距离下 7~8 列已经看不清片名。
-        val gap = 14.dp
+        val gap = TvSpace.s16
         val avail = maxWidth - TvLayout.insetX * 2
         val columns = (avail / 130.dp).toInt().coerceIn(3, 8)
 
@@ -197,14 +200,14 @@ fun BrowseScreen(
                 state = gridState,
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 columns = GridCells.Fixed(columns),
-                contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, bottom = ProomSpace.xxl),
+                contentPadding = PaddingValues(start = TvLayout.insetX, end = TvLayout.insetX, bottom = TvSpace.s32),
                 horizontalArrangement = Arrangement.spacedBy(gap),
-                verticalArrangement = Arrangement.spacedBy(ProomSpace.lg),
+                verticalArrangement = Arrangement.spacedBy(TvSpace.s20),
             ) {
                 // 这一页已经在「电影 / 剧集 / 动漫…」这个 tab 下面了，再写一遍「片库 + 分类名」
                 // 等于把顶栏说过的又说一次，还白占一屏 —— 直接从筛选条开始。
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Column(Modifier.padding(top = ProomSpace.xl, bottom = ProomSpace.md)) {
+                    Column(Modifier.padding(top = TvSpace.s24, bottom = TvSpace.s16)) {
                         ChipRow("年份", YEARS, year) { year = it }
                         Spacer(Modifier.height(8.dp))
                         ChipRow("地区", AREAS, area) { area = it }
@@ -264,7 +267,7 @@ fun BrowseScreen(
 @Composable
 private fun ChipRow(label: String, values: List<String>, selected: String, onSelect: (String) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, style = ProomType.label, color = ProomColor.muted, modifier = Modifier.padding(end = 8.dp))
+        Text(label, style = ProomType.label, color = ProomColor.muted, modifier = Modifier.padding(end = TvSpace.s8))
         values.forEach { v ->
             FilterChip(
                 text = v.ifBlank { "全部" },
@@ -278,29 +281,21 @@ private fun ChipRow(label: String, values: List<String>, selected: String, onSel
 @Composable
 private fun FilterChip(text: String, on: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(50)
+    // chip 统一 10dp 圆角（规范 §6.1）：曾经这里和直播页是 50% 胶囊、搜索页是 14dp、
+    // 我的页是 10dp —— 同一个「选项块」在四处是四种形状，整屏看起来就没有章法
+    val shape = RoundedCornerShape(ProomShape.sm)
     Box(
         Modifier
+            // chip 横排紧贴，环内收；金色只表示选中，焦点一律走白
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, color = Color.White, inset = true)
             .clip(shape)
             .background(if (on) ProomColor.accentSoft else ProomColor.surface)
-            .then(
-                when {
-                    // 金色只表示「选中」，白色只表示「焦点」：两者都用金边时，
-                    // 焦点落在已选中的 chip 上就完全看不出来（电视上最常见的一幕）
-                    focused -> Modifier.border(
-                        if (on) 3.dp else 2.dp,
-                        if (on) Color.White else ProomColor.accent,
-                        shape,
-                    )
-                    on -> Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.6f), shape)
-                    else -> Modifier
-                }
-            )
+            .then(if (on) Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.6f), shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             // 13/6 的胶囊只有 26dp 高：电视上是个很难瞄准的细条，统一到 48dp 可点目标
             .heightIn(min = TvLayout.minTouch)
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(horizontal = TvSpace.s16, vertical = TvSpace.s8),
         contentAlignment = Alignment.Center,
     ) {
         Text(

@@ -1,6 +1,7 @@
 package com.projectionroom.ui.screen
 
 import androidx.compose.animation.core.animateFloatAsState
+import com.projectionroom.ui.component.tvFocusRing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -54,7 +55,8 @@ import androidx.compose.ui.unit.Dp
 import com.projectionroom.ui.component.TvRow
 import com.projectionroom.ui.util.metaLine
 import com.projectionroom.ui.theme.ProomColor
-import com.projectionroom.ui.theme.ProomSpace
+import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
 
@@ -127,16 +129,24 @@ fun TvHome(
         androidx.compose.foundation.lazy.LazyColumn(
             Modifier.fillMaxSize(),
             state = listState,
-            contentPadding = PaddingValues(bottom = ProomSpace.xxl),
+            contentPadding = PaddingValues(bottom = TvSpace.s32),
         ) {
             // Hero 顶到屏幕上沿、导航浮在它上面，首屏才是一整块画面。
-            // 0.76 会让第一排货架只剩半张卡片露在屏幕外（"下面还有内容"变成了"被切掉了"），
-            // 0.68 正好容下 hero + 区块标题 + 一整排卡片。
+            // 0.76 会让第一排货架只剩半张卡片露在屏幕外（"下面还有内容"变成了"被切掉了"）。
+            // 0.68 能容下 hero + 区块标题 + 一整排卡片，但卡片标题正好压在
+            // y=508~532dp —— 离屏幕底只剩 8dp，电视一过扫描就切字。
+            // 0.65 让出 16dp，标题底落到 516dp，底部留够 24dp 才敢说「放得下」。
+            //
+            // +topInset：导航是浮在 Hero 上的，那 27dp 安全区要从 Hero 内部让出来。
+            // 不减的话 Hero 内高少了 27dp，内容（标题+简介+按钮）整体下沉，
+            // 「立即播放」会和底部轮播圆点挤在同一行上。
             item {
                 if (latest.isNotEmpty()) {
                     TvHero(
                         items = heroItems,
-                        height = maxHeight * 0.68f,
+                        // 高度不再额外加 topInset：那 27dp 从 Hero 内部间距里省
+                        // （间距各收一档，见 TvHero），货架就能回到首屏
+                        height = maxHeight * 0.65f,
                         topInset = TOP_BAR_HEIGHT + topInset,
                         playFocusRequester = if (latest.isNotEmpty()) heroPlay else null,
                         navFocusRequester = landing,
@@ -152,7 +162,7 @@ fun TvHome(
                         text = "正在读 NAS…",
                         style = ProomType.label,
                         color = ProomColor.muted,
-                        modifier = Modifier.padding(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
+                        modifier = Modifier.padding(horizontal = TvLayout.insetX, vertical = TvSpace.s8),
                     )
                 }
             }
@@ -163,8 +173,8 @@ fun TvHome(
                     TvRow(
                         items = continueWatching.take(10),
                         itemWidth = wideCardW,
-                        gap = ProomSpace.md,
-                        contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
+                        gap = TvSpace.s16,
+                        contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = TvSpace.s8),
                     ) { v, focused ->
                         WideCard(
                             vod = v,
@@ -173,7 +183,7 @@ fun TvHome(
                             onClick = { onOpen(v) },
                         )
                     }
-                    Spacer(Modifier.height(ProomSpace.lg))
+                    Spacer(Modifier.height(TvSpace.s20))
                 }
             }
 
@@ -183,8 +193,8 @@ fun TvHome(
                     TvRow(
                         items = latestRest.take(14),
                         itemWidth = cardW,
-                        gap = ProomSpace.md,
-                        contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
+                        gap = TvSpace.s16,
+                        contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = TvSpace.s8),
                     ) { v, focused ->
                         PosterCard(
                             title = v.name,
@@ -289,7 +299,7 @@ private fun SectionTitle(title: String, sub: String) {
                 sub,
                 style = ProomType.meta,
                 color = ProomColor.muted,
-                modifier = Modifier.padding(start = 10.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = TvSpace.s12, bottom = TvSpace.s4),
             )
         }
     }
@@ -298,15 +308,15 @@ private fun SectionTitle(title: String, sub: String) {
 @Composable
 private fun SearchEntry(onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(ProomSpace.md)
+    val shape = RoundedCornerShape(ProomShape.md)
     Row(
         Modifier
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)
             .clip(shape)
             .background(ProomColor.surface)
-            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 11.dp),
+            .padding(horizontal = TvSpace.s16, vertical = TvSpace.s12),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("搜索片名、演员…", style = ProomType.body, color = ProomColor.muted)
@@ -332,17 +342,17 @@ private fun CategoryShelf(
                 "${group.count} 部",
                 style = ProomType.meta,
                 color = ProomColor.muted,
-                modifier = Modifier.padding(start = 10.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = TvSpace.s12, bottom = TvSpace.s4),
             )
             Spacer(Modifier.weight(1f))
             MoreLink(onMore)
         }
-        Spacer(Modifier.height(ProomSpace.sm))
+        Spacer(Modifier.height(TvSpace.s8))
         TvRow(
             items = group.items.take(14),
             itemWidth = cardW,
-            gap = ProomSpace.md,
-            contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = ProomSpace.sm),
+            gap = TvSpace.s16,
+            contentPadding = PaddingValues(horizontal = TvLayout.insetX, vertical = TvSpace.s8),
         ) { v, focused ->
             PosterCard(
                 title = v.name,
@@ -352,7 +362,7 @@ private fun CategoryShelf(
                 onClick = { onOpen(v) },
             )
         }
-        Spacer(Modifier.height(ProomSpace.lg))
+        Spacer(Modifier.height(TvSpace.s20))
     }
 }
 
@@ -362,13 +372,14 @@ private fun MoreLink(onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
     Box(
         Modifier
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)
             .clip(shape)
             .background(if (focused) ProomColor.surface2 else Color.Transparent)
-            .then(if (focused) Modifier.border(1.dp, ProomColor.accent, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = TvSpace.s12, vertical = TvSpace.s8),
     ) {
-        Text("查看全部", style = ProomType.label, color = if (focused) ProomColor.accent else ProomColor.muted)
+        // 焦点不再改文字色：金意味着「选中 / 主操作」，焦点只由白环表达
+        Text("查看全部", style = ProomType.label, color = if (focused) ProomColor.text else ProomColor.muted)
     }
 }

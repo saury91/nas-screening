@@ -115,15 +115,16 @@ fun PermissionCard(
             Modifier
                 .fillMaxWidth()
                 .height(46.dp)
+                // 主按钮恒定金底（主操作），焦点只加白环。
+                // 原来是手写的「2dp 白边」，没有柔光、也不跟全站口径
+                .tvFocusRing(
+                    RoundedCornerShape(ProomShape.md),
+                    ringWidth = 2.dp,
+                    zoom = 1f,
+                    inset = true,
+                )
                 .clip(RoundedCornerShape(ProomShape.md))
                 .background(ProomColor.accent)
-                .then(
-                    if (primaryFocused) {
-                        Modifier.border(2.dp, Color.White, RoundedCornerShape(ProomShape.md))
-                    } else {
-                        Modifier
-                    }
-                )
                 .onFocusChanged { primaryFocused = it.isFocused }
                 .clickable(onClick = onPrimary),
             contentAlignment = Alignment.Center,
@@ -142,6 +143,12 @@ fun PermissionCard(
                 Modifier
                     .fillMaxWidth()
                     .height(44.dp)
+                    .tvFocusRing(
+                        RoundedCornerShape(ProomShape.md),
+                        ringWidth = 2.dp,
+                        zoom = 1f,
+                        inset = true,
+                    )
                     .clip(RoundedCornerShape(ProomShape.md))
                     .background(
                         if (secondaryFocused) Color.White.copy(alpha = 0.10f) else Color.Transparent

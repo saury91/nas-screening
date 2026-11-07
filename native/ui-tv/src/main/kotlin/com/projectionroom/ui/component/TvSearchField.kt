@@ -1,7 +1,9 @@
 package com.projectionroom.ui.component
 
 import androidx.compose.foundation.clickable
+import com.projectionroom.ui.component.tvFocusRing
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -30,6 +32,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvIcon
+import com.projectionroom.ui.theme.TvSpace
+import com.projectionroom.ui.theme.ProomShape
 import com.projectionroom.ui.theme.ProomSp
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.TvLayout
@@ -66,20 +71,28 @@ fun TvSearchField(
         keyboard?.show()
     }
 
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+    // 进来就抢焦点并弹键盘，环要一直亮着，用户才知道「现在打进去的字会进这个框」
+    Row(
+        // 与页内搜索框、地址输入框同一档圆角，环的形状才会和框边贴着走
+        modifier.tvFocusRing(
+            RoundedCornerShape(ProomShape.sm),
+            ringWidth = 2.dp,
+            zoom = 1f,
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Icon(
             imageVector = TabIcons.Search,
             contentDescription = null,
             tint = ProomColor.muted,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(TvIcon.control),
         )
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(TvSpace.s12))
         BasicTextField(
             value = query,
             onValueChange = onQuery,
             singleLine = true,
-            textStyle = TextStyle(
-                fontSize = ProomSp(16.sp),
+            textStyle = ProomType.body.copy(
                 fontWeight = FontWeight.Medium,
                 color = ProomColor.text,
             ),
@@ -101,14 +114,19 @@ fun TvSearchField(
             },
         )
         Box(
-            Modifier.size(TvLayout.minTouch).clip(CircleShape).clickable(onClick = onClose),
+            Modifier
+                .size(TvLayout.minTouch)
+                // 原来这颗 ✕ 可聚焦却没有环：遥控器停在这，屏幕上什么反应都没有
+                .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f, inset = true)
+                .clip(CircleShape)
+                .clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = TabIcons.Close,
                 contentDescription = "关闭搜索",
                 tint = ProomColor.muted,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(TvIcon.control),
             )
         }
     }

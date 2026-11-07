@@ -1,6 +1,7 @@
 package com.projectionroom.ui.screen
 
 import androidx.compose.foundation.background
+import com.projectionroom.ui.component.tvFocusRing
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
@@ -44,10 +45,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectionroom.shared.playback.SkipRule
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import com.projectionroom.ui.component.TabIcons
+import com.projectionroom.ui.component.tvFocusBloom
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomShape
-import com.projectionroom.ui.theme.ProomSpace
 import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.ProomSp
 
@@ -164,9 +168,9 @@ fun SettingsScreen(
             contentPadding = PaddingValues(
                 start = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
                 end = com.projectionroom.ui.component.TvPageHeaderSpec.inset,
-                bottom = ProomSpace.xxl,
+                bottom = TvSpace.s32,
             ),
-            verticalArrangement = Arrangement.spacedBy(ProomSpace.sm),
+            verticalArrangement = Arrangement.spacedBy(TvSpace.s8),
         ) {
             item { GroupTitle("NAS") }
             item {
@@ -202,6 +206,7 @@ fun SettingsScreen(
                         value = "",
                         hint = "安装包不带任何源：这一步会把本地配置清空，回到刚装好的状态",
                         action = if (state.busy) "恢复中" else "恢复",
+                        danger = true,
                         enabled = !state.busy,
                         onClick = onImportBuiltIn,
                     )
@@ -356,7 +361,7 @@ fun SettingsScreen(
                         "收藏和播放记录优先存本地，NAS 在线时后台同步。",
                     style = ProomType.label,
                     color = ProomColor.muted,
-                    modifier = Modifier.padding(top = ProomSpace.sm, start = 4.dp, end = 4.dp),
+                    modifier = Modifier.padding(top = TvSpace.s8, start = 4.dp, end = 4.dp),
                 )
             }
 
@@ -369,7 +374,7 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(ProomShape.lg))
                         .background(ProomColor.bgSoft)
-                        .padding(18.dp),
+                        .padding(TvSpace.s16),
                 ) {
                     Text("添加订阅", style = ProomType.title, color = ProomColor.text)
                     Text(
@@ -382,15 +387,19 @@ fun SettingsScreen(
                         value = subText,
                         onValueChange = { subText = it },
                         singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = ProomSp(14.sp), color = ProomColor.text,
-                        ),
+                        textStyle = ProomType.meta.copy(color = ProomColor.text),
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(ProomColor.accent),
                         modifier = Modifier
                             .fillMaxWidth()
+                            // 输入框原来只有光标在动，焦点落上去看不出「已经在这」
+                            .tvFocusRing(
+                                RoundedCornerShape(ProomShape.sm),
+                                ringWidth = 2.dp,
+                                zoom = 1f,
+                            )
                             .clip(RoundedCornerShape(ProomShape.sm))
                             .background(ProomColor.surface)
-                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                            .padding(horizontal = TvSpace.s12, vertical = TvSpace.s12),
                         decorationBox = { inner ->
                             Box {
                                 if (subText.isEmpty()) {
@@ -401,7 +410,7 @@ fun SettingsScreen(
                         },
                     )
                     Row(
-                        Modifier.fillMaxWidth().padding(top = 14.dp),
+                        Modifier.fillMaxWidth().padding(top = TvSpace.s16),
                         horizontalArrangement = Arrangement.End,
                     ) {
                         Text(
@@ -409,9 +418,14 @@ fun SettingsScreen(
                             style = ProomType.cardTitle,
                             color = ProomColor.muted,
                             modifier = Modifier
+                                .tvFocusRing(
+                                    RoundedCornerShape(ProomShape.sm),
+                                    ringWidth = 2.dp,
+                                    zoom = 1f,
+                                )
                                 .clip(RoundedCornerShape(ProomShape.sm))
                                 .clickable { addSubOpen = false }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                                .padding(horizontal = TvSpace.s16, vertical = TvSpace.s8),
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
@@ -419,6 +433,11 @@ fun SettingsScreen(
                             style = ProomType.cardTitle,
                             color = if (subText.isBlank()) ProomColor.muted else ProomColor.accent,
                             modifier = Modifier
+                                .tvFocusRing(
+                                    RoundedCornerShape(ProomShape.sm),
+                                    ringWidth = 2.dp,
+                                    zoom = 1f,
+                                )
                                 .clip(RoundedCornerShape(ProomShape.sm))
                                 .then(
                                     if (subText.isBlank()) Modifier
@@ -429,7 +448,7 @@ fun SettingsScreen(
                                         onAddSub(u)
                                     }
                                 )
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                                .padding(horizontal = TvSpace.s16, vertical = TvSpace.s8),
                         )
                     }
                 }
@@ -470,7 +489,7 @@ private fun GroupTitle(text: String) {
         text,
         style = ProomType.label,
         color = ProomColor.muted,
-        modifier = Modifier.padding(top = ProomSpace.lg, bottom = ProomSpace.xs, start = 4.dp),
+        modifier = Modifier.padding(top = TvSpace.s20, bottom = TvSpace.s4, start = 4.dp),
     )
 }
 
@@ -501,15 +520,15 @@ private fun Divider() {
 @Composable
 private fun PlaybackSetting() {
     val ctx = LocalContext.current
-    Column(Modifier.padding(horizontal = ProomSpace.md, vertical = 12.dp)) {
+    Column(Modifier.padding(horizontal = TvSpace.s16, vertical = 12.dp)) {
         Text("双击快进", style = ProomType.cardTitle, color = ProomColor.text)
         Text(
             "播放页双击左右半屏快退/快进的秒数；遥控器方向键也用这个步长",
             style = ProomType.label,
             color = ProomColor.muted,
-            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
+            modifier = Modifier.padding(top = TvSpace.s4, bottom = TvSpace.s12),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(TvSpace.s12)) {
             PlaybackPrefs.steps.forEach { ms ->
                 SeekChip(
                     label = PlaybackPrefs.label(ms),
@@ -524,15 +543,15 @@ private fun PlaybackSetting() {
             "跳过片头",
             style = ProomType.cardTitle,
             color = ProomColor.text,
-            modifier = Modifier.padding(top = 22.dp),
+            modifier = Modifier.padding(top = TvSpace.s24),
         )
         Text(
             "播放到片头区间时右下角浮出按钮，按 OK 才跳。已单独设过的剧不受这里影响",
             style = ProomType.label,
             color = ProomColor.muted,
-            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
+            modifier = Modifier.padding(top = TvSpace.s4, bottom = TvSpace.s12),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(TvSpace.s12)) {
             SkipRule.introOptions.forEach { ms ->
                 SeekChip(
                     label = if (ms == 0L) "关" else "${ms / 1000}",
@@ -546,15 +565,15 @@ private fun PlaybackSetting() {
             "片尾提示",
             style = ProomType.cardTitle,
             color = ProomColor.text,
-            modifier = Modifier.padding(top = 22.dp),
+            modifier = Modifier.padding(top = TvSpace.s24),
         )
         Text(
             "最后这段时间里允许按「下一集」，设「关」就不提示",
             style = ProomType.label,
             color = ProomColor.muted,
-            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
+            modifier = Modifier.padding(top = TvSpace.s4, bottom = TvSpace.s12),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(TvSpace.s12)) {
             SkipRule.outroOptions.forEach { ms ->
                 SeekChip(
                     label = if (ms == 0L) "关" else "${ms / 1000}",
@@ -573,10 +592,11 @@ private fun RowScope.SeekChip(label: String, on: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .weight(1f)
+            // chip 横向并排，环向外鼓会被邻居吃掉，只能内收
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true)
             .onFocusChanged { focused = it.isFocused }
             .clip(shape)
             .background(if (on) ProomColor.accentSoft else ProomColor.bgSoft)
-            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
@@ -601,6 +621,9 @@ private fun SettingRow(
     value: String,
     hint: String = "",
     action: String? = null,
+    // 破坏性操作（清空/恢复出厂）右侧动作文字走 danger：
+    // 全页都是金色时，「恢复」和「同步」看起来是同一档风险
+    danger: Boolean = false,
     enabled: Boolean = true,
     focusRequester: FocusRequester? = null,
     onClick: (() -> Unit)? = null,
@@ -608,20 +631,37 @@ private fun SettingRow(
     val shape = RoundedCornerShape(ProomShape.sm)
     var focused by remember { mutableStateOf(false) }
     val actionable = onClick != null && enabled
+    // 整行宽度接近满屏，不能像小控件那样放大（会顶出安全区），
+    // 所以「鼓起」全靠边框自身发泡：由 2dp 硬线换成「缝隙 + 锐环 + 同色柔晕」
+    val bloom by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = if (focused) {
+            spring(dampingRatio = 0.52f, stiffness = 420f)
+        } else {
+            androidx.compose.animation.core.tween(150)
+        },
+        label = "setting-row-bloom",
+    )
     Row(
         Modifier
             .fillMaxWidth()
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
-            // 整行宽度接近满屏，不能像小控件那样放大（会顶出安全区），
-            // 电视上的替代方案是「底色提亮 + 强调色描边」
+            // 发泡要画到元素外侧，必须排在 clip 前面，否则环会被自己的圆角裁掉
+            .then(
+                Modifier.tvFocusBloom(
+                    shape = shape,
+                    bloom = bloom,
+                    ringWidth = 2.dp,
+                    inset = true,
+                )
+            )
             .clip(shape)
             .background(if (focused) ProomColor.bgSoft else Color.Transparent)
-            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, shape) else Modifier)
             .then(
                 if (actionable) Modifier.clickable(onClick = onClick!!) else Modifier
             )
-            .padding(horizontal = ProomSpace.md, vertical = 12.dp),
+            .padding(horizontal = TvSpace.s16, vertical = TvSpace.s12),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -634,7 +674,7 @@ private fun SettingRow(
                         color = if (action != null) ProomColor.muted else ProomColor.dim,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 10.dp),
+                        modifier = Modifier.padding(start = TvSpace.s12),
                     )
                 }
             }
@@ -645,7 +685,7 @@ private fun SettingRow(
                     color = ProomColor.muted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 3.dp),
+                    modifier = Modifier.padding(top = TvSpace.s4),
                 )
             }
         }
@@ -653,9 +693,13 @@ private fun SettingRow(
             Text(
                 action,
                 style = ProomType.label,
-                color = if (enabled) ProomColor.accent else ProomColor.muted,
+                color = when {
+                    !enabled -> ProomColor.muted
+                    danger -> ProomColor.danger
+                    else -> ProomColor.accent
+                },
                 maxLines = 1,
-                modifier = Modifier.padding(start = 12.dp),
+                modifier = Modifier.padding(start = TvSpace.s12),
             )
         }
     }

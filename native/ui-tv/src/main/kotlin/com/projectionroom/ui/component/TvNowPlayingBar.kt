@@ -1,6 +1,7 @@
 package com.projectionroom.ui.component
 
 import androidx.compose.foundation.background
+import com.projectionroom.ui.component.tvFocusRing
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
@@ -40,7 +41,11 @@ import com.projectionroom.ui.music.MusicBox
 import com.projectionroom.ui.music.MusicTrack
 import com.projectionroom.ui.music.RepeatMode
 import com.projectionroom.ui.theme.ProomColor
+import com.projectionroom.ui.theme.ProomType
 import com.projectionroom.ui.theme.ProomShape
+import com.projectionroom.ui.theme.TvIcon
+import com.projectionroom.ui.theme.TvLayout
+import com.projectionroom.ui.theme.TvSpace
 import com.projectionroom.ui.theme.ProomSp
 
 /**
@@ -96,7 +101,7 @@ fun TvNowPlayingBar(
                     )
                 )
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(TvSpace.s12))
 
         // 拆成 5 个独立焦点目标：左格 + 4 颗按钮，左右键在本组内循环。
         // 整条可聚焦的话遥控器只停在外沿，里面按钮永远选不到。
@@ -110,18 +115,16 @@ fun TvNowPlayingBar(
             Row(
                 Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(ProomShape.sm))
-                    // 焦点态用淡底 + 细边，不用实色翻白：这块区域很大，
-                    // 整块翻白会把左栏撕成两个色块，比没有反馈更割裂
-                    .then(
-                        if (openFocused) {
-                            Modifier
-                                .background(ProomColor.surface)
-                                .border(2.dp, ProomColor.accent, RoundedCornerShape(ProomShape.sm))
-                        } else {
-                            Modifier
-                        }
+                    // 焦点态只提亮底色 + 白环，不翻实色：这块区域很大，
+                    // 整块翻色会把左栏撕成两个色块，比没有反馈更割裂
+                    .tvFocusRing(
+                        RoundedCornerShape(ProomShape.sm),
+                        ringWidth = 2.dp,
+                        zoom = 1f,
+                        inset = true,
                     )
+                    .clip(RoundedCornerShape(ProomShape.sm))
+                    .background(if (openFocused) ProomColor.surface else Color.Transparent)
                     // requester 要挂在 focusable 之前，否则绑不到节点
                     .then(
                         if (firstActionFocus != null) {
@@ -133,12 +136,12 @@ fun TvNowPlayingBar(
                     .onFocusChanged { openFocused = it.isFocused }
                     // 空态点这里没有播放页可进，直接当作「从第一首开始」
                     .clickable(onClick = { if (idle) startFirst() else onOpen() })
-                    .padding(vertical = 6.dp, horizontal = 8.dp),
+                    .padding(vertical = TvSpace.s8, horizontal = TvSpace.s8),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
                     Modifier
-                        .size(44.dp)
+                        .size(TvLayout.minTouch)
                         .clip(RoundedCornerShape(ProomShape.sm))
                         .background(ProomColor.card),
                     contentAlignment = Alignment.Center,
@@ -149,7 +152,7 @@ fun TvNowPlayingBar(
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(TvLayout.minTouch)
                                 .clip(RoundedCornerShape(ProomShape.sm)),
                         )
                     } else {
@@ -162,13 +165,12 @@ fun TvNowPlayingBar(
                         )
                     }
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(TvSpace.s12))
                 Column(Modifier.weight(1f)) {
                     Text(
                         track?.title ?: "未在播放",
                         color = if (track == null) ProomColor.dim else ProomColor.text,
-                        fontSize = ProomSp(14.sp),
-                        fontWeight = FontWeight.Medium,
+                        style = ProomType.body.copy(fontWeight = FontWeight.Medium),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -192,8 +194,7 @@ fun TvNowPlayingBar(
                         } else {
                             ProomColor.muted
                         },
-                        // 12sp 是电视上辅助信息的下限：11sp 在 3 米外糊成一条
-                        fontSize = ProomSp(12.sp),
+                        style = ProomType.label,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -225,11 +226,11 @@ fun TvNowPlayingBar(
             NowBtn(repeatIcon(mode), repeatLabel(mode)) { MusicBox.cycleRepeat() }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(TvSpace.s8))
         PlayProgress(idle)
         // 留出电视的安全底边：原来贴到屏幕最下方，
         // 进度条几乎压在画面边缘，像被裁掉了一截
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(TvSpace.s20))
     }
 }
 
@@ -246,29 +247,29 @@ private fun PlayProgress(idle: Boolean) {
     val frac = if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f
 
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().padding(horizontal = TvSpace.s8),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier
                 .weight(1f)
-                .height(2.dp)
-                .clip(RoundedCornerShape(1.dp))
+                .height(ProomShape.xs)
+                .clip(RoundedCornerShape(ProomShape.xs))
                 .background(ProomColor.line),
         ) {
             Box(
                 Modifier
                     .fillMaxWidth(frac)
-                    .height(2.dp)
+                    .height(ProomShape.xs)
                     .background(ProomColor.accent)
             )
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(TvSpace.s12))
         // 空态写 --:-- 而不是 0:00/0:00：后者看起来像「一首 0 秒的歌」
         Text(
             if (idle) "0:00 / --:--" else "${mmss(pos)} / ${mmss(dur)}",
             color = ProomColor.muted,
-            fontSize = ProomSp(12.sp),
+            style = ProomType.label,
         )
     }
 }
@@ -284,9 +285,9 @@ private fun NowBtn(
     Box(
         Modifier
             .size(48.dp)
+            .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f)
             .clip(CircleShape)
             .then(if (focused) Modifier.background(ProomColor.surface2) else Modifier)
-            .then(if (focused) Modifier.border(2.dp, ProomColor.accent, CircleShape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -294,8 +295,9 @@ private fun NowBtn(
         Icon(
             imageVector = icon,
             contentDescription = desc,
-            tint = if (focused) ProomColor.accent else Color.White.copy(alpha = 0.88f),
-            modifier = Modifier.size(22.dp),
+            // 焦点只提亮到纯白，不再变金：金留给「选中」
+            tint = if (focused) Color.White else Color.White.copy(alpha = 0.88f),
+            modifier = Modifier.size(TvIcon.toolbar),
         )
     }
 }

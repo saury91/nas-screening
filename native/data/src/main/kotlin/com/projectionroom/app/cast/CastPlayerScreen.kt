@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +37,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,6 +48,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
+import com.projectionroom.ui.component.tvFocusRing
+import com.projectionroom.ui.theme.TvSpace
+import com.projectionroom.ui.theme.TvSize
+import com.projectionroom.ui.theme.TvLayout
+import com.projectionroom.ui.theme.TvIcon
+import com.projectionroom.ui.theme.ProomType
+import com.projectionroom.ui.theme.ProomShape
 import kotlinx.coroutines.delay
 
 /** 投屏播放页的可观察状态。进度每秒一变，所以整块用 State 驱动 */
@@ -96,6 +108,7 @@ fun CastPlayerScreen(
     var showControls by remember { mutableStateOf(true) }
     var tick by remember { mutableIntStateOf(0) }
     val playFocus = remember { FocusRequester() }
+    val rootFocus = remember { FocusRequester() }
 
     // 任何按键都算"用户在操作"：重新亮出控制条并把 6 秒倒计时清零
     LaunchedEffect(tick) {
@@ -103,16 +116,37 @@ fun CastPlayerScreen(
         delay(6_000)
         showControls = false
     }
-    LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
+    // 控制条收起后焦点必须有主人，否则整棵树没有焦点节点，
+    // 根节点上的 onPreviewKeyEvent 永远不会被调用 —— 表现就是「6 秒后遥控器彻底失灵」，
+    // 只剩返回键还能退出。收起时把焦点收回到根，亮起时还给播放键
+    LaunchedEffect(showControls) {
+        if (!showControls) {
+            runCatching { rootFocus.requestFocus() }
+        } else {
+            // 控制层刚组合时焦点树还没稳，多请求几次，最后一次一定落在已就绪的节点上
+            repeat(4) {
+                delay(80)
+                runCatching { playFocus.requestFocus() }
+            }
+        }
+    }
 
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .onPreviewKeyEvent {
+            // 根节点自己必须可聚焦：预览事件只沿「焦点路径」下发
+            .focusRequester(rootFocus)
+            .focusable()
+            .onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val wasHidden = !showControls
                 showControls = true
                 tick++
-                false
+                // 收起状态下这一下只用来唤出，不再落到下面的按钮上，
+                // 否则「按 OK 唤出」会顺手把片子暂停。
+                // 控制条已经亮着时必须放行（false），不然方向键永远不生效
+                wasHidden
             }
     ) {
         AndroidView(factory = { playerView() }, modifier = Modifier.fillMaxSize())
@@ -122,10 +156,10 @@ fun CastPlayerScreen(
             Text(
                 "缓冲中…",
                 color = Color.White.copy(alpha = 0.75f),
-                fontSize = 14.sp,
+                style = ProomType.meta,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(24.dp),
+                    .padding(TvSpace.s24),
             )
         }
 
@@ -133,10 +167,10 @@ fun CastPlayerScreen(
             Text(
                 msg,
                 color = Color(0xFFFF8A80),
-                fontSize = 16.sp,
+                style = ProomType.body,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .padding(horizontal = 48.dp),
+                    .padding(horizontal = TvSpace.s48),
             )
         }
 
@@ -152,29 +186,29 @@ fun CastPlayerScreen(
                             1f to Color.Black.copy(alpha = 0.86f),
                         )
                     )
-                    .padding(horizontal = 48.dp, vertical = 24.dp),
+                    .padding(horizontal = TvSpace.s48, vertical = TvSpace.s24),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Progress(state)
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(TvSpace.s16))
 
                 // 整条控制收进一颗胶囊：片名在左，操作用无底色图标向右排。
                 // 之前 7 个灰底圆按钮平铺，电视上一排看过去全是同重量的色块，
                 // 眼睛找不到「按哪个」，主键也被稀释掉了。
                 Row(
                     Modifier
+                        .focusGroup()
                         .clip(RoundedCornerShape(50))
                         .background(GlassFill)
                         .border(1.dp, GlassLine, RoundedCornerShape(50))
-                        .padding(start = 24.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                        .padding(start = TvSpace.s24, end = TvSpace.s8, top = TvSpace.s8, bottom = TvSpace.s8),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.widthIn(max = 320.dp).padding(end = 20.dp)) {
+                    Column(Modifier.widthIn(max = 320.dp).padding(end = TvSpace.s20)) {
                         Text(
                             state.title.ifBlank { "投屏内容" },
                             color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            style = ProomType.cardTitle,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -184,23 +218,23 @@ fun CastPlayerScreen(
                                 "线路 ${state.line + 1}",
                             ).joinToString(" · "),
                             color = Color.White.copy(alpha = 0.45f),
-                            fontSize = 11.sp,
+                            style = ProomType.label,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 3.dp),
+                            modifier = Modifier.padding(top = TvSpace.s4),
                         )
                     }
 
                     Box(
                         Modifier
                             .width(1.dp)
-                            .height(30.dp)
+                            .height(TvSpace.s32)
                             .background(Color.White.copy(alpha = 0.14f))
                     )
 
                     Row(
-                        Modifier.padding(start = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        Modifier.padding(start = TvSpace.s12),
+                        horizontalArrangement = Arrangement.spacedBy(TvSpace.s4),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         CastKey("−10 秒") { onSeekBy(-10_000) }
@@ -232,33 +266,36 @@ private fun Progress(state: CastUiState) {
         Modifier.fillMaxWidth(0.56f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(fmt(state.positionMs), color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
-        Spacer(Modifier.width(12.dp))
+        Text(fmt(state.positionMs), color = Color.White.copy(alpha = 0.55f), style = ProomType.label)
+        Spacer(Modifier.width(TvSpace.s12))
         Box(
             Modifier
                 .weight(1f)
-                .height(3.dp)
-                .clip(RoundedCornerShape(2.dp))
+                .height(ProomShape.xs)
+                .clip(RoundedCornerShape(ProomShape.xs))
                 .background(Color.White.copy(alpha = 0.20f))
         ) {
             Box(
                 Modifier
                     .fillMaxWidth(frac)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
+                    .height(ProomShape.xs)
+                    .clip(RoundedCornerShape(ProomShape.xs))
                     .background(Brush.horizontalGradient(listOf(CastCyanLight, CastCyan)))
             )
         }
-        Spacer(Modifier.width(12.dp))
-        Text(fmt(state.durationMs), color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+        Spacer(Modifier.width(TvSpace.s12))
+        Text(fmt(state.durationMs), color = Color.White.copy(alpha = 0.55f), style = ProomType.label)
     }
 }
 
 /**
- * 胶囊里的次级键：不画底色，只在获得焦点时亮出青色描边。
+ * 胶囊里的次级键：不画底色，获得焦点时提亮一层并套白环。
  *
  * 电视是 3 米外看的，焦点框必须够亮够粗；而没有焦点时如果每个键都带底色，
  * 一排看过去就是一条灰带，等于没有主次。
+ *
+ * 环是白的，不是青的：青色在这套 UI 里表示「这是投屏控制」，是身份；
+ * 焦点是位置，全站统一白环。两者混用会让「青」既像状态又像光标。
  */
 @Composable
 private fun CastKey(
@@ -270,20 +307,20 @@ private fun CastKey(
     val shape = RoundedCornerShape(50)
     Box(
         modifier
-            .height(48.dp)
+            .height(TvLayout.minTouch)
             .widthIn(min = 58.dp)
-            .onFocusChanged { focused = it.isFocused }
+            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(shape)
             .background(if (focused) Color.White.copy(alpha = 0.18f) else Color.Transparent)
-            .border(2.dp, if (focused) CastCyan else Color.Transparent, shape)
+            .onFocusChanged { focused = it.isFocused }
             .clickable { onClick() }
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = TvSpace.s16),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
             color = if (focused) Color.White else Color.White.copy(alpha = 0.78f),
-            fontSize = 13.sp,
+            style = ProomType.label,
         )
     }
 }
@@ -295,24 +332,23 @@ private fun PlayKey(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    var focused by remember { mutableStateOf(false) }
     Box(
         modifier
-            .size(60.dp)
-            .onFocusChanged { focused = it.isFocused }
+            .size(TvSize.videoControl)
+            // 底色恒为青色（主操作），焦点只加白环 + 柔光
+            .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f, inset = true)
             .clip(CircleShape)
             .background(Brush.linearGradient(listOf(CastCyanLight, CastCyan)))
-            .border(2.dp, if (focused) Color.White else Color.Transparent, CircleShape)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
         if (playing) {
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Box(Modifier.size(5.dp, 20.dp).clip(RoundedCornerShape(2.dp)).background(CastCyanInk))
-                Box(Modifier.size(5.dp, 20.dp).clip(RoundedCornerShape(2.dp)).background(CastCyanInk))
+            Row(horizontalArrangement = Arrangement.spacedBy(TvSpace.s4)) {
+                Box(Modifier.size(ProomShape.xs, 20.dp).clip(RoundedCornerShape(ProomShape.xs)).background(CastCyanInk))
+                Box(Modifier.size(ProomShape.xs, 20.dp).clip(RoundedCornerShape(ProomShape.xs)).background(CastCyanInk))
             }
         } else {
-            Canvas(Modifier.size(20.dp)) {
+            Canvas(Modifier.size(TvIcon.control)) {
                 val triangle = Path().apply {
                     moveTo(2f, 1f)
                     lineTo(size.width - 1f, size.height / 2f)
