@@ -134,17 +134,19 @@ class NasApi(
             lang = d.lang,
             score = d.score,
             desc = d.desc,
-            lines = d.sources.map { s ->
-                Line(
-                    site = s.site,
-                    remarks = s.remarks,
-                    // 服务端给过就信它，没给才自己认一次
-                    quality = s.q.ifBlank {
-                        Quality.from(s.remarks, s.eps.firstOrNull()?.url.orEmpty(), s.site)
-                    },
-                    episodes = s.eps.map { Episode(it.name, it.url) },
-                )
-            }.sortedWith(compareBy({ Quality.rank(it.quality) }, { -it.count })),
+            lines = dedupeLines(
+                d.sources.map { s ->
+                    Line(
+                        site = s.site,
+                        remarks = s.remarks,
+                        // 服务端给过就信它，没给才自己认一次
+                        quality = s.q.ifBlank {
+                            Quality.from(s.remarks, s.eps.firstOrNull()?.url.orEmpty(), s.site)
+                        },
+                        episodes = s.eps.map { Episode(it.name, it.url) },
+                    )
+                },
+            ).sortedWith(compareBy({ Quality.rank(it.quality) }, { -it.count })),
         )
     }
 

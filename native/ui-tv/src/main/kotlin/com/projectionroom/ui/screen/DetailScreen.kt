@@ -17,9 +17,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraintsScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -41,6 +44,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,8 +63,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.projectionroom.shared.catalog.siteBaseName
+import com.projectionroom.shared.model.Line
 import com.projectionroom.shared.model.Vod
-import com.projectionroom.ui.component.TvRow
 import com.projectionroom.ui.theme.ProomColor
 import com.projectionroom.ui.theme.TvRatio
 import com.projectionroom.ui.theme.TvIcon
@@ -80,6 +85,7 @@ import com.projectionroom.ui.component.RemoteImage
  * 遥控器语义刻意收紧 —— 只让「播放 / 线路 / 选集」可聚焦，
  * 海报和简介不参与焦点循环，否则方向键要多按好几下才能到想按的地方。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailScreen(
     vod: Vod,
@@ -100,6 +106,21 @@ fun DetailScreen(
     val line = vod.lines.getOrNull(lineIndex)
     val firstFocus = remember { FocusRequester() }
     val scrollState = rememberScrollState()
+    var topRowFocused by remember { mutableStateOf(false) }
+
+    // 焦点回到顶部那排（立即播放 / 收藏）时，把整页推回顶部。
+    //
+    // 焦点系统自带的 bringIntoView 只保证「按钮露出来」，上面那截（片名 + 海报顶）
+    // 还停在顶部的渐隐遮罩下面：遥控器往上按时看到的是被折掉一截的画面，
+    // 再按一下就跳到「返回」，那块内容永远显示不全。所以光标一回到这排就滚回顶部，
+    // 此时再往上是完整的详情页，返回键在画面最上方，位置关系是清楚的。
+    LaunchedEffect(topRowFocused) {
+        if (!topRowFocused) return@LaunchedEffect
+        // 等一帧：先让焦点自己那段 bringIntoView 发出请求，后面这次滚动
+        // （优先级相同、后发）会接管它，不会两边互相抢位置
+        withFrameNanos { }
+        scrollState.animateScrollTo(0)
+    }
 
     LaunchedEffect(vod.name) {
         // 节点可能还没挂上，重试几次
@@ -129,12 +150,6 @@ fun DetailScreen(
     // 右侧信息列的宽度：海报之外全部给它。这里必须算出来 —— DSL 作用域里的
     // maxWidth 一进嵌套的 Row/Column 就取不到了
     val rightW = maxWidth - posterW - TvSpace.s20 - TvLayout.insetX * 2
-    // 线路卡 4 列：宽度按可用宽度算，不写死 200dp ——
-    // 写死时 4×200+3×12=836，容器 864，右边多出 28dp，整排看起来是歪的。
-    // 列间距 16dp 而不是 12dp：聚焦卡的白环要往外鼓 3dp + 一圈柔光，
-    // 12dp 的缝一填满，环就贴在邻居的金色选中框上，两圈线叠成一道。
-    val lineGap = TvSpace.s16
-    val lineCardW = (maxWidth - TvLayout.insetX * 2 - lineGap * 3) / 4
 
     // ── 氛围层 ──
     // `Modifier.blur` 在 API<31 是空操作，很多电视盒子正好跑在 30，靠它只会得到
@@ -278,7 +293,11 @@ fun DetailScreen(
                         contentPadding = Padding(20, 11),
                         label = "立即播放",
                         labelColor = Color(0xFF1B1206),
-                        modifier = Modifier.focusRequester(firstFocus),
+                        // onFocusChanged 必须在 tvFocusRing / clickable 之前（外层），
+                        // 否则收不到焦点事件
+                        modifier = Modifier
+                            .onFocusChanged { topRowFocused = it.isFocused }
+                            .focusRequester(firstFocus),
                     )
                     // 收藏紧跟主操作：它是「对这部片」的第二个动作，不是页面级开关。
                     // 图标而不是文字：状态型操作，靠形状就能读（实心=已收），
@@ -291,6 +310,8 @@ fun DetailScreen(
                         },
                         desc = if (isFavorite) "取消收藏" else "收藏",
                         active = isFavorite,
+                        // 和左侧主按钮同一排，同样把页面拉回顶部（见上）
+                        modifier = Modifier.onFocusChanged { topRowFocused = it.isFocused },
                         onClick = onToggleFavorite,
                     )
                 }
@@ -299,7 +320,35 @@ fun DetailScreen(
 
         Spacer(Modifier.height(TvSpace.s24))
 
-        Text("播放线路", style = ProomType.title, color = ProomColor.text)
+        // 每条线路一张卡，同站镜像在站名后补序号：艾旦资源1 … 艾旦资源8。
+        //
+        // 之前试过按站点分组（站名印一次 + 一排编号胶囊），省了字但要读两步：
+        // 先认组、再认组里的编号；而且组的边框会把同一排的其他站点切开，
+        // 看着不像一排平级的选项。序号直接跟进站名里，一眼就能念出
+        // 「艾旦资源3」，按钮之间也就没有从属关系了。
+        //
+        // 真正重复的线路（同一条内容给了播放页 + 直链两种地址）已在数据层
+        // 合并（见 dedupeLines），所以这里的每张卡都是一个能独立重试的源。
+        val siteTotals = vod.lines.groupingBy { shortSiteName(it.site) }.eachCount()
+        val labels = run {
+            val seen = mutableMapOf<String, Int>()
+            vod.lines.map { l ->
+                val base = shortSiteName(l.site)
+                val n = (seen[base] ?: 0) + 1
+                seen[base] = n
+                // 只有一个线路的站点不加编号：没有第二条，「1」就没有解释对象
+                if ((siteTotals[base] ?: 1) > 1) "$base$n" else base
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("播放线路", style = ProomType.title, color = ProomColor.text)
+            if (vod.lines.isNotEmpty()) {
+                Spacer(Modifier.width(TvSpace.s12))
+                // 条数写在标题边上：胶囊是内容宽度，扫一眼数不出总共有几条
+                Text("共 ${vod.lines.size} 条", style = ProomType.meta, color = ProomColor.muted)
+            }
+        }
         Spacer(Modifier.height(TvSpace.s12))
         if (vod.lines.isEmpty()) {
             // 线路是逐个源回来的：先给一句话，别让这里空着像「没有资源」
@@ -310,31 +359,26 @@ fun DetailScreen(
                 modifier = Modifier.padding(vertical = TvSpace.s20),
             )
         }
-        // 排成网格，每行 5 张。
-        //
-        // 之前是一整条横向滑轨：9 条线路在电视上只放得下 4 张半，
-        // 第 5 张永远被屏幕右边缘切掉一半 —— 看着像没画完。现在常见条数一眼看全，
-        // 既不用滑，也不会再出现「半张卡」。
-        // 每行 4 张、每张 200dp：164dp 时站名只剩 5 个字，
-        // 「极速资源 · 线路1」被截成「极速资源 · 线…」—— 而「线路1」正是
-        // 区分两条线唯一的字，截掉等于全叫「极速资源」。
-        Column(verticalArrangement = Arrangement.spacedBy(TvSpace.s8)) {
-            vod.lines.chunked(4).forEach { row ->
-                TvRow(
-                    items = row,
-                    itemWidth = lineCardW,
-                    gap = lineGap,
-                ) { l, focused ->
-                    val idx = vod.lines.indexOf(l)
-                    LineChip(
-                        index = idx,
-                        site = l.site,
-                        quality = l.quality,
-                        count = l.count,
-                        selected = idx == lineIndex,
-                        focused = focused,
-                        onClick = { lineIndex = idx },
+        // 流式排列，宽度跟着内容走：一张卡一行 48dp，十几条两三排就收完，
+        // 选集紧跟着露出来；定宽网格会把这些短标签撑成一片方块墙。
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(TvSpace.s12),
+            verticalArrangement = Arrangement.spacedBy(TvSpace.s8),
+        ) {
+            vod.lines.forEachIndexed { idx, l ->
+                val sel = idx == lineIndex
+                LineChip(selected = sel, onClick = { lineIndex = idx }) {
+                    Text(
+                        labels[idx],
+                        // 控件标签不是海报标题：18sp 在胶囊里已经足够，再大字距就散了
+                        style = ProomType.body,
+                        color = if (sel) ProomColor.accent else ProomColor.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                    Spacer(Modifier.width(TvSpace.s8))
+                    MetaText(lineMeta(l), selected = sel)
                 }
             }
         }
@@ -430,31 +474,30 @@ private fun Poster(vod: Vod, modifier: Modifier) {
 }
 
 /**
- * 线路卡片。
+ * 线路胶囊（宽度跟着内容走）。
  *
- * 之前是固定 150dp 的小方块，两行字塞在里面：名字一长就被省略成「极速资源…」，
- * 六张排在一起只剩标点不一样；选中态只有 1dp 半透明描边，坐远了根本看不出选的是哪条。
- * 现在定宽、高度统一，左边补序号 —— 名字再像，序号也能分开；一排排满时右边缘也是齐的。
+ * 内容由调用方决定：[LineChip] 只管「可聚焦 / 选中 / 焦点环」这套壳，
+ * 单线路站点放「站名 + 集数」，镜像线路放「序号 + 集数」。
+ *
+ * 未选中不再是实心深色块：十几块连成一片时，它们的视觉重量比页面其他所有元素
+ * 加起来还大；5.5% 白的 [ProomColor.surface] 够分出边界，又不会糊成一堵墙。
  */
 @Composable
 private fun LineChip(
-    index: Int,
-    site: String,
-    quality: String,
-    count: Int,
     selected: Boolean,
-    focused: Boolean,
     onClick: () -> Unit,
+    content: @Composable RowScope.() -> Unit,
 ) {
+    var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(ProomShape.sm)
     Row(
         Modifier
-            .fillMaxWidth()
-            .height(TvLayout.minTouch)
-            // 焦点环必须画在 clip 之前：clip 会把它剪掉，而它本来就要鼓到格子外面。
-            // 环走外扩而不是内收 —— 内收的那 3dp 正好压在序号和集数上，
-            // 截图里「18」被白环穿过去，读起来像描边画歪了。格子之间横 12dp、
-            // 竖 8dp 的缝足够环外扩（3dp），不需要牺牲内容。
+            .heightIn(min = TvLayout.minTouch)
+            // 站名特别长的片子不能把整排撑爆：给个上限，超了走省略号
+            .widthIn(max = 300.dp)
+            // 焦点事件必须挂在 clickable 之前（外层），clickable 才是焦点目标
+            .onFocusChanged { focused = it.isFocused }
+            // 环画在 clip 之前：clip 会把它剪掉，而它本来就要鼓到格子外面
             .then(
                 if (focused) {
                     Modifier.tvFocusBloom(shape, bloom = 1f, ringWidth = 2.dp, color = Color.White)
@@ -467,11 +510,13 @@ private fun LineChip(
                 when {
                     selected -> ProomColor.accentSoft
                     focused -> ProomColor.surface2
+                    // 注意别写 surface.copy(alpha = …)：surface 本身就是带 alpha 的白
+                    // (0x0EFFFFFF)，copy 是**替换** alpha 不是相乘 —— 传 0.55 会变成
+                    // 55% 白，整排亮成一片灰块（比改之前还重）
                     else -> ProomColor.surface
                 }
             )
-            // 选中描边只在没焦点时画：聚焦时已经有白环，再留一圈金边就是「双框」，
-            // 那块地方看起来像两个控件叠在一起。金色的选中语义由底色 + 金序号承担。
+            // 选中描边只在没焦点时画：聚焦时已经有白环，再留一圈金边就是「双框」
             .then(
                 if (selected && !focused) {
                     Modifier.border(1.dp, ProomColor.accent.copy(alpha = 0.7f), shape)
@@ -479,40 +524,37 @@ private fun LineChip(
                     Modifier
                 }
             )
-            // TvRow 已经负责 focusable/焦点态，这里只处理点击
             .clickable(onClick = onClick)
-            .padding(horizontal = TvSpace.s12),
+            .padding(horizontal = TvSpace.s12, vertical = TvSpace.s8),
         verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            (index + 1).toString().padStart(2, '0'),
-            style = ProomType.label,
-            color = if (selected) ProomColor.accent else ProomColor.muted.copy(alpha = 0.45f),
-        )
-        Spacer(Modifier.width(TvSpace.s12))
-        Column(Modifier.weight(1f)) {
-            Text(
-                cleanSiteName(site),
-                // 这是控件标签不是海报标题：20sp 的字阶让 200dp 只能放 7 个字，
-                // 降到正文级 18sp 正好多挤出一个字
-                style = ProomType.body,
-                color = if (selected) ProomColor.accent else ProomColor.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(TvSpace.s4))
-            Text(
-                buildString {
-                    if (quality.isNotBlank()) append(quality).append(" · ")
-                    append("$count 集")
-                },
-                style = ProomType.label,
-                color = ProomColor.muted,
-                maxLines = 1,
-            )
-        }
-    }
+        content = content,
+    )
 }
+
+/** 集数小字。每条线路都印，不搞「只印少数派」—— 有的有有的没有，读起来像丢了数据。 */
+@Composable
+private fun RowScope.MetaText(meta: String, selected: Boolean) {
+    Text(
+        meta,
+        style = ProomType.label,
+        color = if (selected) ProomColor.accent else ProomColor.muted,
+        maxLines = 1,
+    )
+}
+
+/** 线路的次要信息：集数（有画质就带上画质） */
+private fun lineMeta(l: Line): String = buildString {
+    append("${l.count} 集")
+    if (l.quality.isNotBlank()) append(" · ").append(l.quality)
+}
+
+/**
+ * 站名去掉「·线路N」镜像后缀，用来把同一个站点的几条镜像归成一组。
+ *
+ * 后缀是采集站给站内线路编的号（`艾旦资源 · 线路2`），对用户没有意义：
+ * 分组之后站名印一次、编号挂在右边，比把长后缀重复印 8 遍清楚得多。
+ */
+private fun shortSiteName(raw: String): String = siteBaseName(cleanSiteName(raw))
 
 /**
  * 清洗采集站的站名。
