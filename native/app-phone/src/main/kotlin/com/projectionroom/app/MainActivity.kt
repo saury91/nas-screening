@@ -1059,8 +1059,13 @@ class MainActivity : ComponentActivity() {
 
                 // 收藏 / 记录：本地主库，NAS 只是同步对象（见 LibraryStore / LibrarySync）
                 var lib by remember { mutableStateOf(LibFile()) }
+                // 本地主库读完了没有。同步必须等它：带着空库去同步，结果会把
+                // 内存里这份记录覆盖成「NAS 上有什么」（没有 NAS 就是空的）——
+                // 症状是刚进首页有「继续观看」，一两秒后整排消失。
+                var libReady by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) {
                     lib = withContext(Dispatchers.IO) { LibraryStore.load(this@MainActivity) }
+                    libReady = true
                 }
                 val favs = lib.favorites()
                 val hist = lib.history()
@@ -1068,7 +1073,8 @@ class MainActivity : ComponentActivity() {
                 var syncing by remember { mutableStateOf(false) }
                 // 下拉刷新靠它重跑同步（LaunchedEffect 的 key 变了才会重新执行）
                 var syncTick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-                LaunchedEffect(api, syncTick) {
+                LaunchedEffect(api, syncTick, libReady) {
+                    if (!libReady) return@LaunchedEffect
                     // 启动先推未同步的改动，再拉 NAS 上的；离线时两边都失败，界面照旧用本地。
                     // 永久离线就不该每次启动都等它 10 秒 —— 交给熔断器。
                     syncing = true
