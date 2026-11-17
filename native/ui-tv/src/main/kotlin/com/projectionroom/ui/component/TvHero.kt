@@ -40,6 +40,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,6 +80,15 @@ fun TvHero(
     topInset: Dp = 0.dp,
     playFocusRequester: FocusRequester? = null,
     navFocusRequester: FocusRequester? = null,
+    /**
+     * 按钮上按「上」时的自定义处理：返回 true = 已消费，焦点不动。
+     *
+     * 首页用它把列表先滚回顶部：光标从 Hero 直接跳到顶栏 tab 时，列表还停在
+     * 半截位置上，Hero 的片名被顶栏裁掉 —— 看起来像「滚不到顶就跳走了」。
+     */
+    onUpKey: () -> Boolean = { false },
+    /** 「立即播放」的焦点进出：首页据此把列表滚回顶部（见 TvHome） */
+    onPlayFocus: (Boolean) -> Unit = {},
     onPlay: (Vod) -> Unit,
     onDetail: (Vod) -> Unit,
 ) {
@@ -199,11 +213,13 @@ fun TvHero(
                         primary = true,
                         focusRequester = playFocusRequester,
                         upTarget = navFocusRequester,
-                        onFocus = { focused = it },
+                        onUpKey = onUpKey,
+                        onFocus = { focused = it; onPlayFocus(it) },
                     ) { onPlay(vod) }
                     HeroButton(
                         "详情",
                         upTarget = navFocusRequester,
+                        onUpKey = onUpKey,
                         onFocus = { focused = it },
                     ) { onDetail(vod) }
                 }
@@ -275,6 +291,8 @@ private fun HeroButton(
     primary: Boolean = false,
     focusRequester: FocusRequester? = null,
     upTarget: FocusRequester? = null,
+    /** 详见 [TvHero.onUpKey]：返回 true 时不走 [upTarget] */
+    onUpKey: () -> Boolean = { false },
     /** 焦点进出时通知上层：自动轮播要据此暂停，不能把用户要按的那张换掉 */
     onFocus: (Boolean) -> Unit = {},
     onClick: () -> Unit,
@@ -289,6 +307,10 @@ private fun HeroButton(
                     Modifier.focusProperties { up = upTarget }
                 } else Modifier
             )
+            // 必须在 clickable 之前：按键只沿焦点路径下发
+            .onPreviewKeyEvent { e ->
+                e.type == KeyEventType.KeyDown && e.key == Key.DirectionUp && onUpKey()
+            }
             // 主按钮底色恒定金：聚焦不再翻白 —— 翻白之后白环贴在自己的白底上就没了，
             // 而且「金=主操作、白=焦点」两套颜色同屏打架。焦点只由白环表达
             .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f)

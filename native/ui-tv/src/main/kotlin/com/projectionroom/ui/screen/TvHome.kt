@@ -26,9 +26,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,6 +94,24 @@ fun TvHome(
     // 顶栏是浮层（不在 LazyColumn 的焦点树里），几何寻路找不到下面的 Hero 按钮，
     // 所以给两个方向各钉一个锚点：胶囊 ↓ → 立即播放，Hero 按钮 ↑ → 胶囊。
     val heroPlay = remember { FocusRequester() }
+    // 上键要把列表滚回顶部（见 TvHero.onUpKey）
+    val scope = rememberCoroutineScope()
+    var heroPlayFocused by remember { mutableStateOf(false) }
+
+    // 光标落到 Hero 的「立即播放」时，把列表滚回顶部。
+    //
+    // 从下面几排往上按，焦点系统只会把按钮「刚好露出来」—— Hero 的片名留在顶栏
+    // 底下，屏幕上只剩半张推荐位，遥控器上读起来就是「滚不到顶」。所以光标一回到
+    // 主按钮，就让整块 Hero 归位。
+    LaunchedEffect(heroPlayFocused) {
+        if (!heroPlayFocused) return@LaunchedEffect
+        val atTop = listState.firstVisibleItemIndex == 0 &&
+            listState.firstVisibleItemScrollOffset == 0
+        if (atTop) return@LaunchedEffect
+        // 等一帧，让焦点自己那次 bringIntoView 先发出请求，再由这次接管
+        withFrameNanos { }
+        listState.animateScrollToItem(0)
+    }
     LaunchedEffect(Unit) {
         // 等一帧，LazyColumn 的项还没测量时 requestFocus 会静默失败
         withFrameNanos { }
@@ -150,6 +170,20 @@ fun TvHome(
                         topInset = TOP_BAR_HEIGHT + topInset,
                         playFocusRequester = if (latest.isNotEmpty()) heroPlay else null,
                         navFocusRequester = landing,
+                        // 上键先让列表自己滚回顶部，滚动到位之后才允许跳到顶栏 tab。
+                        // 直接跳的话，Hero 停在半截位置：片名被顶栏裁掉、顶栏也从渐变切成
+                        // 实底 —— 遥控器上读起来就是「还没滚到顶就跳走了」。
+                        onUpKey = {
+                            val atTop = listState.firstVisibleItemIndex == 0 &&
+                                listState.firstVisibleItemScrollOffset == 0
+                            if (atTop) {
+                                false
+                            } else {
+                                scope.launch { listState.animateScrollToItem(0) }
+                                true
+                            }
+                        },
+                        onPlayFocus = { heroPlayFocused = it },
                         onPlay = onPlay,
                         onDetail = { v -> onOpen(v) },
                     )
