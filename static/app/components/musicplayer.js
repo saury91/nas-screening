@@ -3,6 +3,7 @@
 import { $, esc, icon, toast, fmtClock } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { setFocus, clearFocus } from '../core/focus.js';
+import { withBase } from '../core/base.js';
 
 const audio = () => $('#audio');
 
@@ -14,7 +15,7 @@ function absoluteMedia(u) {
     const nas = window.ProomNative?.server?.();
     if (nas && /^https?:\/\//.test(nas)) return nas.replace(/\/$/, '') + u;
   } catch (e) { /* 浏览器里没有这个桥 */ }
-  return u;
+  return withBase(u);
 }
 
 let queue = [];
@@ -250,7 +251,7 @@ function load(autoplay) {
   renderNowPlaying();
 
   const src = t.provider === 'local'
-    ? '/api/music/file?id=' + encodeURIComponent(t.id)
+    ? withBase('/api/music/file?id=' + encodeURIComponent(t.id))
     : (t.url || '');
 
   const use = async () => {

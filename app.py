@@ -145,13 +145,18 @@ def main():
 
     srv = Srv((HOST, PORT), Handler)
 
-    # 首页推荐、分类映射、封面图床、直播频道都在后台预热，避免第一次打开干等
-    for fn in (catalog.refresh_recommend_async, catalog.catmap_warm,
-               catalog.refresh_pic_hosts):
+    # 首页推荐、封面图床：各自后台跑
+    for fn in (catalog.refresh_recommend_async, catalog.refresh_pic_hosts):
         try:
             threading.Thread(target=fn, daemon=True).start()
         except Exception:
             pass
+    # 分类映射 → 五个分类第一页预热 → 每 5 分钟补一次。
+    # 串在一个线程里：映射没建好就预热，缓存里会存下缺站的结果。
+    try:
+        threading.Thread(target=catalog.browse_warm_loop, daemon=True).start()
+    except Exception:
+        pass
     try:
         if not dbrun("SELECT COUNT(*) FROM live", fetch=True)[0][0]:
             threading.Thread(target=live_svc.refresh_live, daemon=True).start()

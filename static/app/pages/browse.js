@@ -19,7 +19,10 @@ let io = null;
 let phNodes = [];          // 正在加载的骨架占位，跟着网格流走
 let rootRef = null;        // 当前页面的根节点，滚动监听只认它
 let scrollTimer = null;
-const B_TTL = 10 * 60 * 1000;
+// 与后端片库缓存对齐（半小时）：列表本来就更新很慢，10 分钟就过期等于
+// 每次回访都要重新聚合一遍
+const B_TTL = 30 * 60 * 1000;
+let prefetching = false;
 
 const bkey = () => `browse|${st.cat}|${st.year}|${st.area}|${st.src}`;
 const sigOf = items => [items.length, items[0] && items[0].name,
@@ -121,7 +124,8 @@ export async function render(root, ctx) {
     root.querySelector('#hint').textContent = `已载入 ${st.items.length} 部 · 正在更新…`;
   }
 
-  await loadSources(root);
+  // 片源下拉不挡首屏：晚几十毫秒出来没人看得出来，挡着就是白等
+  loadSources(root);
   bind(root);
   watchScroll(root);
   if (cached && cached.items && cached.items.length) {
@@ -129,6 +133,29 @@ export async function render(root, ctx) {
   } else {
     await fetchPage(root, { replace: true, first: true });
   }
+  prefetchOthers();
+}
+
+// 切标签要等一次聚合，很慢。用户在这一页看片的时候，空闲时间把其它几个
+// 分类的第一页顺手取回来：等真点过去，缓存已经在 IndexedDB 里，直接出画面。
+// 串行 + 空闲调度：不跟当前页抢带宽，也不让后端同时算五个分类。
+function prefetchOthers() {
+  if (prefetching) return;
+  const mine = st && st.cat;
+  const cats = Object.values(SLUG).filter(c => c !== mine);
+  if (!cats.length) return;
+  prefetching = true;
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 600));
+  const mySt = st;
+  const step = i => {
+    // 页面切走了就别再取：白耗流量，还会把旧页面的状态写回来
+    if (!st || st !== mySt || i >= cats.length) { prefetching = false; return; }
+    if (navigator.onLine === false) { prefetching = false; return; }
+    api.browse({ cat: cats[i], year: '', area: '', pg: 1, src: '' })
+      .catch(() => {})
+      .finally(() => idle(() => step(i + 1)));
+  };
+  idle(() => step(0));
 }
 
 async function loadSources(root) {
@@ -174,6 +201,22 @@ async function resetFilters(root) {
   st.sig = '';
   root.querySelector('#load-slot').innerHTML = '';
   removeSkeletons();
+
+  // 先在本地筛一遍：手上这 60 条里就有符合的，立刻铺出来给个反应，
+  // 精确结果（其它页、其它源）随后静默替换。
+  // 不然点个「2024」也要等一次全站聚合，用户只会觉得"点了没反应"。
+  if (st.items.length && (st.year || st.area)) {
+    const local = st.items.filter(x =>
+      (!st.year || String(x.year || '').startsWith(st.year)) &&
+      (!st.area || String(x.area || '').includes(st.area)));
+    if (local.length) {
+      st.items = local;
+      paintList(root);
+      root.querySelector('#hint').innerHTML = '<span class="spin-sm"></span> 正在筛选…';
+      await fetchPage(root, { replace: true, silent: true });
+      return;
+    }
+  }
 
   const cached = cacheGet(bkey(), B_TTL);
   if (cached && cached.items && cached.items.length) {

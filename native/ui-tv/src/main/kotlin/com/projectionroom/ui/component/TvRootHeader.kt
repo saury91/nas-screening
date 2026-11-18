@@ -1,5 +1,6 @@
 package com.projectionroom.ui.component
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -247,44 +248,73 @@ private fun RootTab(
     // 10dp 圆角块，不是 50% 胶囊。两个字（「首页」）在 48dp 高时用 50% 半径会算成
     // 一颗 54×48 的金椭圆 —— 顶栏里最重的一块，和最轻的 15sp 纯文字 tab 差了一个量级。
     val shape = RoundedCornerShape(ProomShape.sm)
+
+    // 光标从「外扩白环」换成「白底深字」，和 B 站电视版顶栏同一套语言。
+    //
+    // 之前的环是围着**整颗 48dp 可点区域**画的：一个两字 tab 只剩 54×48，环一外扩
+    // 就是一只大白框；8 个 tab 之间只隔 8dp，框和框几乎连成一排表格线。
+    // 填充色没有这个问题 —— 它只占文字本身那么大，不会去圈那块为了遥控器凑出来的空白。
+    //
+    // 白底上只能用底色写字：金色压在近白上对比度只剩 1.6:1，3 米外糊成一片。
+    val ink by animateColorAsState(
+        when {
+            focused -> ProomColor.bg
+            selected -> ProomColor.accent
+            else -> ProomColor.muted
+        },
+        tween(120),
+        label = "root-tab-ink",
+    )
+    val pill by animateColorAsState(
+        if (focused) ProomColor.text else Color.Transparent,
+        tween(120),
+        label = "root-tab-pill",
+    )
+
     Box(
         Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .then(
                 if (downTarget != null) Modifier.focusProperties { down = downTarget } else Modifier
             )
-            // 焦点环 2dp：和全站一致（原来 3dp，顶栏这一颗比页面里所有环都粗）
-            .tvFocusRing(shape, ringWidth = 2.dp, zoom = 1f, color = Color.White)
-            .clip(shape)
-            .background(if (focused) ProomColor.surface2 else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
-            // 内边距 + 下面的 heightIn 兜住 48dp 可点目标：只靠内边距会随字阶漂
+            // 可点目标仍按 48dp 兜底，但白色只涂到文字外一圈：整颗 48dp 都填白的话，
+            // 顶栏中间会多出一条白砖，比原来的大白框还重。
             .heightIn(min = TvLayout.minTouch)
-            .padding(horizontal = TvSpace.s12),
+            .padding(horizontal = TvSpace.s4),
         contentAlignment = Alignment.Center,
     ) {
-        // 当前页不再画成一块金砖：金底 + 白环同时亮时，顶栏上有两个「按下去」的东西，
-        // 分不清哪个是位置、哪个是光标。改成「金字 + 一条金线」——
-        // 位置靠颜色和线，焦点靠环，两套语言不打架，整排 tab 的重量也一致了。
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = label,
-                style = ProomType.meta,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = when {
-                    selected -> ProomColor.accent
-                    focused -> ProomColor.text
-                    else -> ProomColor.muted
-                },
-            )
+            Box(
+                Modifier
+                    .clip(shape)
+                    .background(pill)
+                    // 左右各 12dp：8 个 tab 每个多占 8dp，顶栏就会把右侧三颗图标挤扁
+                    // （.size(48) 遇到不够用的父宽会被压窄，圆圆形变成竖条）
+                    .padding(horizontal = TvSpace.s12, vertical = TvSpace.s8),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = ProomType.meta,
+                    fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
+                    color = ink,
+                )
+            }
+            // 当前页仍然用「金字 + 底部金线」，但只在不聚焦时画：
+            // 光标压上去时白胶囊已经说明「在这」，再叠一条金线，字和线都挤在 40dp 里。
+            // 高度恒定占位，焦点进出时整排 tab 不会上下跳半格。
             Spacer(Modifier.height(TvSpace.s4))
             Box(
                 Modifier
-                    .width(if (selected) 18.dp else 0.dp)
+                    // 宽度恒定：0 ↔ 18 会让 tab 宽度随焦点变，右边 7 个 tab 全部左右窜
+                    .width(18.dp)
                     .height(3.dp)
                     .clip(RoundedCornerShape(ProomShape.xs))
-                    .background(if (selected) ProomColor.accent else Color.Transparent)
+                    .background(
+                        if (selected && !focused) ProomColor.accent else Color.Transparent
+                    )
             )
         }
     }
@@ -330,6 +360,9 @@ private fun NowPlayingDisc(
                 if (downTarget != null) Modifier.focusProperties { down = downTarget } else Modifier
             )
             .size(TvLayout.minTouch)
+            // 聚焦同样是白底：唱片比图标位小一圈，白底露出来的那圈就是「被选中」的托底
+            .clip(CircleShape)
+            .background(if (focused) ProomColor.text else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -337,8 +370,6 @@ private fun NowPlayingDisc(
         Box(
             Modifier
                 .size(TvIcon.display)
-                // 焦点环画在旋转层外面：跟着唱片一起转会像碟片在打滑
-                .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f)
                 .clip(CircleShape)
                 .background(ProomColor.card),
             contentAlignment = Alignment.Center,
@@ -409,8 +440,9 @@ private fun HeaderIcon(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    // 焦点只提亮到主文字色，不变金
-    val tint = if (focused) ProomColor.text else ProomColor.dim
+    // 和 tab 同一套：聚焦 = 白底深图标，不画环。
+    // 一排 tab 是白胶囊、右边三颗图标却还是白框的话，顶栏右端会突然换一种语言。
+    val tint = if (focused) ProomColor.bg else ProomColor.dim
     Box(
         Modifier
             .then(
@@ -418,9 +450,8 @@ private fun HeaderIcon(
             )
             // 40dp 的圆形图标位小于 10-foot UI 的可点目标下限
             .size(TvLayout.minTouch)
-            .tvFocusRing(RoundedCornerShape(50), ringWidth = 2.dp, zoom = 1f)
             .clip(RoundedCornerShape(50))
-            .background(if (focused) ProomColor.surface2 else Color.Transparent)
+            .background(if (focused) ProomColor.text else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

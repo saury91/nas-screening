@@ -8,7 +8,7 @@ import time
 import urllib.error
 import urllib.request
 
-from ..cache import cache_age, cache_peek, cache_put, cache_valid
+from ..cache import cache_age, cache_drop, cache_peek, cache_put, cache_valid
 from ..config import (BROWSE_DEADLINE, BROWSE_SITES, CAT_ORDER, CATMAP_TTL,
                       FALLBACK_HOT, RECOMMEND_TTL, SEARCH_DEADLINE, TIMEOUT)
 from ..db import dbrun, pref_json, pref_set_json
@@ -32,6 +32,19 @@ _SEARCH_POOL = concurrent.futures.ThreadPoolExecutor(
 # 因此长期显示「暂时没货」。worker 提到 32，一轮并发打完。
 _BROWSE_POOL = concurrent.futures.ThreadPoolExecutor(
     max_workers=32, thread_name_prefix="cms-browse")
+# 分类映射探测单独一个池：它经常要等超时，混进浏览池会把 worker 占满
+_CM_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=12, thread_name_prefix="cms-catmap")
+# 浏览时最多等分类映射多久。到点先拿已回来的站出画面，剩下的继续在后台探，
+# 探完写缓存，第二次点击就是全的 —— 绝不能让一个慢站决定整页等多久。
+_BROWSE_CM_WAIT = 4.0
+# 片库列表变化很慢：半小时内直接复用，别每次都重新聚合
+_BROWSE_TTL = 1800
+# 空结果只压一会儿：多半是慢站没赶上 deadline，缓存太久用户点一次空一次
+_BROWSE_EMPTY_TTL = 60
+# 探测失败的站点记 10 分钟：新浪/索尼/暴风/天堂的 ac=list 总是空，
+# 不记账的话每次点分类都要重新等它们各 8 秒
+_CATMAP_FAIL_TTL = 600
 
 
 def _taste():
@@ -163,34 +176,53 @@ def _pic_store(host, ok):
         pass
 
 
+_PIC_INFLIGHT = set()
+
+
+def _pic_probe_store(host):
+    """探测并落状态。放进线程池执行，所以「谁等在这」和「结不结果」解耦。"""
+    try:
+        _pic_store(host, _pic_probe(host))
+    except Exception:
+        pass
+    finally:
+        with _PIC_LK:
+            _PIC_INFLIGHT.discard(host)
+
+
 def _pic_warm(hosts, timeout=3.0):
-    """并发探测一批未知域名，最多等 timeout 秒；没回来的当未知（下次再说）"""
-    todo = [h for h in dict.fromkeys(hosts) if h and _pic_known(h) is None]
+    """并发探测一批未知域名。
+
+    timeout=0 表示不等结果、纯后台探：以前这里会把 pending 的任务 cancel 掉，
+    等于什么都没探；现在探测和落状态绑在同一个任务里，等不等都能有结论。
+    """
+    todo = []
+    with _PIC_LK:
+        for h in dict.fromkeys(hosts):
+            if not h or _pic_known(h) is not None or h in _PIC_INFLIGHT:
+                continue
+            _PIC_INFLIGHT.add(h)
+            todo.append(h)
     if not todo:
         return
-    futs = {_PIC_POOL.submit(_pic_probe, h): h for h in todo}
-    done, pending = concurrent.futures.wait(list(futs), timeout=timeout)
-    for f in done:
-        try:
-            _pic_store(futs[f], f.result())
-        except Exception:
-            pass
-    for f in pending:
-        f.cancel()
+    futs = [_PIC_POOL.submit(_pic_probe_store, h) for h in todo]
+    if timeout > 0:
+        concurrent.futures.wait(futs, timeout=timeout)
 
 
-def _pick_cover(pics):
+def _pick_cover(pics, wait=3.0):
     """同一部片的多个源各有封面，挑一个图床能连上的。
 
     顺序：已确认可用 → 还没探测过（乐观沿用原行为）→ 已知不可用。
-    只有候选 ≥2 才会同步探测一次，单封面不会为它多等 3 秒。
+    wait 是同步等待图床探测的上限：浏览列表传 0（一页几十部片，等不起），
+    详情/搜索保持 3 秒。
     """
     pics = [p for p in dict.fromkeys(pics) if (p or "").strip()]
     if not pics:
         return ""
     _pic_load()
     if len(pics) > 1:
-        _pic_warm([_pic_host(p) for p in pics])
+        _pic_warm([_pic_host(p) for p in pics], timeout=wait)
     for p in pics:
         if _pic_known(_pic_host(p)) is True:
             return p
@@ -241,7 +273,7 @@ def refresh_pic_hosts(timeout=40.0):
     return bad_pic_hosts()
 
 
-def _dedup(items, limit=0):
+def _dedup(items, limit=0, pic_wait=3.0):
     """同名同年份只留一条。
 
     片名里带不带年份、括号打不打，各家源都不一样（「夺命狂花」vs「夺命狂花 2026」），
@@ -269,7 +301,7 @@ def _dedup(items, limit=0):
         first = g[0]
         pics = [(x.get("pic") or "").strip() for x in g]
         if any(pics):
-            cover = _pick_cover(pics)
+            cover = _pick_cover(pics, wait=pic_wait)
             if cover and cover != (first.get("pic") or ""):
                 first = dict(first)
                 first["pic"] = cover
@@ -352,13 +384,18 @@ def detect_catmap_full(site):
     """
     key = "catmap3|" + site["name"]
     c = cache_peek(key)
-    if isinstance(c, dict) and c.get("cats") and cache_valid(key, CATMAP_TTL):
-        return c["cats"], c.get("names") or {}
+    if isinstance(c, dict):
+        if c.get("cats") and cache_valid(key, CATMAP_TTL):
+            return c["cats"], c.get("names") or {}
+        # 上一次探测失败：短时间内别再试。失败不记账的话，这种站每次点分类
+        # 都要重新等它超时一遍（8 秒 × 两个阶段）。
+        if c.get("failed") and cache_valid(key, _CATMAP_FAIL_TTL):
+            return {}, {}
 
     try:
         api = site["api"]
         sep = "&" if "?" in api else "?"
-        d = json.loads(http_get(api + sep + "ac=list", timeout=8))
+        d = json.loads(http_get(api + sep + "ac=list", timeout=6))
         classes = []
         if isinstance(d, dict):
             classes = d.get("class") or d.get("classes") or []
@@ -395,29 +432,52 @@ def detect_catmap_full(site):
         pass                     # 有的站不支持 ac=list，退回盲探
 
     def probe(t):
+        # 盲探是「赌这个 ID 有货」，请求本身要快：4 秒没响应就算死
         try:
-            L = _qs(site, "ac=detail&t=%d" % t)
+            L = _qs(site, "ac=detail&t=%d" % t, timeout=4)
         except Exception:
-            return (t, "")
+            return (t, "", False)
         names = [_cat(x.get("type")) for x in L[:14]]
         names = [n for n in names if n]
         if len(names) < 3:            # 样本太少，判不出来
-            return (t, "")
-        return (t, max(set(names), key=names.count))
+            return (t, "", True)
+        return (t, max(set(names), key=names.count), True)
 
-    out = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-        for t, c2 in ex.map(probe, range(1, 31)):
+    out, fails = {}, 0
+    # 盲探是 30 个请求，别开太多 worker：它在后台跑，抢带宽会把正常站拖慢。
+    # 关键是不能「等全部跑完」：站点连不上时 30 个 ID 会白等好几分钟，
+    # 连续失败几个就直接收手（剩下的取消掉）。
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+    try:
+        futs = [ex.submit(probe, t) for t in range(1, 31)]
+        for f in concurrent.futures.as_completed(futs):
+            t, c2, ok = f.result()
+            if not ok:
+                fails += 1
+                if fails >= 5:
+                    break
+                continue
             if c2:
                 out[str(t)] = c2
+    except Exception:
+        pass
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
     if out:
         cache_put(key, {"cats": out, "names": {}})
+    else:
+        # 记成失败，10 分钟内不再重探（含 ac=list 抛异常 / 返回空）
+        cache_put(key, {"cats": {}, "names": {}, "failed": True})
     return out, {}
 
 
 def detect_catmap(site):
     """只要 id → 大类的映射（服务端浏览用）"""
     return detect_catmap_full(site)[0]
+
+
+_CATMAP_LK = threading.Lock()
 
 
 def catmap_warm():
@@ -429,6 +489,16 @@ def catmap_warm():
     App 端自己挑有映射的源来拉列表。只预热前几个的话，剩下的源在 App 里
     等于不存在 —— 片库凭空少掉一大半。
     """
+    # 启动线程和片库预热都会走到这儿：第二个进来直接退出，别重复打站
+    if not _CATMAP_LK.acquire(blocking=False):
+        return
+    try:
+        _catmap_warm_inner()
+    finally:
+        _CATMAP_LK.release()
+
+
+def _catmap_warm_inner():
     def one(s):
         try:
             return detect_catmap(s) or None
@@ -444,6 +514,8 @@ def catmap_warm():
     if missed:
         time.sleep(1.5)
         def again(s):
+            # 先抹掉上一轮记的「失败」：不抹的话重试会被负缓存直接挡回来
+            cache_drop("catmap3|" + s["name"])
             try:
                 return detect_catmap(s) or None
             except Exception:
@@ -468,6 +540,27 @@ def _area_keys(area):
     return [area] + extra.get(area, [])
 
 
+def _catmaps(pool):
+    """并发取各站的分类映射；到点只收已回来的。
+
+    以前这里是 `for s in pool: detect_catmap_full(s)`：每站 ac=list 8 秒超时
+    （失败还要再盲探 30 个 ID），8 个站串起来，冷缓存点一次分类实测 88 秒。
+    现在并发 + 只等 2 秒：先拿已回来的站出画面，没回来的继续在后台探、
+    探完自己写缓存，下一次点击就是全的。
+    """
+    if not pool:
+        return {}
+    futs = {_CM_POOL.submit(detect_catmap_full, s): s for s in pool}
+    done, _pending = concurrent.futures.wait(list(futs), timeout=_BROWSE_CM_WAIT)
+    out = {}
+    for f in done:
+        try:
+            out[futs[f]["name"]] = f.result()
+        except Exception:
+            pass
+    return out
+
+
 def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
                    deadline=BROWSE_DEADLINE):
     """按大类 / 年份 / 地区浏览片库。
@@ -476,11 +569,14 @@ def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
     回来统一按 type_name 归一、再按年份地区过滤。
     这样不用管各站 ID 怎么排，也不会因为某个站的 ID 变了就整个失效。
     """
-    # 一次要打 4 个站 × 4 个分类，缓存住，翻回来才不会又等 5 秒
     ck = "browse|%s|%s|%s|%d|%s" % (cat, year, area, pg, site or "")
     c = cache_peek(ck)
-    if c is not None and cache_valid(ck, 600):
-        return c
+    if c is not None:
+        # 映射没齐时算出来的结果只短存：等后台把映射补齐，下一次重新聚合
+        ttl = (60 if c.get("partial")
+               else (_BROWSE_TTL if c.get("items") else _BROWSE_EMPTY_TTL))
+        if cache_valid(ck, ttl):
+            return c
 
     tasks, nsite, out = [], 0, []
     pool = active_sites()
@@ -488,9 +584,10 @@ def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
         pool = [x for x in pool if x["name"] == site]
     else:
         pool = pool[:BROWSE_SITES]
+    maps = _catmaps(pool)
     for s in pool:
-        cm, tnames = detect_catmap_full(s)
-        ts = [t for t, c in cm.items() if not cat or c == cat]
+        cm, tnames = maps.get(s["name"], ({}, {}))
+        ts = [t for t, c2 in cm.items() if not cat or c2 == cat]
         if ts and area:
             # 分类名里带地区的排前面：猫眼「动漫」有 5 个子分类，
             # 只取前 4 个的话「日韩动漫」经常被挤掉，筛日本就没货了
@@ -524,18 +621,61 @@ def browse_catalog(cat="", year="", area="", pg=1, limit=60, site=None,
         out = [x for x in out if any(k in (x.get("area") or "")
                                      for k in _area_keys(area))]
 
-    items = _dedup(out, limit)
+    # 一页几十部片：封面图床探测不再同步等（等一次就是 3 秒），
+    # 先乐观用第一个封面，探测结果下一次请求就生效
+    items = _dedup(out, limit, pic_wait=0)
     # 新片优先；同年份里信息全的（有简介）优先
     items.sort(key=lambda x: (str(x.get("year") or "0"),
                               1 if x.get("desc") else 0), reverse=True)
     res = {"items": items, "pg": pg, "cat": cat, "year": year, "area": area,
            "more": len(out) > limit, "total": len(out),
-           "sites": nsite, "at": int(time.time())}
-    # 空结果不落缓存：多半是慢站没在 deadline 内回来，缓存住会让这个分类
-    # 整整 10 分钟都显示没货（用户点一次空一次）。下次直接重试。
-    if items:
-        cache_put(ck, res)
+           "sites": nsite, "at": int(time.time()),
+           # 还有站的映射这次没赶上（超时）：结果不完整，只短存 60 秒。
+           # 注意不能看 nsite：本来就没映射的坏站也在 maps 里，算「已答复」。
+           "partial": len(maps) < len(pool)}
+    # 空结果也存，但读取时只认 60 秒：既能挡住「连点两次等两遍」，
+    # 又不至于让这个分类半小时都显示没货
+    cache_put(ck, res)
     return res
+
+
+_BROWSE_WARM_CATS = ["电影", "剧集", "动漫", "综艺", "纪录片"]
+
+
+def browse_warm():
+    """把五个分类的第一页先聚合好：用户点标签时直接命中缓存。
+
+    串行跑（一次一个分类）：五个分类并发等于 40 个站同时打，
+    采集站会限流，反而比串行更慢。
+    """
+    for cat in _BROWSE_WARM_CATS:
+        try:
+            ck = "browse|%s|||1|" % cat
+            # 离过期还有 5 分钟以上就不动它，别把用户正在看的那页顶掉
+            if cache_valid(ck, _BROWSE_TTL - 300):
+                continue
+            t0 = time.time()
+            data = browse_catalog(cat=cat, pg=1)
+            log("片库预热 %s：%d 条 / %.1f 秒"
+                % (cat, len(data.get("items") or []), time.time() - t0))
+        except Exception as e:
+            log("片库预热 %s 失败：%s" % (cat, e))
+        time.sleep(1.0)
+
+
+def browse_warm_loop():
+    """启动预热 + 常驻刷新。分类映射先建好，否则浏览会拿到半截映射。"""
+    try:
+        catmap_warm()
+        log("片库预热启动")
+    except Exception as e:
+        log("片库预热启动失败：%s" % e)
+    while True:
+        try:
+            browse_warm()
+        except Exception:
+            pass
+        time.sleep(300)
 
 
 _REFRESHING = False

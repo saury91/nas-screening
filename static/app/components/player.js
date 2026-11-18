@@ -6,6 +6,7 @@ import { api } from '../core/api.js';
 import { openCastSheet } from '../core/cast.js';
 import { getToken } from '../core/auth.js';
 import { setFocus, clearFocus } from '../core/focus.js';
+import { withBase } from '../core/base.js';
 
 let art = null;
 let state = null;      // { item, si, ei, isLive }
@@ -169,8 +170,8 @@ function ensureLibs() {
     s.onerror = () => rej(new Error(src));
     document.head.appendChild(s);
   });
-  libsPromise = load('/static/artplayer.js')
-    .then(() => (window.Hls ? null : load('/static/hls.js')))
+  libsPromise = load(withBase('/static/artplayer.js'))
+    .then(() => (window.Hls ? null : load(withBase('/static/hls.js'))))
     .catch(e => { libsPromise = null; throw e; });
   return libsPromise;
 }
@@ -784,7 +785,7 @@ function mountArt(url, position) {
   applyClickGesture();
   const isM3u8 = isHlsUrl(url);
   // 走同源代理：采集站几乎都不带 CORS 头，直连必被浏览器拦
-  const src = isM3u8 ? '/api/proxy?u=' + encodeURIComponent(url) : url;
+  const src = isM3u8 ? withBase('/api/proxy?u=' + encodeURIComponent(url)) : url;
   // 透明 1x1：Artplayer 不传 poster 时会用自带的「灰底大播放键」占位图，
   // 那个白底跟暗色界面完全不搭，缓冲/换集时尤其明显
   const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -1224,7 +1225,7 @@ function playUrl(url, position) {
   $('.pl-stage')?.classList.remove('playing');
   $('#pl-poster')?.classList.remove('gone');
   const isM3u8 = isHlsUrl(url);
-  const src = isM3u8 ? '/api/proxy?u=' + encodeURIComponent(url) : url;
+  const src = isM3u8 ? withBase('/api/proxy?u=' + encodeURIComponent(url)) : url;
   try {
     art.type = isM3u8 ? 'm3u8' : '';
     art.switchUrl(src);

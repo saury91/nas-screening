@@ -7,6 +7,7 @@ import { syncFavs, store } from './core/store.js';
 import { initNav, markActive, openSearch, closeSearch, searchVisible } from './components/nav.js';
 import { initMusicPlayer } from './components/musicplayer.js';
 import { startReceiver } from './core/cast.js';
+import { withBase } from './core/base.js';
 
 
 import * as home from './pages/home.js';
@@ -189,6 +190,9 @@ async function boot() {
   window.addEventListener('app:fresh', () => {
     if (!lastRoute) return;
     if (document.querySelector('.playerlayer')) return;      // 正在播，别动
+    // 分类页自己会更新（fetchPage 拿到新数据就重画）：整页重建会把滚动位置
+    // 顶回顶部、还把已经画好的封面全丢掉重下一遍，视觉上就是"闪一下 + 卡"
+    if (parseRoute().path === '/browse') return;
     if (Date.now() - lastFreshAt < 8000) return;               // 8 秒内只刷一次
     clearTimeout(freshTimer);
     freshTimer = setTimeout(() => {
@@ -211,7 +215,7 @@ async function boot() {
   // 电视端把自己注册成投屏接收端；收到指令就用同一套播放器播
   // NAS 中转与局域网直连共用：拿到 {item, si, ei, position} 就起播
   const playCast = (cmd) => {
-    import('/static/app/components/player.js').then(({ openPlayer }) => {
+    import(withBase('/static/app/components/player.js')).then(({ openPlayer }) => {
       const item = cmd.item && cmd.item.sources && cmd.item.sources.length
         ? cmd.item
         : { name: cmd.title || '投屏播放',
@@ -237,7 +241,7 @@ async function boot() {
   startRouter();
   syncFavs();
   // 提前把搜索热词拿好，按 / 时零等待
-  fetch('/api/suggest').catch(() => {});
+  fetch(withBase('/api/suggest')).catch(() => {});
   // 键盘任意方向键后，给个可见的焦点提示
   document.addEventListener('keydown', e => {
     if (e.key.startsWith('Arrow') && !document.querySelector('.focused')) {

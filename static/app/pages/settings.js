@@ -7,6 +7,7 @@ import { store } from '../core/store.js';
 import { cacheDrop } from '../core/cache.js';
 import { isAdmin } from '../core/auth.js';
 import { isApp } from '../core/platform.js';
+import { withBase } from '../core/base.js';
 
 // 第四列 scope：user = 消费端也能看，admin = 只在 PC 管理台出现
 const NAV = [
@@ -729,9 +730,9 @@ async function backupPanel(panel) {
       <h4>导出</h4>
       <p class="hint">两种都行：完整版连直播频道一起带走，配置源版只留片源和种子（体积小、更适合分享）。</p>
       <div class="row" style="gap:10px;flex-wrap:wrap">
-        <a class="btn primary" href="/api/config/export?channels=1" data-focus>
+        <a class="btn primary" href="${withBase('/api/config/export?channels=1')}" data-focus>
           ${icon('download')}下载完整配置</a>
-        <a class="btn" href="/api/config/export?channels=0" data-focus>只要配置源</a>
+        <a class="btn" href="${withBase('/api/config/export?channels=0')}" data-focus>只要配置源</a>
       </div>
     </div>
 

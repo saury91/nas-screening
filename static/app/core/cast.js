@@ -2,6 +2,7 @@
 // 电视端自己就是接收器（同一套网页），不做 DLNA/Cast。
 import { $, esc, icon, toast } from './dom.js';
 import { getToken } from './auth.js';
+import { withBase } from './base.js';
 import { isTv, isPhone } from './platform.js';
 
 const ID_KEY = 'pr.dev';
@@ -26,7 +27,7 @@ function deviceId() {
 }
 
 async function post(path, body) {
-  const res = await fetch(path, {
+  const res = await fetch(withBase(path), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -40,7 +41,7 @@ async function post(path, body) {
 }
 
 async function getJSON(path) {
-  const res = await fetch(path, {
+  const res = await fetch(withBase(path), {
     headers: getToken() ? { 'X-Token': getToken() } : {},
   });
   const d = await res.json().catch(() => ({}));

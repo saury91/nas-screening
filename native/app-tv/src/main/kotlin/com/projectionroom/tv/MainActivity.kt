@@ -265,6 +265,18 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    /**
+     * 首页确认「退出应用」后才走这里。
+     *
+     * 不用 moveTaskToBack：那是「退到后台」，服务照跑、进程照在，
+     * 电视上看着像关了，其实投屏接收和音乐都还在占着。
+     * finishAndRemoveTask 把任务从最近使用里一起摘掉，重进就是从首屏开始；
+     * 音乐/投屏的收摊已经在 onDestroy(isFinishing) 里做过了，这里不重复。
+     */
+    private fun quitApp() {
+        finishAndRemoveTask()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 联调入口：`am start … -e nas http://10.0.2.2:8899` 直接指定 NAS。
         // 必须在下面的 CastService.start 之前落盘 —— 投屏服务启动时才去读地址，
@@ -1076,6 +1088,26 @@ class MainActivity : ComponentActivity() {
                         is Screen.Settings -> cur.from
                         is Screen.Pair -> cur.from
                         else -> Screen.Home
+                    }
+                }
+
+                // 首页再按返回 = 退出 App。必须问一句：
+                // 电视上遥控器返回键就在手边，误按一下整个 App 连同投屏接收、后台音乐
+                // 一起没了，重开要等 NAS 发现 + 首屏加载。
+                var confirmExit by remember { mutableStateOf(false) }
+                BackHandler(enabled = screen == Screen.Home && !confirmExit) {
+                    confirmExit = true
+                }
+
+                if (confirmExit) {
+                    androidx.compose.ui.window.Dialog(onDismissRequest = { confirmExit = false }) {
+                        com.projectionroom.ui.component.TvExitDialog(
+                            onCancel = { confirmExit = false },
+                            onConfirm = {
+                                confirmExit = false
+                                quitApp()
+                            },
+                        )
                     }
                 }
 

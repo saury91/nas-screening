@@ -2,6 +2,7 @@
 import { getToken, needLogin } from './auth.js';
 import { load as cacheLoad, save as cacheSave, setOffline, indexTitles } from './offline.js';
 import * as agg from './aggregate.js';
+import { withBase } from './base.js';
 
 // NAS 不可用时，用本地配置包自己去问采集站
 async function tryAggregate(path) {
@@ -45,7 +46,9 @@ async function revalidate(path, init) {
   if (refreshing.has(path)) return;
   refreshing.add(path);
   try {
-    const res = await fetch(path, init);
+    // 不跟着页面一起取消：切标签时页面会 abort 自己的请求，
+    // 但这次后台刷新要继续跑完并写回缓存，否则下次进来还是旧数据、还得再聚合一遍
+    const res = await fetch(withBase(path), { ...init, signal: undefined });
     if (!res.ok) return;
     const ct = res.headers.get('Content-Type') || '';
     const data = ct.includes('json') ? await res.json() : await res.text();
@@ -81,7 +84,7 @@ async function request(path, { method = 'GET', body, signal } = {}) {
 
   let res;
   try {
-    res = await fetch(path, init);
+    res = await fetch(withBase(path), init);
   } catch (e) {
     // 连不上 NAS：交给上层显示「离线模式」横幅，同时让页面用缓存数据继续渲染
     setOffline(true);

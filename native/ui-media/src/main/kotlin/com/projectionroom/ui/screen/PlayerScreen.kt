@@ -523,6 +523,14 @@ fun PlayerScreen(
     /** 跳过片头按完自增一次：触发下面的还焦（按钮本身随即消失） */
     var refocusPlay by remember { mutableIntStateOf(0) }
 
+    // 每颗「能把面板叫出来」的图标各配一个落点。
+    // 面板关掉后焦点必须还给**按下去的那一颗**：之前一律回播放键，
+    // 用户想连调两次定时/字幕，得重新往右按四格，遥控器上很恼人。
+    val sleepFocus = remember { FocusRequester() }
+    val tracksFocus = remember { FocusRequester() }
+    val infoFocus = remember { FocusRequester() }
+    val settingsFocus = remember { FocusRequester() }
+
     fun seekBy(deltaMs: Long) {
         if (live) return
         val max = exo.duration.coerceAtLeast(0L)
@@ -1095,8 +1103,7 @@ fun PlayerScreen(
     // 焦点抢回根节点；根节点再把方向键当成「唤出控制层」吃掉 —— 表现为面板里
     // 怎么按都不动、行上的焦点环永远画不出来。
     val overlayOpen = trackOpen || infoOpen || sleepOpen || castOpen || sidePanel || panel != Panel.None
-    LaunchedEffect(controlsVisible, overlayOpen) {
-        if (overlayOpen) return@LaunchedEffect
+    LaunchedEffect(controlsVisible) {
         if (!controlsVisible) {
             // 控制层收起时一并退出调进度模式，否则左右键会继续被它接管
             seekMode = false
@@ -1105,12 +1112,42 @@ fun PlayerScreen(
             } else {
                 focusManager.clearFocus()
             }
-        } else if (isTv) {
+        } else if (isTv && !overlayOpen) {
             // 不能拿 requestFocus 没抛异常当成功：控制层刚组合时焦点树还没稳，
             // 请求会"成功但没落地"。多按几次，最后一次一定落在已就绪的节点上。
             repeat(4) {
                 delay(80)
                 runCatching { playFocus.requestFocus() }
+            }
+        }
+    }
+
+    // 浮层关掉后，焦点得有人接住：还给把它叫出来的那颗按钮（✕、返回键、
+    // 点选项自动关，三条路都走这里）。
+    //
+    // 不做成「监听 overlayOpen 变化」的 effect：真机上那条路边沿会丢，实测面板关掉后
+    // 整棵树的焦点就地消失 —— 光秃秃一根环都没有，遥控器按下去像死了。
+    // 改成关闭动作里直接调用，时序上唯一确定的事就是「我刚刚关了谁」。
+    val scope = rememberCoroutineScope()
+    /** 当前是否还有浮层开着。必须现读状态，读组合期的 overlayOpen 局部变量会拿到常量 */
+    fun overlayOpenNow(): Boolean =
+        trackOpen || infoOpen || sleepOpen || castOpen || sidePanel || panel != Panel.None
+    fun backToBar(target: FocusRequester?) {
+        if (!isTv) return
+        val t = target ?: playFocus
+        scope.launch {
+            // 面板刚被移除时焦点树还在重建，这时 requestFocus 不报错也不生效，多发几帧
+            repeat(6) {
+                delay(80)
+                // 期间又开了面板，或控制层自己收起，就别再抢焦点
+                if (overlayOpenNow()) return@launch
+                // 控制层没了就没有「刚才那颗按钮」可言了：把焦点还给整棵树，
+                // 至少方向键还能把控制层叫回来（否则焦点悬空，遥控器静默）
+                if (!controlsVisible) {
+                    runCatching { rootFocus.requestFocus() }
+                    return@launch
+                }
+                runCatching { t.requestFocus() }
             }
         }
     }
@@ -1122,18 +1159,6 @@ fun PlayerScreen(
         // 节点移除和重新组合不在同一帧，多请求几次，最后一发一定落在重建完的树上
         repeat(3) {
             delay(80)
-            runCatching { playFocus.requestFocus() }
-        }
-    }
-
-    // 抽屉关掉后焦点得有个主人：留在刚被移除的节点上，遥控器会静默几秒，
-    // 表现就是「按了没反应」。还回播放键，和唤出控制层时的落点一致。
-    LaunchedEffect(sidePanel) {
-        if (sidePanel || !controlsVisible || !isTv) return@LaunchedEffect
-        // 抽屉刚被移除时焦点树还在重建，这时 requestFocus 不会报错也不生效，
-        // 所以要等它重建完再多请求几次，否则遥控器按 OK 像没反应。
-        repeat(5) {
-            delay(90)
             runCatching { playFocus.requestFocus() }
         }
     }
@@ -1160,16 +1185,26 @@ fun PlayerScreen(
     }
 
     // 面板开着时，返回键先关面板 —— 否则遥控器上按返回直接把整页播掉了，
-    // 用户只是想退出「播放设置」
-    BackHandler(enabled = !locked) {
+    // 用户只是想退出「播放设置」。
+    // 七个开关必须一个不漏地列在这里：之前睡眠定时没进名单，打开定时面板按返回
+    // 会直接把整页播掉，而且那个面板连 ✕ 都没有（只能靠点空白关）—— 两头堵死。
+    fun closeOverlay(): Boolean {
+        // 叠在上面的先关：mount 顺序是 sidePanel → panel → sleep → info → track，
+        // 最后画的最先关，和视觉层级一致
         when {
-            trackOpen -> trackOpen = false
-            infoOpen -> infoOpen = false
-            sidePanel -> sidePanel = false
-            panel != Panel.None -> panel = Panel.None
-            castOpen -> castOpen = false
-            else -> onBack()
+            trackOpen -> { trackOpen = false; backToBar(tracksFocus) }
+            infoOpen -> { infoOpen = false; backToBar(infoFocus) }
+            sleepOpen -> { sleepOpen = false; backToBar(sleepFocus) }
+            castOpen -> { castOpen = false; backToBar(null) }
+            sidePanel -> { sidePanel = false; backToBar(settingsFocus) }
+            panel != Panel.None -> { panel = Panel.None; backToBar(null) }
+            else -> return false
         }
+        return true
+    }
+
+    BackHandler(enabled = !locked) {
+        if (!closeOverlay()) onBack()
     }
 
     Box(
@@ -1200,14 +1235,7 @@ fun PlayerScreen(
                 when (e.key) {
                     // 返回键走预览事件：抽屉里点着格子时 BackHandler 收不到
                     // （实测按 BACK 一次完全没反应，得按两次），在根节点先截住
-                    Key.Back -> when {
-                        trackOpen -> { trackOpen = false; true }
-                        infoOpen -> { infoOpen = false; true }
-                        sidePanel -> { sidePanel = false; true }
-                        panel != Panel.None -> { panel = Panel.None; true }
-                        castOpen -> { castOpen = false; true }
-                        else -> false
-                    }
+                    Key.Back -> closeOverlay()
                     // 收起状态：左右 = 快退/快进（步长同双击设置）；上下/OK = 唤出控制层
                     Key.DirectionLeft -> if (controlsVisible) false else { seekBy(-PlaybackPrefs.doubleTapMs); true }
                     Key.DirectionRight -> if (controlsVisible) false else { seekBy(PlaybackPrefs.doubleTapMs); true }
@@ -1634,6 +1662,10 @@ fun PlayerScreen(
                             refreshTracks()
                             trackOpen = true
                         },
+                        sleepFocus = sleepFocus,
+                        tracksFocus = tracksFocus,
+                        infoFocus = infoFocus,
+                        settingsFocus = settingsFocus,
                         // 电视专用：药丸在遥控器上落不了焦，必须有个在焦点树里的入口。
                         // 手机不加 —— 底栏右侧已经 5 个按钮，360dp 会挤出去
                         onSkipIntro = if (isTv && SkipRule.shouldShowIntro(position, skipMark.introMs, live)) {
@@ -1682,12 +1714,14 @@ fun PlayerScreen(
                                 epIndex = epIndex.coerceIn(0, lineEpCount(it) - 1)
                             }
                             sidePanel = false
+                            backToBar(settingsFocus)
                         },
                         onSelectEp = {
                             epIndex = it
                             sidePanel = false
+                            backToBar(settingsFocus)
                         },
-                        onClose = { sidePanel = false },
+                        onClose = { sidePanel = false; backToBar(settingsFocus) },
                         modifier = Modifier.align(Alignment.CenterEnd),
                     )
                 }
@@ -1706,13 +1740,15 @@ fun PlayerScreen(
                             speed = it
                             exo.setPlaybackSpeed(it)
                             panel = Panel.None
+                            backToBar(null)
                         },
                         onLine = {
                             lineIndex = it
                             epIndex = epIndex.coerceIn(0, lineEpCount(it) - 1)
                             panel = Panel.None
+                            backToBar(null)
                         },
-                        onDismiss = { panel = Panel.None },
+                        onDismiss = { panel = Panel.None; backToBar(null) },
                     )
                 }
 
@@ -1721,7 +1757,7 @@ fun PlayerScreen(
                     PlayerSleepSheet(
                         modifier = Modifier.align(Alignment.Center),
                         live = live,
-                        onClose = { sleepOpen = false },
+                        onClose = { sleepOpen = false; backToBar(sleepFocus) },
                     )
                 }
 
@@ -1739,7 +1775,7 @@ fun PlayerScreen(
                                 PlaybackPrefs.setDecoder(context, m)
                             }
                         },
-                        onClose = { infoOpen = false },
+                        onClose = { infoOpen = false; backToBar(infoFocus) },
                         modifier = Modifier.align(Alignment.Center),
                     )
                 }
@@ -1789,7 +1825,7 @@ fun PlayerScreen(
                             outroDismissed = false
                             SkipStore.remember(context, vod.name, next)
                         },
-                        onClose = { trackOpen = false },
+                        onClose = { trackOpen = false; backToBar(tracksFocus) },
                         modifier = Modifier.align(Alignment.Center),
                     )
                 }
@@ -1866,9 +1902,10 @@ fun PlayerScreen(
                     castOpen = false
                     hint = "已停止投屏"
                 },
-                onClose = { castOpen = false },
+                onClose = { castOpen = false; backToBar(null) },
             )
         }
+
     }
 }
 
@@ -2061,6 +2098,14 @@ private fun PlayerBottomBar(
     /** 字幕开着时圆钮变金：否则「字幕有没有开」只能点进去才知道 */
     subtitleOn: Boolean = false,
     onTracks: () -> Unit = {},
+    /**
+     * 右侧四颗「叫面板」的图标各带一个落点：
+     * 面板关掉后焦点要回到被按下去的那一颗，而不是回播放键（见 PlayerScreen 的还焦 effect）。
+     */
+    sleepFocus: FocusRequester? = null,
+    tracksFocus: FocusRequester? = null,
+    infoFocus: FocusRequester? = null,
+    settingsFocus: FocusRequester? = null,
     /**
      * 片头区间内才传入：电视端唯一能落焦的「跳过片头」入口。
      *
@@ -2277,16 +2322,19 @@ private fun PlayerBottomBar(
                     // 倍速对直播流没有意义（只会让音频越拖越远），直接不出现
                     if (!live) {
                         CircleTextChip(speedLabel(speed), onSpeed, size = 52.dp)
-                        // 定时开着时图标变金：不然「有没有设过」完全看不出来
-                        val sleepOn = SleepTimer.mode != SleepTimer.Mode.Off
-                        CircleIcon(
-                            PlayerIcons.Timer,
-                            if (sleepOn) "睡眠定时 · ${SleepTimer.remainingText()}" else "睡眠定时",
-                            onSleep,
-                            tint = if (sleepOn) ProomColor.accent else null,
-                            size = 52.dp,
-                        )
                     }
+                    // 直播也会看着看着睡着，定时不能跟着倍速一起消失（原来这两颗包在
+                    // 同一个 if 里，直播底栏就少了定时，和剧集页对不上）
+                    // 定时开着时图标变金：不然「有没有设过」完全看不出来
+                    val sleepOn = SleepTimer.mode != SleepTimer.Mode.Off
+                    CircleIcon(
+                        PlayerIcons.Timer,
+                        if (sleepOn) "睡眠定时 · ${SleepTimer.remainingText()}" else "睡眠定时",
+                        onSleep,
+                        tint = if (sleepOn) ProomColor.accent else null,
+                        size = 52.dp,
+                        focusRequester = sleepFocus,
+                    )
                     // 直播也留这个入口：体育台的双语解说、赛事字幕都在音轨/字幕轨里
                     CircleIcon(
                         PlayerIcons.Subtitle,
@@ -2294,14 +2342,22 @@ private fun PlayerBottomBar(
                         onTracks,
                         tint = if (subtitleOn) ProomColor.accent else null,
                         size = 52.dp,
+                        focusRequester = tracksFocus,
                     )
                     // 直播也留这个入口：IPTV 卡不卡、码流多大，同样要能看见
-                    CircleIcon(PlayerIcons.Info, "播放信息", onInfo, size = 52.dp)
+                    CircleIcon(
+                        PlayerIcons.Info,
+                        "播放信息",
+                        onInfo,
+                        size = 52.dp,
+                        focusRequester = infoFocus,
+                    )
                     CircleIcon(
                         PlayerIcons.More,
                         if (live) "换源" else "选集与线路",
                         onSettings,
                         size = 52.dp,
+                        focusRequester = settingsFocus,
                     )
                 }
             }
@@ -2872,6 +2928,8 @@ private fun CircleIcon(
     tint: Color? = null,
     /** 底栏里传 52dp 把一排放整齐；不传就按 10-foot 的 56dp / 手机 48dp */
     size: Dp? = null,
+    /** 这颗按钮叫出的面板关掉后，焦点要回到这里（见 PlayerScreen 的还焦 effect） */
+    focusRequester: FocusRequester? = null,
 ) {
     // 电视上 40dp 的圆钮在 3 米外只有指甲盖大：抬到 56dp，图标同步放大
     val tv = LocalProomTv.current
@@ -2881,6 +2939,7 @@ private fun CircleIcon(
             // 手机侧原来是 40dp 的裸图标：热区不够，且压在亮画面上（星空、白底字幕）
             // 几乎看不见。48dp + 一层半透明底，和电视侧一样有「这是个按钮」的样子
             .size(box)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .tvFocusRing(CircleShape, ringWidth = 2.dp, zoom = 1f)
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = if (enabled) 0.30f else 0.16f))
@@ -3075,8 +3134,19 @@ private fun PlayerSleepSheet(
     live: Boolean,
     onClose: () -> Unit,
 ) {
-    val options = listOf(15, 30, 45, 60)
+    val tv = LocalProomTv.current
     val firstFocus = rememberSheetFirstFocus()
+    // 这个面板原来**一个关闭控件都没有**：只有点面板外的空白才关得掉，
+    // 遥控器上等于没有出口（返回键又漏在 back 名单外，一按直接退出播放页）。
+    // ✕ 和下面那列选项不在同一条轴上，一维焦点搜索找不到它，所以要显式接链：
+    // ✕ ↓ 第一项、第一项 ↑ ✕，否则上了 ✕ 就下不来。
+    val closeFocus = remember { FocusRequester() }
+    val shape = RoundedCornerShape(16.dp)
+    val options = buildList {
+        listOf(15, 30, 45, 60).forEach { add(SleepOption.Minutes(it)) }
+        if (!live) add(SleepOption.TrackEnd)
+        if (SleepTimer.mode != SleepTimer.Mode.Off) add(SleepOption.Cancel)
+    }
     Box(
         modifier
             .fillMaxSize()
@@ -3086,44 +3156,62 @@ private fun PlayerSleepSheet(
     ) {
         Column(
             Modifier
-                .width(220.dp)
+                .width(if (tv) 380.dp else 300.dp)
                 .focusGroup()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black.copy(alpha = 0.9f))
+                .clip(shape)
+                .background(Color.Black.copy(alpha = 0.93f))
+                .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
                 // 吃掉落在面板空白处的点击，别穿透到遮罩上直接关掉
                 .pointerInput(Unit) { detectTapGestures { } }
-                .padding(vertical = 10.dp),
+                .padding(bottom = if (tv) 14.dp else 10.dp),
         ) {
-            Text(
-                "睡眠定时",
-                color = Color.White.copy(alpha = 0.5f),
-                fontSize = ProomType.label.fontSize,
-                modifier = Modifier.padding(start = 14.dp, bottom = 2.dp),
-            )
+            PlayerSheetHeader("睡眠定时", tv, closeFocus, firstFocus, onClose)
             Text(
                 if (SleepTimer.mode == SleepTimer.Mode.Off) "最后 30 秒渐弱，到点暂停"
                 else "${SleepTimer.remainingText()} 后停止",
-                color = Color.White.copy(alpha = 0.32f),
-                fontSize = ProomSp(10.5.sp),
-                modifier = Modifier.padding(start = 14.dp, bottom = 6.dp),
+                color = Color.White.copy(alpha = 0.38f),
+                fontSize = ProomSp(11.sp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 6.dp),
             )
-            options.forEachIndexed { i, m ->
-                PanelRow(
-                    label = "$m 分钟",
-                    selected = SleepTimer.mode == SleepTimer.Mode.Timer && SleepTimer.minutes == m,
-                    modifier = if (i == 0) Modifier.focusRequester(firstFocus) else Modifier,
-                ) { SleepTimer.start(m); onClose() }
-            }
-            if (!live) {
-                PanelRow(
-                    label = "听完这集",
-                    selected = SleepTimer.mode == SleepTimer.Mode.TrackEnd,
-                ) { SleepTimer.startTrackEnd(); onClose() }
-            }
-            if (SleepTimer.mode != SleepTimer.Mode.Off) {
-                PanelRow(label = "关闭定时", selected = false) { SleepTimer.cancel(); onClose() }
-            }
+            // 三列等宽：六个选项两行放完，比原来一列六行矮了一半多。
+            // 直播只有 4 档（没有「听完这集」）：四列排一行，别让第二行只剩一个
+            ChipGrid(
+                items = options,
+                columns = if (options.size == 4) 4 else 3,
+                label = { it.label },
+                selected = { it.selected },
+                onPick = { it.apply(); onClose() },
+                firstModifier = Modifier
+                    .focusProperties { up = closeFocus }
+                    .focusRequester(firstFocus),
+            )
         }
+    }
+}
+
+/** 睡眠定时的候选项：分钟档 / 听完这集 / 关闭定时，三种收口各带自己的落点 */
+private sealed interface SleepOption {
+    val label: String
+    val selected: Boolean
+    fun apply()
+
+    data class Minutes(val minutes: Int) : SleepOption {
+        override val label get() = "$minutes 分钟"
+        override val selected get() =
+            SleepTimer.mode == SleepTimer.Mode.Timer && SleepTimer.minutes == minutes
+        override fun apply() = SleepTimer.start(minutes)
+    }
+
+    object TrackEnd : SleepOption {
+        override val label get() = "听完这集"
+        override val selected get() = SleepTimer.mode == SleepTimer.Mode.TrackEnd
+        override fun apply() = SleepTimer.startTrackEnd()
+    }
+
+    object Cancel : SleepOption {
+        override val label get() = "关闭定时"
+        override val selected get() = false
+        override fun apply() = SleepTimer.cancel()
     }
 }
 

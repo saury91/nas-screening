@@ -8,6 +8,7 @@
 
 import { load, save } from './offline.js';
 import { plainText } from './dom.js';
+import { withBase } from './base.js';
 
 const BUNDLE_KEY = 'config:bundle';
 const BUNDLE_TTL = 30 * 86400 * 1000;
@@ -19,7 +20,7 @@ export async function getBundle() {
 
 export async function syncBundle() {
   try {
-    const r = await fetch('/api/config/bundle');
+    const r = await fetch(withBase('/api/config/bundle'));
     if (!r.ok) return null;
     const b = await r.json();
     if (b && Array.isArray(b.sources) && b.sources.length) {
