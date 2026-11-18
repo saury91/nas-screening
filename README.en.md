@@ -13,22 +13,11 @@ Version **0.15.0** · One codebase for Web / Android phone / Android TV
 ## Contents
 
 - [1. Scope](#1-scope)
-- [2. Feature list](#2-feature-list)
-- [3. Client matrix](#3-client-matrix)
-- [4. Architecture](#4-architecture)
-  - [4.1 Layers and dependency direction](#41-layers-and-dependency-direction)
-  - [4.2 One boundary: the NAS does four things](#42-one-boundary-the-nas-does-four-things)
-  - [4.3 Standalone operation: the NAS being off is normal](#43-standalone-operation-the-nas-being-off-is-normal)
-  - [4.4 Sync: who owns what](#44-sync-who-owns-what)
-  - [4.5 How the clients find each other](#45-how-the-clients-find-each-other)
-  - [4.6 Why this split](#46-why-this-split)
-- [5. Screenshots](#5-screenshots)
-- [6. Deployment](#6-deployment)
-- [7. First run](#7-first-run)
-- [8. Environment variables](#8-environment-variables)
-- [9. Project layout](#9-project-layout)
-- [10. Development and tests](#10-development-and-tests)
-- [11. License and content notice](#11-license-and-content-notice)
+[1. Scope](#1-scope) · [2. Feature list](#2-feature-list) · [3. Client matrix](#3-client-matrix) ·
+[4. Architecture](#4-architecture) · [5. Screenshots](#5-screenshots) · [6. Deployment](#6-deployment) ·
+[7. First run](#7-first-run) · [8. Environment variables](#8-environment-variables) ·
+[9. Project layout](#9-project-layout) · [10. Development and tests](#10-development-and-tests) ·
+[11. License and content notice](#11-license-and-content-notice)
 
 ---
 
@@ -36,11 +25,11 @@ Version **0.15.0** · One codebase for Web / Android phone / Android TV
 
 | Item | Description |
 |---|---|
-| What it is | A unified player frontend for films, live TV and music, plus a thin backend that only distributes config and updates |
+| What it is | A unified player frontend for films, live TV and music, plus a thin backend limited to config distribution and self-update |
 | What it is not | A content site: it does not scrape, store or distribute any work, and ships no subscriptions |
 | Content sources | Scraping-site APIs, channel lists and music services supplied by the user |
 | Bundled config | None. The config bundle is empty; no connection details are built in |
-| Nature | A self-use project published as-is, non-commercial, no operations, no support commitment |
+| Nature | Personal project published as-is; non-commercial, no operations or support commitment |
 | Runtime | Build-free frontend: `python3 app.py`, no pip / Node / bundling |
 | Offline | With the NAS off, clients still search, browse and play using the last synced config |
 
@@ -83,11 +72,11 @@ Version **0.15.0** · One codebase for Web / Android phone / Android TV
 | Capability | Notes |
 |---|---|
 | Gestures and remote | Tap to pause/play, double-tap for fullscreen; the TV uses D-pad focus, OK, BACK |
-| Resume | Progress saved every few seconds; picks up where you stopped |
-| Buffering state | Blurred poster, three bouncing dots, live bitrate — never a spinner |
+| Resume | Progress recorded per second; playback resumes from the last position |
+| Buffering state | Blurred poster, bouncing dots and live bitrate; no spinner |
 | Picture-in-picture | Browse, search and switch titles in a small window; closing it ends playback |
-| Subtitles | App only: toggle and switch embedded tracks, attach local SRT / VTT / ASS / TTML; remembered per title + episode; four size steps |
-| Audio tracks | App only: pick between multiple audio tracks (dual-language commentary, dub vs. original); defaults to automatic |
+| Subtitles | App: switch embedded tracks and attach local SRT / VTT / ASS / TTML, remembered per title + episode, four size steps. Web: external files only, embedded tracks are not parsed |
+| Audio tracks | App: manual selection between multiple tracks; defaults to automatic |
 
 ### 2.5 Casting
 
@@ -118,18 +107,11 @@ If LAN discovery is blocked by the router, pair via the QR code and PIN shown on
 
 | Capability | Notes |
 |---|---|
-| Standalone apps | Search, browse and play with the NAS off, using the last synced config |
-| No accounts | Open and go — no login, no PIN (`NO_AUTH=1` by default) |
-| Local cache | Page data and title index live on device; render first, refresh after |
+| Offline use | Search, browse and play with the NAS off, using the last synced config |
+| Local first | Page data and title index live on device; render first, refresh after |
 | Zero third-party deps | No build step, self-hosted fonts, no CDN references |
 
-### 2.8 Interface boundary
-
-The NAS serves four interface groups only: sync (favorites / history / library), cast relay,
-update (version check and APK download) and config (bundle plus the channel table it carries).
-Everything else is resource loading and goes from the client straight to the source — never through the NAS.
-The one exception is the HLS playback proxy (`/api/proxy`): to get around CORS and Referer limits, playlists
-and segments are relayed by the NAS, which refuses private addresses by default (`PROXY_ALLOW_PRIVATE=0`).
+Mechanisms are described in [4.3](#43-standalone-operation).
 
 ---
 
@@ -157,8 +139,7 @@ and segments are relayed by the NAS, which refuses private addresses by default 
 
 ## 4. Architecture
 
-The three clients are not three skins over one runtime: the web app runs on the NAS, the apps run on
-the devices, and what they share is **protocol and configuration**, not a process.
+The web app runs on the NAS, the apps run on the devices; they share protocol and configuration, not a runtime.
 
 ### 4.1 Layers and dependency direction
 
@@ -174,7 +155,7 @@ zero-build ES modules           │                            │
 server/ (Python standard library, no framework, no pip)
 ```
 
-| Layer | Location | Responsibility | Hard rule |
+| Layer | Location | Responsibility | Constraint |
 |---|---|---|---|
 | Protocol | `native/core` | MacCMS parsing, cross-site merge, title normalisation, quality buckets, cast payloads | Pure Kotlin, no Android deps, thickest test coverage |
 | Platform | `native/data` | Storage, config bundle, NAS gate, favourite sync, discovery, DLNA | Depends on `core` only |
@@ -183,52 +164,52 @@ server/ (Python standard library, no framework, no pip)
 | Per-client UI | `ui-phone` / `ui-tv` | Gestures vs 10-foot focus ring | No cross references |
 | Web | `static/app` + `server/` | Same `/api/*` semantics as the apps | Zero build, edit and refresh |
 
-### 4.2 One boundary: the NAS does four things
+### 4.2 Scope of the NAS
 
-| Through the NAS | Endpoints | Why it must |
+| Responsibility | Endpoints | Why it must be on the NAS |
 |---|---|---|
-| Sync | `/api/fav` `/api/history` `/api/library` | Every device sees the same favourites and progress |
+| Sync | `/api/fav` `/api/history` `/api/library` | Every device shares one set of favourites and progress |
 | Cast | `/api/cast/*` | Relay when phone and TV are on different subnets |
 | Update | `/api/app/latest` `/api/app/download` | Version check and APK delivery |
-| Config | `/api/config/bundle` | Change a source once, all three clients follow |
+| Config | `/api/config/bundle` | A source change takes effect on all three clients |
 
-Everything else is **resource loading** — home, library, search, detail, playback, covers, music —
-and goes from the client straight to the source. Not dogma: aggregating on the NAS makes the NAS the
-bottleneck, and worse, one NAS shutdown takes every client down with it.
+Everything else is resource loading (home, library, search, detail, streams, playback, covers, music)
+and goes from the client straight to the source. Aggregating it on the NAS would make the NAS the
+bottleneck and make every client depend on its uptime.
 
-The single exception is the web HLS proxy `/api/proxy`: browsers cannot get past CORS and Referer
-rules, so a same-origin relay is unavoidable (private addresses refused by default).
+The one exception is the web HLS proxy `/api/proxy`: browser CORS and Referer rules cannot be bypassed,
+so a same-origin relay is required; private destinations are refused by default (`PROXY_ALLOW_PRIVATE=0`).
 
-### 4.3 Standalone operation: the NAS being off is normal
+### 4.3 Standalone operation
 
-All three pillars must hold, otherwise the client is just a shell that needs a NAS:
+All three mechanisms are required; missing one degrades the client to a NAS-dependent shell:
 
-| Pillar | How | Result |
+| Mechanism | Implementation | Effect |
 |---|---|---|
-| Config on device | Atomic write (`.bak` → `.tmp` → rename), fall back to `.bak` | Works forever after one sync |
-| Cache never expires | No TTL; freshness only decides whether to refresh **in the background** | Home is never blank because the NAS is off |
-| Local primary store | Favourites and progress written locally first, pushed when the NAS is reachable | A month offline loses nothing |
+| Config on device | Atomic write (`.bak` → `.tmp` → rename), fall back to `.bak` | Usable indefinitely after one sync |
+| Cache never expires | No TTL; freshness only decides whether to refresh in the background | Home still has content while the NAS is offline |
+| Local primary store | Favourites and progress written locally first, pushed when the NAS is online | No loss during long offline periods; reconciled on reconnect |
 
-The home feed is assembled locally too: first page of each of five categories → merged and deduped →
-sorted by year. The snapshot keeps display fields only (`lines` dropped, 1.8 MB → 53 KB),
-1.4 s cold start; the NAS is asked only when nothing can be assembled.
+The home feed is assembled locally as well: first page of each of five categories, merged, deduplicated
+and sorted by year. The snapshot keeps display fields only (`lines` dropped, 1.8 MB → 53 KB) and reaches
+first paint in 1.4 s; the NAS is queried only when local assembly fails.
 
-### 4.4 Sync: who owns what
+### 4.4 Primary store and sync
 
-| Data | Primary | How it syncs | The trap |
+| Data | Primary | How it syncs | Constraint |
 |---|---|---|---|
-| Sources / live / music config | NAS | Compare version, rewrite only on change | All three paths (seed / sync now / restore built-in) go through one `ConfigStore.save` |
-| Favourites | **Device** | Write local (`pendingFav=true`) → push → clear flag | The NAS side is a **toggle**: pull the current state first and skip when already equal, otherwise "unfavourite" flips into "favourite again" |
-| Playback history | **Device** | Same, keyed by title + episode | Progress written per second, last write wins |
-| Home feed | Device | Snapshot rebuilt in background after 15 min | Ask the NAS only when local assembly fails |
+| Sources / live / music config | NAS | Compare version, rewrite only on change | Seeding, manual sync and restore-built-in all go through one `ConfigStore.save`, with no second write path |
+| Favourites | **Device** | Write local (`pendingFav=true`) → push → clear flag | The NAS side is a toggle: pull the current state first and skip when equal, otherwise "unfavourite" inverts into "favourite again" |
+| Playback history | **Device** | Same, keyed by title + episode | Progress written per second; last write wins |
+| Home feed | Device | Snapshot rebuilt in the background after 15 min | The NAS is queried only when local assembly fails |
 | Cast progress | TV | TV reports back to the phone | Only the NAS relay and LAN direct channels report; DLNA does not |
 
-Two hard rules:
+Two constraints:
 
-1. **Sync endpoints bypass the disk cache** — judging "already equal" from a stale snapshot breaks the toggle semantics above;
-2. **Failures must trip a breaker** — `NasGate` stops trying for 60 s after one failure; config pull is capped at 8 s, favourite sync at 6 s, both background only and never blocking the UI.
+1. **Sync endpoints skip the disk cache**: judging consistency from a cached snapshot breaks the toggle semantics;
+2. **Failures trip a breaker**: after one failure `NasGate` stops retrying for 60 s; config pull is capped at 8 s and favourite sync at 6 s, both background only and never blocking the UI.
 
-### 4.5 How the clients find each other
+### 4.5 Discovery and pairing
 
 ```
 Phone first run ──► UDP broadcast PROOM_DISCOVER to 8897 ──► NAS discovery_loop replies PROOM_OFFER
@@ -237,23 +218,23 @@ Phone ⇄ TV ──► UDP on the same LAN (LAN direct, never through the NAS)
                └─ if the router blocks it: the TV shows a QR code plus a pairing code
 ```
 
-The pairing is written to local settings and **configured once** — that NAS may never be powered on again.
+The pairing is written to local settings; later launches do not require the NAS.
 
-### 4.6 Why this split
+### 4.6 Design trade-offs
 
-| Choice | Usual approach | Why not |
+| Decision | Common approach | Reason |
 |---|---|---|
-| Two separate apps | One app with `if (isTv)` | Focus-ring and gesture constraints fight each other; one change breaks the other side |
-| KMP with native UI | WebView shell | Sources will not send CORS headers to `127.0.0.1`; a shell either proxies everything (NAS bottleneck) or trips everywhere. Native also buys hardware decoding and background playback |
-| Zero-build frontend | Vite / React | No Node toolchain on a NAS; edit-and-refresh beats a build pipeline here |
-| Four NAS responsibilities | Proxy all traffic | Server-side aggregation becomes the bottleneck, and a shutdown kills everything |
+| Two separate apps | One app with `if (isTv)` | Focus-ring and gesture constraints conflict; a change to one side tends to break the other |
+| KMP with native UI | WebView shell | Sources do not send CORS headers to `127.0.0.1`; a shell requires either full proxying (NAS becomes the bottleneck) or per-source adaptation. Native also provides hardware decoding and background playback |
+| Zero-build frontend | Vite / React | No Node toolchain on a NAS; edit and refresh is sufficient |
+| Four NAS responsibilities | Proxy all traffic | Server-side aggregation becomes the bottleneck, and a shutdown disables every client |
 
 ---
 
 ## 5. Screenshots
 
-These show interface structure and the configuration / pairing flow only. They contain no source data
-and no third-party title information.
+Screenshots show interface structure, configuration and pairing only; they contain no source data or
+third-party title information.
 
 Config backup and sharing (preview before import, backup written first):
 
@@ -269,7 +250,7 @@ TV pairing by QR code (direct connection when LAN discovery is blocked):
 
 ## 6. Deployment
 
-### 5.1 Run directly
+### 6.1 Run directly
 
 ```bash
 git clone https://github.com/saury91/nas-screening.git
@@ -277,9 +258,9 @@ cd nas-screening
 python3 app.py
 ```
 
-Open `http://127.0.0.1:8899`. The database is created on first run; home recommendations and the five category pre-warms take about half a minute.
+Open `http://127.0.0.1:8899`. The database is created on first run; home and the five category pre-warms take about half a minute in the background, so opening a category right away waits a few seconds, after which switching tabs is immediate.
 
-### 5.2 Docker
+### 6.2 Docker
 
 ```bash
 docker build -t projection-room .
@@ -304,7 +285,7 @@ docker run -d --name projection-room --restart unless-stopped --network host \
   projection-room
 ```
 
-### 5.3 Building the clients
+### 6.3 Building the clients
 
 ```bash
 cd native
@@ -317,7 +298,7 @@ JDK 17, compileSdk 35. APKs are signed with the fixed key shipped in the repo
 (`native/keystore/proom.jks`, password `proom-release`) so that any build can upgrade any other.
 The key is public and adds no security; set `PROOM_KEYSTORE` and `PROOM_KEYSTORE_PASS` to sign with your own.
 
-On the TV, allow "install unknown apps" the first time. Some TV ROMs show an unverified-app warning; accept it and continue.
+On the TV, allow "install unknown apps" the first time; some TV systems show an unverified-app warning, accept it and continue.
 
 ---
 
@@ -325,20 +306,21 @@ On the TV, allow "install unknown apps" the first time. Some TV ROMs show an unv
 
 Nothing is bundled: no film sources, no channels, no music API. A "no sources yet" screen on first launch is expected.
 
+> Do not expose port 8899 to the internet: there is no authentication by default and the service is LAN-only. Add real authentication in front if you need remote access.
+
 Configure in this order:
 
-1. **Do not expose port 8899 to the internet.** There is no authentication by default; it is a LAN service. Put a real auth layer in front if you need remote access.
-2. **Import sources** — Console → Sources. Paste a TVBox config URL to import in bulk.
-3. **Import live TV** — Console → Live sources. Enter candidate URLs; they are re-fetched, merged and health-checked daily.
-4. **Add music** (optional) — a local folder or Navidrome / Airsonic / Gonic; online playlists and search need endpoints you provide.
+1. **Import sources** — Console → Sources. Paste a TVBox config URL to import in bulk.
+2. **Import live TV** — Console → Live sources. Enter candidate URLs; they are re-fetched, merged and health-checked daily.
+3. **Add music** (optional) — a local folder or Navidrome / Airsonic / Gonic; online playlists and search need endpoints you provide.
 
-The repository contains no scraping-site addresses, no channel lists and no music endpoints. Three ways to load your own:
+The repository contains no scraping-site addresses, channel lists or music endpoints. Three ways to load your own:
 
-| Method | How | When |
+| Method | How | Use case |
 |---|---|---|
-| Config bundle | Console → Backup → Import a JSON | Moving from another machine |
-| Manually | Add sources one by one, or paste a TVBox config URL | Just a few |
-| Seed file | Drop an exported `seed.json` at `data/seed.json` and start | Whole setup at once |
+| Config bundle | Console → Backup → Import a JSON | Migrating from another machine |
+| Manually | Add sources one by one, or paste a TVBox config URL | A few entries |
+| Seed file | Drop an exported `seed.json` at `data/seed.json` and start | Full setup at once |
 
 `seed.json` uses the same format as a config bundle:
 
@@ -379,9 +361,9 @@ DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 
 Entries marked "empty disables" are content entry points: leave them empty and no request is made to any third-party service.
 
-Any of the above can also go into a `.env` file at the repo root; `app.py` reads it on startup (existing environment variables win). `.env` is gitignored, which makes it the right place for your real endpoints and credentials.
+Any of the above can also go into a `.env` file at the repo root; `app.py` reads it on startup (existing environment variables win). `.env` is gitignored, which makes it the right place for real endpoints and credentials.
 
-> This is a **LAN** setup: no password, no HTTPS. Never expose 8899 directly to the internet; use a reverse proxy with real authentication if you need remote access.
+> This is a **LAN** setup: no password, no HTTPS. Never expose 8899 directly to the internet.
 
 ---
 
@@ -435,7 +417,7 @@ cd .. && ./tools/publish-apk.sh tv && ./tools/publish-apk.sh phone
 ```
 
 `publish-apk.sh` writes the APK plus `{versionCode, versionName, size, sha256, notes}` into `data/apps/`;
-the app verifies size and sha256 so a bad build never reaches the installer.
+the app verifies size and sha256, so a corrupted build never reaches the installer.
 
 ---
 
@@ -475,15 +457,11 @@ Font license texts and provenance are in `static/fonts/README.md`. Every fronten
 - Music comes from a Navidrome / Airsonic / Gonic server the user runs, or an endpoint the user provides;
 - The repository contains no media files and no playback URL lists.
 
-All content remains the property of its respective rights holders. What you configure, play and where you
-play it from is your decision and your responsibility.
-
-This project does not recommend, endorse or maintain any third-party source, and makes no judgement or
-warranty about their legality, availability or content. Where you obtain endpoints, and whether they are
-lawful, is unrelated to this project.
-
-Third-party names, trademarks and service marks mentioned here belong to their owners and are used only
-to describe compatibility — they imply no affiliation or endorsement.
+All content remains the property of its respective rights holders. Which sources you configure, what you
+play and where you play it from is your decision and your responsibility.
+This project does not recommend, endorse or maintain any third-party source, and makes no judgement
+about their legality, availability or content. Third-party names, trademarks and service marks belong to
+their owners, are used only to describe compatibility, and imply no affiliation or endorsement.
 
 ### 11.4 Disclaimer
 
