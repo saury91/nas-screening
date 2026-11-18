@@ -28,36 +28,43 @@ core / ui-kit  ← 平台能力与视觉底座，两端共用
 两个 applicationId 不同，**可以同机共存、各自发版**；电视盒子上已装的旧版
 `com.projectionroom.app` 不会被覆盖，需要另装 TV 版并重新配对（配置可导出导入）。
 
-## 装完就能看：配置内置在 APK 里
+## 装完是空的：内置配置只是空壳
 
-`app-tv` / `app-phone` 各带一份 `src/main/assets/config/bundle.json`（约 90KB：
-片源清单 + 40 组直播频道表 + 音乐接口地址）。启动时 `ConfigStore.seedFromAssets()`：
+`app-tv` / `app-phone` 各带一份 `src/main/assets/config/bundle.json`。仓库里这份是
+**空壳**（203 字节：`sources` 为空、`live.items` 为空、`music.api` 为空），不含任何
+采集站地址、频道表或音乐接口。启动时 `ConfigStore.seedFromAssets()`：
 
 ```
 本地还没有 bundle.json
   └─► 读 assets ──► ConfigWire.decode（线上格式 live.items → 本地 live.channels）
-                └─► 原子写 files/config/bundle.json，并把「已跳过连 NAS」置上
+                └─► 原子写 files/config/bundle.json，落一份「合法的空配置」
 ```
 
-所以**首启不会被「连上你的 NAS」拦住**：装完直接有片源、有 349 个直播台，
-NAS 开不开机都一样。三个相关动作的区别：
+空壳**不会**标记「已跳过连 NAS」——本地 `sources` 为空时，首启照常去连 NAS，
+拉到使用者的配置就覆盖它。所以：
+
+- **装完不内置任何内容**：打开看到「还没有片源」是设计结果，不是故障；
+- 片源、频道、音乐接口由使用者自己填，或从自己的 NAS / 配置包导入；
+- NAS 关机后 App 仍能搜、看、播，但用的是本地已有的那份配置，不会凭空变出内容。
+
+三个相关动作的区别：
 
 | 动作 | 什么时候做 | 本地已有配置时 |
 |---|---|---|
 | `seedFromAssets`（首启播种） | 每次 onCreate | 直接跳过，不覆盖 |
 | 设置 →「立即同步配置」 | 想让片源跟 NAS 对齐 | 从 NAS 拉，版本变了才写 |
-| 设置 →「恢复内置配置」 | 导错包、拉到空配置 | **强制**用 APK 里那份覆盖 |
+| 设置 →「恢复内置配置」 | 导错包、拉到空配置 | 用 APK 里那份覆盖，**出厂即空壳，等价于清空** |
 
 三条路都走同一个 `ConfigStore.save`：先留 `.bak`、再写 `.tmp`、最后改名，
 恢复错了还能从 `files/config/bundle.json.bak` 手工找回来。
 
-内置配置跟着 APK 版本走 —— 想换片源又不想发版，连 NAS；想改「出厂」配置，
-改 `assets/config/bundle.json` 重新打包。
+想改「出厂」配置就把自己的 `bundle.json` 放进 `assets/config/` 重新打包 ——
+仓库和发行包里都不应该出现别人的源地址。
 
 ## 连上 NAS（可选）
 
-配置已经在包里了，连 NAS 只是为了**后续更新**配置、同步收藏、下载新版本 APK。
-用户主动去设置里点「更换」时才走这条路，开机流程是：
+内置配置是空壳，连 NAS 是为了**拿到真正的配置**，以及后续更新、同步收藏、下载新版本 APK。
+首次启动、本地还没有片源时会走一次；之后用户主动去设置里点「更换」才再走。开机流程是：
 
 ```
 读本地地址（SharedPreferences）
@@ -67,7 +74,8 @@ NAS 开不开机都一样。三个相关动作的区别：
               └─ 3.5 秒没回 → 显示「连上你的 NAS」，可手动填地址（自动补 :8899）
 ```
 
-首启播种成功后 `NasStore.setSkipped(true)`，这条流程不会在启动时触发；
+只有**拉到有片源的配置**后才把 `NasStore.setSkipped(true)`，下次启动不再拦；
+空壳播种不置标记，所以本地一直没内容时会反复走这条流程（这是有意的：不给假的「已就绪」）。
 「跳过」标记只影响启动拦截，不影响设置里手动换地址。
 
 协议与 WebView 版电视端完全一致，NAS 端（`app.py` 的 `discovery_loop`）不用改。

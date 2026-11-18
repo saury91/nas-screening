@@ -49,11 +49,7 @@ Thumbs.db
 .codebuddy/
 
 # ── Android 构建产物 ──
-android/.gradle/
-android/build/
-android/app/build/
 android/local.properties
-android/.idea/
 *.apk
 *.aab
 *.keystore
@@ -61,8 +57,6 @@ android/.idea/
 # 本地构建产物（APK 从 CI 产物或 Release 拿）
 dist/
 
-# 构建时从 static/ 复制出来的前端产物
-android/app/src/main/assets/www/
 
 # ── 原生工程（KMP）构建产物 ──
 native/.gradle/
@@ -70,9 +64,6 @@ native/build/
 native/*/build/
 native/local.properties
 native/.kotlin/
-
-# ── 浏览器自动化会话产物（playwright-cli 生成）──
-.playwright-cli/
 
 # ── 浏览器自动化会话产物（playwright-cli 生成）──
 .playwright-cli/
