@@ -12,9 +12,18 @@ let found = null;      // 服务端搜索结果（专辑 + 单曲）
 let seq = 0;
 let runSearchRef = null;
 let favListener = null;
+// 后台扫盘时轮询用：扫描在服务端后台跑，前端隔几秒来问一次
+let scanTimer = 0;
+let scanTries = 0;
+
+function stopScanPoll() {
+  clearTimeout(scanTimer);
+  scanTimer = 0;
+}
 
 export function destroy() {
   home = null; kw = ''; found = null;
+  stopScanPoll();
   if (favListener) { document.removeEventListener('app:music-fav', favListener); favListener = null; }
 }
 
@@ -283,6 +292,27 @@ export async function render(root, ctx) {
     return;
   }
   paint(root);
+  scanTries = 0;
+  pollScan(root);
+}
+
+/** 首次扫盘在服务端后台进行，这里每 2.5 秒问一次，扫完就停 */
+function pollScan(root) {
+  stopScanPoll();
+  if (!home || !home.scanning) return;
+  if (++scanTries > 80) return;          // 3 分多钟还没扫完就不再打扰，用户可手动刷新
+  scanTimer = setTimeout(async () => {
+    if (!root.isConnected) return;       // 已经切走页面
+    try {
+      const d = await api.musicHome(200);
+      if (!root.isConnected) return;
+      home = d;
+      paint(root);
+      pollScan(root);
+    } catch (e) {
+      pollScan(root);                    // 网络抖一下就再来，不弹错
+    }
+  }, 2500);
 }
 
 function paint(root) {
@@ -309,6 +339,14 @@ function paint(root) {
       iconName: 'music', title: '音乐库暂时不可用', desc: home.error,
       action: isApp() ? '' : '<a class="btn" href="#/settings/music" data-focus>检查配置</a>',
     });
+    return;
+  }
+
+  // 首次进页面时扫盘还没结束：给骨架屏 + 说明，别显示成「曲库是空的」
+  if (home.scanning && !(home.albums || []).length && !kw) {
+    if (sum) sum.textContent = '正在扫描音乐目录…首次会比较慢';
+    body.innerHTML = `<div class="album-grid">${Array(8).fill(
+      '<div class="skl" style="aspect-ratio:1;border-radius:14px"></div>').join('')}</div>`;
     return;
   }
 

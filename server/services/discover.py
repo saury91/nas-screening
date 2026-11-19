@@ -12,6 +12,7 @@
 和直播自动汇总的区别：直播是「每天重建」，点播源是「只增不减」——
 因为删源会影响用户的收藏和观看记录，宁可留着让用户手动停用。
 """
+import concurrent.futures
 import json
 import threading
 import time
@@ -26,6 +27,9 @@ from ..providers import tvbox
 from ..providers.cms import fetch_vod
 
 _RUN = {"running": False, "since": 0, "result": {}}
+# 验证候选接口能真搜出东西；这里只跑网络，复用常驻池即可
+_VERIFY_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=8, thread_name_prefix="cms-verify")
 
 
 def catalog_configs():
@@ -87,10 +91,8 @@ def _verify(api, timeout=8):
         return 0
 
 
-def discover(max_configs=10, max_new=8, workers=8, timeout=8):
+def discover(max_configs=10, max_new=8, timeout=8):
     """目录 → 配置 → 候选接口 → 验证 → 入库（只增不减）。"""
-    from concurrent.futures import ThreadPoolExecutor
-
     t0 = time.time()
     cfgs = catalog_configs()[:max_configs]
     exist_sites = all_sites()
@@ -115,9 +117,8 @@ def discover(max_configs=10, max_new=8, workers=8, timeout=8):
         return {"configs": len(cfgs), "candidates": 0, "alive": 0, "added": 0,
                 "seconds": 0}
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        hits = list(ex.map(lambda kv: (kv[0], kv[1], _verify(kv[0], timeout)),
-                           cand.items()))
+    hits = list(_VERIFY_POOL.map(
+        lambda kv: (kv[0], kv[1], _verify(kv[0], timeout)), cand.items()))
 
     alive = [(api, s, n) for api, s, n in hits if n > 0]
     alive.sort(key=lambda x: -x[2])

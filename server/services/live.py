@@ -2,7 +2,9 @@
 """直播源：M3U / TXT 解析、抓取入库、按分组查询。"""
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 
+from ..config import UA
 from ..db import (dbrun, pref_json, pref_read, pref_set_json,
                    pref_write)
 from ..log import log
@@ -163,22 +165,33 @@ def clear_source(name):
 # ── 频道探活 ──────────────────────────────────────────────────
 # 公开源里大量是运营商专网地址（39.134.x.x/dbiptv...），普通宽带根本连不上。
 # 让用户能先测一遍，把点开必黑的频道标出来，比一个个试快得多。
-def check_channels(grp="", limit=240, workers=16, timeout=4):
-    from concurrent.futures import ThreadPoolExecutor
-    import concurrent.futures
+#
+# 探活是同步接口，单次最多扫 PROBE_LIMIT 条：再大就要几十秒，浏览器/App
+# 那边先超时了。超出的部分会在返回值里用 truncated 标出来，让 UI 说清楚
+# 「这次只测了前 600 条」，而不是假装全测过。
+#
+# 后台的 auto_collect 不受这个上限约束 —— 它跑在定时任务里，用
+# LIVE_PROBE_LIMIT（默认 1500）控制单次探测规模，两者场景不同，不要合并。
+PROBE_LIMIT = 600
+# 并发度是服务级常量（和片库/搜索的常驻池一致），不再由每个请求传 workers：
+# 传进来的值一改就重建池，等于每次都新建线程，反而更慢。
+_PROBE_POOL = ThreadPoolExecutor(max_workers=32, thread_name_prefix="live-probe")
+
+
+def check_channels(grp="", limit=0, timeout=4):
     import urllib.request
     from ..config import UA
 
-    sql = "SELECT id,name,url FROM live"
-    args = []
+    where, args = "", []
     if grp:
-        sql += " WHERE grp=?"
+        where = " WHERE grp=?"
         args.append(grp)
-    sql += " LIMIT ?"
-    args.append(limit)
-    rows = dbrun(sql, tuple(args), fetch=True) or []
+    total = (dbrun("SELECT COUNT(*) FROM live" + where, tuple(args), fetch=True) or [[0]])[0][0]
+    cap = limit or PROBE_LIMIT
+    rows = dbrun("SELECT id,name,url FROM live" + where + " LIMIT ?",
+                 tuple(args + [cap]), fetch=True) or []
     if not rows:
-        return {"checked": 0, "ok": 0, "dead": 0}
+        return {"checked": 0, "ok": 0, "dead": 0, "total": 0, "truncated": False}
 
     def one(r):
         _id, _name, url = r
@@ -191,8 +204,7 @@ def check_channels(grp="", limit=240, workers=16, timeout=4):
         except Exception:
             return _id, 0
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        res = list(ex.map(one, rows))
+    res = list(_PROBE_POOL.map(one, rows))
 
     now = int(time.time())
     for _id, ok in res:
@@ -203,7 +215,8 @@ def check_channels(grp="", limit=240, workers=16, timeout=4):
               (ok, now, 1 if ok else 0, _id))
     ok_n = sum(1 for _, o in res if o)
     log("直播探活：%d 条 → 可用 %d" % (len(res), ok_n))
-    return {"checked": len(res), "ok": ok_n, "dead": len(res) - ok_n}
+    return {"checked": len(res), "ok": ok_n, "dead": len(res) - ok_n,
+            "total": total, "truncated": len(res) < total}
 
 
 # ── 每日自动维护 ──────────────────────────────────────────────
@@ -360,7 +373,7 @@ def _probe_url(url, timeout=4):
         return False
 
 
-def auto_collect(max_probe=None, workers=32, timeout=4):
+def auto_collect(max_probe=None, timeout=4):
     """拉全部候选源 → 合并（同名频道保留多线路）→ 逐条探活 → 只写可播的。"""
     from ..config import LIVE_PROBE_LIMIT
     from ..net import raw_get
@@ -402,8 +415,7 @@ def auto_collect(max_probe=None, workers=32, timeout=4):
         if len(jobs) >= limit:
             break
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        results = list(ex.map(lambda j: _probe_url(j[1], timeout), jobs))
+    results = list(_PROBE_POOL.map(lambda j: _probe_url(j[1], timeout), jobs))
 
     keep = {}
     for (k, u), ok in zip(jobs, results):

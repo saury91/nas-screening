@@ -157,6 +157,16 @@ def _open(url, range_header=None, timeout=30, extra_headers=None):
         if resp is None:
             raise RuntimeError("上游连接失败")
 
+        # 解析阶段的结论可能已经过期，连接建立后按真实对端再校一次
+        bad = _peer_denied(conn)
+        if bad:
+            try:
+                resp.read()
+            except Exception:
+                pass
+            Upstream(key, conn, resp, cur).close()
+            raise ValueError(bad)
+
         if resp.status in (301, 302, 303, 307, 308):
             loc = resp.headers.get("Location") or ""
             try:
@@ -173,6 +183,14 @@ def _open(url, range_header=None, timeout=30, extra_headers=None):
     raise RuntimeError("重定向次数过多")
 
 
+def _ip_denied(ip):
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_reserved:
+        return "拒绝代理本机地址"
+    if ip.is_private and not PROXY_ALLOW_PRIVATE:
+        return "拒绝代理内网地址（确有内网源可设 PROXY_ALLOW_PRIVATE=1）"
+    return ""
+
+
 def _guard(url):
     p = urllib.parse.urlparse(url)
     if p.scheme not in ALLOW_SCHEMES or not p.hostname:
@@ -186,15 +204,30 @@ def _guard(url):
     except Exception:
         raise ValueError("域名解析失败")
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_reserved:
-            raise ValueError("拒绝代理本机地址")
-        if ip.is_private and not PROXY_ALLOW_PRIVATE:
-            raise ValueError("拒绝代理内网地址（确有内网源可设 PROXY_ALLOW_PRIVATE=1）")
+        bad = _ip_denied(ipaddress.ip_address(info[4][0]))
+        if bad:
+            raise ValueError(bad)
     if len(_GUARDED) > 512:
         _GUARDED.clear()
     _GUARDED[p.hostname] = time.time()
     return p
+
+
+def _peer_denied(conn):
+    """连接建立后再看一眼真实对端 IP。
+
+    DNS 结果会缓存 10 分钟，光在解析阶段校验有时间窗：域名可以先解析到
+    公网 IP 过检查，随后换成内网地址（DNS rebinding / 轮询多 A 记录）。
+    连接已建立时对端是确定的，这里再拦一次，窗口就没了。
+    """
+    try:
+        sock = getattr(conn, "sock", None)
+        if sock is None:
+            return ""
+        peer = sock.getpeername()
+        return _ip_denied(ipaddress.ip_address(peer[0]))
+    except Exception:
+        return ""            # 拿不到对端就按解析阶段的结论走，不要误伤
 
 
 def _proxy_url(abs_url):

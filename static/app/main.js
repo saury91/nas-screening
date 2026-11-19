@@ -255,3 +255,13 @@ async function boot() {
 }
 
 boot();
+
+// PWA：只在安全上下文里注册（HTTPS 或 localhost）。局域网明文 HTTP 下
+// 浏览器不允许注册 SW，但「添加到主屏幕」仍然可用，图标和 manifest 照常生效。
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register(withBase('/sw.js'), { scope: withBase('/') })
+      .catch(() => {});
+  });
+}

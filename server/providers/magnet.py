@@ -24,6 +24,16 @@ SCRAPE_HOSTS = [
     ("opentracker.xyz", 80),
 ]
 
+# 常驻线程池：搜索是热路径，不必每个请求都新建一套线程。
+# `scrape_health` 是在 `_SEED_POOL` 的任务里被调用的，所以它必须用**另一个**池：
+# 同一个池里父任务占住线程等子任务，池满时就是自己等自己，直接死锁。
+_SEED_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=10, thread_name_prefix="mag-seed")
+_TRACKER_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="mag-tracker")
+_ENRICH_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=6, thread_name_prefix="mag-enrich")
+
 
 # ───────────────────────── HTTP 工具 ─────────────────────────
 def strip_tags(s):
@@ -89,12 +99,11 @@ def scrape_health(ih_hex):
             return None
 
     best = None
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
-        for r in ex.map(lambda a: one(*a), SCRAPE_HOSTS):
-            if not r:
-                continue
-            if best is None or (r.get("s") or 0) > (best.get("s") or 0):
-                best = r
+    for r in _TRACKER_POOL.map(lambda a: one(*a), SCRAPE_HOSTS):
+        if not r:
+            continue
+        if best is None or (r.get("s") or 0) > (best.get("s") or 0):
+            best = r
     return best
 
 
@@ -248,8 +257,7 @@ def do_search(kw):
             pass
     if not raw:
         return []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
-        details = list(ex.map(enrich, raw))
+    details = list(_ENRICH_POOL.map(enrich, raw))
 
     items = []
     used = set()
@@ -296,8 +304,7 @@ def do_search(kw):
         it["finished"] = hh.get("c") if hh.get("c") is not None else -1
         return it
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-        items = list(ex.map(health, items))
+    items = list(_SEED_POOL.map(health, items))
 
     items.sort(key=lambda x: (-(x.get("seeders") if x.get("seeders", -1) >= 0 else -1),
                               -(x.get("finished") or -1),

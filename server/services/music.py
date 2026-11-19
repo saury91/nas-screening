@@ -14,6 +14,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote, urlencode
 
 from ..config import (MUSIC_ONLINE, ONLINE_COVER_BASE, ONLINE_PLAY_URL,
@@ -27,6 +28,11 @@ from ..net import http_get, raw_get
 AUDIO_EXT = (".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma")
 _INDEX_LOCK = threading.Lock()
 _INDEX = {"root": "", "at": 0, "albums": []}
+# 在线推荐/搜索的并发池：常驻复用，别每刷一次首页就新建一批线程
+_SHELF_POOL = ThreadPoolExecutor(max_workers=5, thread_name_prefix="music-shelf")
+_KEYWORD_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="music-kw")
+_TRACK_CHECK_POOL = ThreadPoolExecutor(max_workers=20,
+                                      thread_name_prefix="music-check")
 
 
 # ═══════════════════════ 配置 ═══════════════════════
@@ -282,21 +288,8 @@ def _root():
     return (cfg.get("local") or {}).get("dir") or os.environ.get("MUSIC_DIR") or ""
 
 
-def local_index(force=False, root=None):
-    """扫目录建索引。结果按根目录缓存 10 分钟，避免每次进页面都扫盘。
-
-    root 传值时只做一次预览扫描，不写入配置。
-    """
-    root = root or _root()
-    if not root:
-        return {"root": "", "albums": [], "error": "还没配置本地音乐目录"}
-    if not os.path.isdir(root):
-        return {"root": root, "albums": [], "error": "目录不存在：%s" % root}
-    with _INDEX_LOCK:
-        if (not force and _INDEX["root"] == root and _INDEX["albums"]
-                and time.time() - _INDEX["at"] < 600):
-            return {"root": root, "albums": _INDEX["albums"]}
-
+def _walk(root):
+    """真正扫盘：一次 os.walk + 逐首读标签，几万首要几十秒。"""
     albums = {}
     count = 0
     for base, dirs, files in os.walk(root):
@@ -354,10 +347,58 @@ def local_index(force=False, root=None):
         a["songs"] = len(a["tracks"])
         out.append(a)
     out.sort(key=lambda a: a["title"])
+    return out
+
+
+def _scan_worker(root):
+    try:
+        out, err = _walk(root), ""
+    except Exception as e:                # 扫盘失败不能让音乐页一直转圈
+        out, err = [], str(e)[:160]
+        log("本地音乐库扫描失败：%s" % err)
     with _INDEX_LOCK:
-        _INDEX.update({"root": root, "at": time.time(), "albums": out})
+        _INDEX.update({"root": root, "at": time.time(), "albums": out,
+                       "scanning": False, "error": err})
     log("本地音乐库：%d 张专辑 / %d 首" % (len(out), sum(a["songs"] for a in out)))
-    return {"root": root, "albums": out}
+
+
+def local_index(force=False, root=None):
+    """扫目录建索引。
+
+    - 结果按根目录缓存 10 分钟；
+    - 扫盘放后台线程：NAS 上几万首要几十秒，以前直接在请求线程里 os.walk，
+      第一次进音乐页会把这一个请求（连带连接）堵住；
+    - 扫描期间返回 scanning=True + 上一次结果，前端轮询即可；
+    - root 传值时做同步预览扫描（设置页「试扫」），不写缓存。
+    """
+    if root:
+        if not os.path.isdir(root):
+            return {"root": root, "albums": [], "scanning": False,
+                    "error": "目录不存在：%s" % root}
+        return {"root": root, "albums": _walk(root), "scanning": False}
+
+    root = _root()
+    if not root:
+        return {"root": "", "albums": [], "scanning": False,
+                "error": "还没配置本地音乐目录"}
+    if not os.path.isdir(root):
+        return {"root": root, "albums": [], "scanning": False,
+                "error": "目录不存在：%s" % root}
+
+    with _INDEX_LOCK:
+        if (not force and _INDEX["root"] == root and _INDEX["albums"]
+                and time.time() - _INDEX["at"] < 600):
+            return {"root": root, "albums": _INDEX["albums"], "scanning": False,
+                    "at": int(_INDEX["at"])}
+        if _INDEX.get("scanning"):
+            same = _INDEX["root"] == root
+            return {"root": root, "albums": _INDEX["albums"] if same else [],
+                    "scanning": True, "at": int(_INDEX["at"])}
+        _INDEX.update({"scanning": True, "root": root, "error": ""})
+
+    threading.Thread(target=_scan_worker, args=(root,), name="music-scan",
+                     daemon=True).start()
+    return {"root": root, "albums": [], "scanning": True, "at": 0}
 
 
 def local_track_path(tid):
@@ -484,6 +525,9 @@ def home(limit=24):
                 "root": idx["root"], "error": idx.get("error"),
                 "albums": albums[:limit],
                 "total": len(albums),
+                # 扫描在后台跑，前端看到 scanning 就隔几秒再拉一次
+                "scanning": bool(idx.get("scanning")),
+                "scannedAt": idx.get("at") or 0,
                 "artists": sorted(artists.values(), key=lambda x: -x["count"])[:16]}
     # subsonic
     try:
@@ -754,8 +798,6 @@ def _home_from_playlists(limit=8, want=6, per_kind=2):
 
     同类关键词最多出 per_kind 个货架，否则整页都是「纯音乐」，看着像只有一类。
     """
-    from concurrent.futures import ThreadPoolExecutor
-
     from . import musicbox
 
     pls = [p for p in musicbox.recommend(limit=14) if p.get("name") and not _blocked(p["name"])]
@@ -785,8 +827,7 @@ def _home_from_playlists(limit=8, want=6, per_kind=2):
         except Exception:
             return []
 
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        lists = list(ex.map(load, picked))
+    lists = list(_SHELF_POOL.map(load, picked))
 
     # 第二步：共用线程池，按货架轮流补足可播曲目
     good_lists = musicbox.select_full(lists, limit, workers=16)
@@ -800,8 +841,6 @@ def _home_from_playlists(limit=8, want=6, per_kind=2):
 
 def _home_from_keywords(limit=10):
     """兜底：按关键词搜歌，逐个校验能否完整播放。"""
-    from concurrent.futures import ThreadPoolExecutor
-
     def search_one(pair):
         name, kw = pair
         try:
@@ -809,12 +848,11 @@ def _home_from_keywords(limit=10):
         except Exception:
             return name, []
 
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        raw = list(ex.map(search_one, _ONLINE_CATS))
+    raw = list(_KEYWORD_POOL.map(search_one, _ONLINE_CATS))
 
     flat = [(name, t) for name, items in raw for t in items]
-    with ThreadPoolExecutor(max_workers=20) as ex:
-        checked = list(ex.map(lambda nt: (nt[0], nt[1], _is_full_track(nt[1])), flat))
+    checked = list(_TRACK_CHECK_POOL.map(
+        lambda nt: (nt[0], nt[1], _is_full_track(nt[1])), flat))
 
     buckets = {}
     for name, t, ok in checked:

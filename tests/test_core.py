@@ -301,40 +301,5 @@ class TestConfigIO(unittest.TestCase):
             C.normalize("{not json")
 
 
-class TestAuth(unittest.TestCase):
-    """PIN 只做哈希与校验（不落库）。"""
-
-    def test_hash_and_verify(self):
-        from server.services import auth
-        h = auth.hash_pin("2468")
-        self.assertTrue(h.startswith("pbkdf2$"))
-        self.assertNotIn("2468", h)          # 不能存明文
-        self.assertTrue(auth.verify_pin("2468", h))
-        self.assertFalse(auth.verify_pin("2469", h))
-        self.assertFalse(auth.verify_pin("", h))
-
-    def test_empty_pin_means_open(self):
-        from server.services import auth
-        self.assertTrue(auth.verify_pin("", ""))
-        self.assertTrue(auth.verify_pin("whatever", ""))
-
-    def test_bad_stored_value(self):
-        from server.services import auth
-        self.assertFalse(auth.verify_pin("1234", "garbage"))
-
-    def test_pin_format(self):
-        from server.services import auth
-        for ok in ("123456", "000000", "987654"):
-            self.assertTrue(auth.PIN_RE.match(ok), ok)
-        for bad in ("12345", "1234567", "adnas", "12 345", ""):
-            self.assertFalse(auth.PIN_RE.match(bad), bad)
-
-    def test_default_admin_credential(self):
-        from server.services import auth
-        self.assertEqual(auth.DEFAULT_ADMIN_NAME, "admin")
-        self.assertEqual(auth.DEFAULT_ADMIN_PIN, "123456")
-        self.assertTrue(auth.PIN_RE.match(auth.DEFAULT_ADMIN_PIN))
-
-
 if __name__ == "__main__":
     unittest.main()

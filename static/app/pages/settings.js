@@ -176,7 +176,7 @@ async function sourcesPanel(panel) {
       const on = !row.classList.contains('off');
       e.target.classList.toggle('on', on);
       await api.toggleSource(id, on);
-      cacheDrop('browse|'); cacheDrop('home');
+      cacheDrop('browse|'); cacheDrop('home'); cacheDrop('detail|');
       toast(on ? '已启用' : '已停用');
     }
     if (act === 'test') {
@@ -195,7 +195,7 @@ async function sourcesPanel(panel) {
       });
       if (ok) {
         await api.delSource(id);
-        cacheDrop('browse|'); cacheDrop('home');
+        cacheDrop('browse|'); cacheDrop('home'); cacheDrop('detail|');
         toast('已删除'); await load();
       }
     }
@@ -221,7 +221,7 @@ async function sourcesPanel(panel) {
     if (!name || !url) return toast('名称和地址都要填', 'err');
     await api.addSource({ name, url, type: +panel.querySelector('#ns-type').value,
                           cat: panel.querySelector('#ns-cat').value });
-    cacheDrop('browse|'); cacheDrop('home');
+    cacheDrop('browse|'); cacheDrop('home'); cacheDrop('detail|');
     toast('已添加', 'ok');
     panel.querySelector('#add-src').hidden = true;
     await load();
@@ -241,7 +241,7 @@ async function sourcesPanel(panel) {
           ${r.skipped.map(s => `<div class="mono" style="color:var(--muted);font-size:11px;padding:3px 0">
             ${esc(s.name)} — ${esc(s.reason)}</div>`).join('')}</div>` : ''}
       </div>`;
-      cacheDrop('browse|'); cacheDrop('home');
+      cacheDrop('browse|'); cacheDrop('home'); cacheDrop('detail|');
       await load();
     } catch (e) {
       report.innerHTML = `<div class="card-block" style="margin:0;border-color:rgba(255,107,107,.35)">

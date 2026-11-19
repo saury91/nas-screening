@@ -75,6 +75,13 @@ def cache_valid(key, ttl):
 
 
 def cache_drop(prefix=""):
+    """按前缀清缓存。
+
+    注意写入时 key 统一加了 `SCHEMA + ":"`（见 `_k`），所以这里必须先补前缀再比。
+    以前直接拿原始 prefix 去 startswith，`cache_drop("catmap3|xxx")` 永远匹配不到
+    "v2:catmap3|xxx"，等于什么都没清 —— 分类映射改完仍会读到旧值。
+    """
+    prefix = _k(prefix) if prefix else ""
     with _LOCK:
         for k in [k for k in _CACHE if k.startswith(prefix)]:
             _CACHE.pop(k, None)

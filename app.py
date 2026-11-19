@@ -21,7 +21,7 @@ from server.cache import cache_load
 from server.config import (LIVE_AUTO, MUSIC_DIR, PORT, HOST, DB_PATH)
 from server.db import db_init, seed_sources, dbrun
 from server.log import log
-from server.services import auth, catalog, live as live_svc, music, musicbox
+from server.services import backup, catalog, live as live_svc, music, musicbox
 from server.services.qbt import QBT
 
 
@@ -119,15 +119,9 @@ def music_warm():
 
 
 def main():
-    db_init()
+    # 初始化用的连接用完就关：真正长期使用的是每线程各自那条（见 server/db.py）
+    db_init().close()
     seed_sources()
-    # 首次启动直接建好 admin/adnas，网页打开就能用，不用先做初始化
-    if auth.ensure_default_admin():
-        log("已创建默认管理员：admin / 123456（建议在设置里改掉 PIN）")
-    else:
-        moved = auth.migrate_pins()
-        if moved:
-            log("账户体系升级：%d 个账户需要重设 PIN（管理员已重置为 123456）" % len(moved))
     cache_load()
 
     print("╭─ 放映室 · Projection Room ───────────────────────────╮")
@@ -171,8 +165,23 @@ def main():
     threading.Thread(target=music_warm, daemon=True).start()
     # 电视端自动发现
     threading.Thread(target=discovery_loop, daemon=True).start()
+    # 每日数据库快照（BACKUP_DAILY=0 可关）
+    backup.start()
 
-    log("就绪 → http://127.0.0.1:%d" % PORT)
+    # 局域网访问地址比 127.0.0.1 有用得多：用户要拿手机/电视连的正是它
+    try:
+        import socket as _s
+        _p = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+        _p.connect(("223.5.5.5", 80))       # 只选出口网卡，不会真的发包
+        lan_ip = _p.getsockname()[0]
+        _p.close()
+    except Exception:
+        lan_ip = ""
+    if lan_ip and HOST in ("0.0.0.0", ""):
+        log("就绪 → 本机 http://127.0.0.1:%d · 局域网 http://%s:%d"
+            % (PORT, lan_ip, PORT))
+    else:
+        log("就绪 → http://127.0.0.1:%d" % PORT)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

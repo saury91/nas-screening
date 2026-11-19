@@ -7,6 +7,10 @@ import { openCastSheet } from '../core/cast.js';
 import { getToken } from '../core/auth.js';
 import { setFocus, clearFocus } from '../core/focus.js';
 import { withBase } from '../core/base.js';
+import {
+  INTRO_OPTIONS, OUTRO_OPTIONS, label as skipLabel, nextOption,
+  readMark, remainingSec, shouldShowIntro, shouldShowOutro, writeMark,
+} from '../core/skip.js';
 
 let art = null;
 let state = null;      // { item, si, ei, isLive }
@@ -19,13 +23,16 @@ let fragPct = 0;
 // 后面的分片，如果加载事件里直接 showBuffer，提示就会一直挂在画面上。
 let waitState = false;
 let booting = true;
+// 片头/片尾：按剧名记，值见 core/skip.js
+let skipMark = { intro: 90000, outro: 0 };
+let skipAct = '';          // '' | 'intro' | 'next'
 
 const layer = () => $('#playerlayer');
 
 // ── 字幕（外挂，用户自己选的文件）──────────────────────────
-// 浏览器只能读用户手动选的文件，blob URL 在刷新/重新进播放器后即失效，
-// 所以不做跨会话记忆（和原生端按集记忆不同）；这里只记「本次播放内挂过什么」，
-// 切集时清掉，避免把上一集的字幕串到下一集。
+// 浏览器拿不到文件路径，blob URL 刷新即失效；但字幕文本本身很小，
+// 解出来存一份（按 剧名|集名，最多 4 条）就能做到「同一集再进来自动挂上」。
+// 切集时仍然清空并加载对应集自己的记忆，避免时间轴串集。
 const SUB_SIZES = [0.85, 1, 1.25, 1.5];
 const SUB_SIZE_NAMES = ['小', '中', '大', '特大'];
 const SUB_BASE_PX = 20;   // 字号档 1.0 的字幕像素，其余按倍率缩放
@@ -84,8 +91,66 @@ function applySubtitle(name, text, type) {
     fail();
     return;
   }
+  saveSubMemory(name, text, type);
   toast('字幕已加载 · ' + name);
   redrawSub(null);
+}
+
+// 字幕记忆：只记小文件（300KB 以内），最多留 4 条，超了按时间淘汰。
+// 用 localStorage 而不是 IndexedDB：这点数据量没必要异步，配额满了就静默放弃。
+const SUB_MEM_BYTES = 300 * 1024;
+const SUB_MEM_KEEP = 4;
+const SUB_MEM_PREFIX = 'pr.subtext.';
+
+function subMemKey() {
+  if (!state) return '';
+  const src = currentSource();
+  const ep = src && src.eps ? src.eps[state.ei] : null;
+  return (state.item.name || '') + '|' + (ep ? ep.name || '' : '');
+}
+
+function saveSubMemory(name, text, type) {
+  const key = subMemKey();
+  if (!key || !text || text.length > SUB_MEM_BYTES) return;
+  try {
+    localStorage.setItem(SUB_MEM_PREFIX + key, JSON.stringify({
+      n: name, t: type, x: text, at: Date.now(),
+    }));
+    pruneSubMemory();
+  } catch (e) { /* 配额满了就不记忆，不影响本次播放 */ }
+}
+
+function pruneSubMemory() {
+  const keys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i) || '';
+      if (!k.startsWith(SUB_MEM_PREFIX)) continue;
+      let at = 0;
+      try { at = JSON.parse(localStorage.getItem(k)).at || 0; } catch (e) { at = 0; }
+      keys.push({ k, at });
+    }
+    if (keys.length <= SUB_MEM_KEEP) return;
+    keys.sort((a, b) => a.at - b.at)
+      .slice(0, keys.length - SUB_MEM_KEEP)
+      .forEach(x => localStorage.removeItem(x.k));
+  } catch (e) { /* ignore */ }
+}
+
+/** 进到某一集时把这一集上次挂过的字幕补回来；没有就什么都不做 */
+function restoreSubMemory() {
+  const key = subMemKey();
+  if (!key || !art || subState.blob) return false;
+  try {
+    const raw = localStorage.getItem(SUB_MEM_PREFIX + key);
+    if (!raw) return false;
+    const o = JSON.parse(raw);
+    if (!o || !o.x || !o.t) return false;
+    applySubtitle(o.n || '上次的字幕', o.x, o.t);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function readFileBuffer(file) {
@@ -246,6 +311,9 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
             position, key: key || item.name };
   speedBps = 0;
   fragPct = 0;
+  // 片头片尾按剧记：进播放器时读一次，换集/换线都不用重读
+  skipMark = readMark(item.name);
+  skipAct = '';
 
   const src = currentSource();
   const ep = src.eps[Math.min(ei, src.eps.length - 1)] || src.eps[0];
@@ -257,6 +325,8 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
       ${item.pic ? `<div class="pl-poster" id="pl-poster"
         style="background-image:url('${esc(item.pic)}')"></div>` : ''}
       <div id="art-host"></div>
+
+      <button class="pl-skip" id="pl-skip" type="button" hidden></button>
 
       <div class="pl-buffer" id="pl-buffer" hidden>
         <div class="pl-dots"><b></b><b></b><b></b></div>
@@ -329,6 +399,65 @@ export function openPlayer(item, { si = 0, ei = 0, position = 0, isLive = false,
 
 function currentSource() { return state.item.sources[state.si]; }
 
+// ── 片头 / 片尾 ────────────────────────────────────────────
+// 只对剧集生效：电影没有「下一集」，套 90 秒片头只会误伤正片开头。
+function isSeries() {
+  const src = state && currentSource();
+  return !!(src && src.eps && src.eps.length > 1);
+}
+
+function onSkip() {
+  if (!art || !state || !skipAct) return;
+  if (skipAct === 'intro') {
+    art.currentTime = skipMark.intro / 1000;
+    toast('已跳过片头');
+  } else if (skipAct === 'next') {
+    const src = currentSource();
+    if (state.ei + 1 < (src.eps || []).length) switchEp(state.ei + 1);
+  }
+  updateSkip();
+}
+
+/** 每次 timeupdate 更新一次按钮：该不该显示、显示成跳过片头还是下一集 */
+function updateSkip() {
+  const btn = $('#pl-skip');
+  if (!btn || !art || !state) return;
+  if (state.isLive || !isSeries()) {
+    skipAct = '';
+    btn.hidden = true;
+    return;
+  }
+  const pos = art.currentTime || 0;
+  const dur = Number.isFinite(art.duration) ? art.duration : 0;
+  const hasNext = state.ei + 1 < (currentSource().eps || []).length;
+  if (shouldShowIntro(pos, skipMark.intro, state.isLive)) {
+    skipAct = 'intro';
+    btn.innerHTML = `<b>跳过片头</b><span>${skipLabel(skipMark.intro)}</span>`;
+  } else if (shouldShowOutro(pos, dur, skipMark.outro, hasNext, state.isLive)) {
+    skipAct = 'next';
+    btn.innerHTML = `<b>下一集</b><span>${remainingSec(pos, dur)} 秒后自动播放</span>`;
+  } else {
+    skipAct = '';
+  }
+  btn.hidden = !skipAct;
+}
+
+/** 侧栏里点一下换一档，立刻存起来（按剧记忆） */
+function bumpSkip(kind) {
+  if (!state) return;
+  const opts = kind === 'intro' ? INTRO_OPTIONS : OUTRO_OPTIONS;
+  const next = nextOption(opts, skipMark[kind] || 0);
+  skipMark = { ...skipMark, [kind]: next };
+  writeMark(state.item.name, skipMark);
+  const btn = $(`#pl-side-body [data-skip="${kind}"]`);
+  if (btn) {
+    btn.textContent = `${kind === 'intro' ? '片头' : '片尾'} ${skipLabel(next)}`;
+    setFocus(btn, false);
+  }
+  toast(`${kind === 'intro' ? '片头' : '片尾'} · ${skipLabel(next)}`);
+  updateSkip();
+}
+
 
 
 /** 投屏用：当前在播的地址、标题、进度 */
@@ -367,8 +496,10 @@ function syncSide() {
   if (!body) return;
   const src = currentSource();
   const ep = src.eps[state.ei];
-  body.querySelectorAll('.line-chip').forEach((b, i) =>
-    b.classList.toggle('on', i === state.si));
+  // 只动线路那一组：字幕/片头片尾块也是 .line-chip，按序号混在一起会把
+  // 「关闭字幕」「片头 90 秒」错标成当前线路
+  const lines = body.querySelectorAll('.line-chips[data-lines] .line-chip');
+  lines.forEach((b, i) => b.classList.toggle('on', i === state.si));
   body.querySelectorAll('.ep').forEach((b, i) =>
     b.classList.toggle('on', i === state.ei));
   const site = body.querySelector('.pl-now b');
@@ -387,13 +518,20 @@ function sideHTML() {
     </div>
     <div class="blk">
       <h5>播放线路 <span class="count">${it.sources.length}</span></h5>
-      <div class="line-chips">${it.sources.map((s, i) => `
+      <div class="line-chips" data-lines>${it.sources.map((s, i) => `
         <button class="line-chip ${i === state.si ? 'on' : ''}" data-si="${i}" data-focus
           title="${esc(s.remarks || '')}">
           <b>${esc(s.site)}</b>${s.q ? `<u>${esc(s.q)}</u>` : ''}<i>${s.count || (s.eps ? s.eps.length : '')} 集</i>
         </button>`).join('')}</div>
     </div>
     <div class="blk" id="pl-sub-blk">${subHTML()}</div>
+    ${isSeries() ? `<div class="blk" id="pl-skip-blk">
+      <h5>片头 / 片尾 <span class="count">按剧记忆</span></h5>
+      <div class="line-chips">
+        <button class="line-chip" data-skip="intro" data-focus>片头 ${skipLabel(skipMark.intro)}</button>
+        <button class="line-chip" data-skip="outro" data-focus>片尾 ${skipLabel(skipMark.outro)}</button>
+      </div>
+    </div>` : ''}
     ${src.eps.length > 1 ? `<div class="blk">
       <h5>选集 <span class="count">${src.eps.length}</span></h5>
       <div class="ep-grid">${src.eps.map((e, i) => `
@@ -434,6 +572,7 @@ function redrawSub(focusSel) {
 function bindUI() {
   $('#pl-close').onclick = () => closePlayer();
   $('#pl-side-close').onclick = () => toggleSide(false);
+  $('#pl-skip').onclick = onSkip;
 
   const side = $('#pl-side-body');
   side.onclick = e => {
@@ -444,6 +583,8 @@ function bindUI() {
       onSubAction(e.target.closest('[data-sub]').dataset.sub);
     } else if (e.target.closest('[data-sub-size]')) {
       setSubSize(+e.target.closest('[data-sub-size]').dataset.subSize);
+    } else if (e.target.closest('[data-skip]')) {
+      bumpSkip(e.target.closest('[data-skip]').dataset.skip);
     } else {
       const ep = e.target.closest('[data-ei]');
       if (ep) switchEp(+ep.dataset.ei);
@@ -880,6 +1021,9 @@ function mountArt(url, position) {
     startStallWatch();
     refreshBuffer();
     autoplayFallback();
+    // 同一集再进来时，把上次挂的字幕补回来（文本小，存在本地）
+    restoreSubMemory();
+    updateSkip();
   });
   art.on('video:volumechange', () => {
     try { localStorage.setItem('pr.volume', String(art.volume)); } catch (e) {}
@@ -888,6 +1032,9 @@ function mountArt(url, position) {
     try { localStorage.setItem('pr.rate', String(art.video.playbackRate)); } catch (e) {}
   });
   art.on('video:ended', onEnded);
+  // 片头/片尾提示就靠这个事件推进；ArtPlayer 没接的话再挂原生事件兜底
+  // 直接挂原生事件：ArtPlayer 的 video:* 代理并非每个版本都转发 timeupdate
+  if (art.video) art.video.addEventListener('timeupdate', updateSkip);
   // 只在真的卡住/定位时显示缓冲状态；正常播放时不打扰画面
   const onWait = () => { waitState = true; showBuffer('缓冲中'); };
   art.on('video:waiting', onWait);

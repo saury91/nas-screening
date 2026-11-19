@@ -27,7 +27,7 @@ Version **0.15.0** · One codebase for web, Android phone and Android TV
 | Preset config | None; no connection details are built in |
 | Accounts | No login, no PIN |
 | Runtime | No build step; `python3 app.py`, no pip / Node / bundling |
-| Offline | Search, browse and play with the NAS off |
+| Offline | App: local mirror — search, browse and play with the NAS off. Web: service worker keeps the shell loadable; content still needs the NAS |
 | Nature | Personal project, published as-is |
 
 ---
@@ -72,9 +72,9 @@ Version **0.15.0** · One codebase for web, Android phone and Android TV
 | Resume | Progress recorded per second; playback resumes from the last position |
 | Buffering state | Blurred poster, bouncing dots and live bitrate |
 | Picture-in-picture | Keep browsing, searching and switching titles in a small window |
-| Subtitles | App: switch embedded tracks, attach local SRT / VTT / ASS / TTML, remembered per title + episode, four size steps. Web: external files only |
+| Subtitles | App: switch embedded tracks, attach local SRT / VTT / ASS / TTML, remembered per title + episode, four size steps. Web: external SRT / VTT / ASS, restored on re-entry, four size steps |
 | Audio tracks | App: manual selection between multiple tracks |
-| Skip intro / outro | Ranges recorded per series; intro shows a skip button, outro offers the next episode with a countdown; stored locally |
+| Skip intro / outro | Ranges recorded per series (intro defaults to 90s, outro off; adjustable in the side panel); intro shows a skip button, outro offers the next episode with a countdown; stored on device |
 
 ### 2.5 Casting
 
@@ -114,7 +114,7 @@ When LAN discovery is blocked, pair by QR code (the TV shows a code) or enter th
 | Music | ✅ Full | ✅ Full | ✅ Full (with EQ presets) |
 | Casting | Receiver control | ✅ Sender | Receiver |
 | Configuration | ✅ All entry points | Subscriptions + import / export | Subscriptions + import / export |
-| Downloads / scheduled backup | ✅ | ❌ | ❌ |
+| Downloads / scheduled backup | ✅ download + daily snapshot | ❌ | ❌ |
 
 The phone app has four tabs (films / live / music / profile). The TV app returns with BACK only, exposes no
 focusable back button and places initial focus on the first actionable item.
@@ -309,7 +309,9 @@ DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 | `MUSIC_DIR` | empty | Local music folder; can also be set in the UI |
 | `QBT_URL` | `http://127.0.0.1:8080` | qBittorrent address |
 | `QBT_USER` / `QBT_PASS` | empty | Environment only; no default credentials |
-| `NO_AUTH` | `1` | Set to `0` for multi-account mode |
+| `BACKUP_DAILY` | `1` | Daily database snapshot; `0` disables it |
+| `BACKUP_DIR` | `./data/backups` | Snapshot directory |
+| `BACKUP_KEEP` | `7` | Number of snapshots to keep |
 | `PROXY_ALLOW_PRIVATE` | empty | The HLS proxy refuses private addresses; set to `1` to allow them |
 
 Any of these can also go into a `.env` file at the repo root; `app.py` reads it on startup (existing

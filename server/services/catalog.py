@@ -35,6 +35,19 @@ _BROWSE_POOL = concurrent.futures.ThreadPoolExecutor(
 # 分类映射探测单独一个池：它经常要等超时，混进浏览池会把 worker 占满
 _CM_POOL = concurrent.futures.ThreadPoolExecutor(
     max_workers=12, thread_name_prefix="cms-catmap")
+# detect_catmap_full 自己是跑在 _CM_POOL 里的，它内部的父级分类/盲探必须另开池：
+# 同一个池再提交就会「worker 全在等自己排的队」，直接死锁。
+_CM_SUB_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="cms-catmap-sub")
+_CM_BLIND_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=6, thread_name_prefix="cms-catmap-blind")
+_CM_WARM_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=12, thread_name_prefix="cms-catmap-warm")
+# 推荐构建里的两段并发：以前每次刷新都新建池，线程数随刷新次数涨
+_TASTE_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=3, thread_name_prefix="cms-taste")
+_LATEST_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=8, thread_name_prefix="cms-latest")
 # 浏览时最多等分类映射多久。到点先拿已回来的站出画面，剩下的继续在后台探，
 # 探完写缓存，第二次点击就是全的 —— 绝不能让一个慢站决定整页等多久。
 _BROWSE_CM_WAIT = 4.0
@@ -263,9 +276,8 @@ def refresh_pic_hosts(timeout=40.0):
 
     hosts = set()
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-            for hs in ex.map(one, active_sites()):
-                hosts |= hs
+        for hs in _PIC_POOL.map(one, active_sites()):
+            hosts |= hs
     except Exception:
         pass
     if hosts:
@@ -319,17 +331,15 @@ def build_recommend(limit=18):
                 return search_online(k, deadline=SEARCH_DEADLINE)[:6]
             except Exception:
                 return []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
-            for part in ex.map(one, taste[:3]):
-                liked.extend(part)
+        for part in _TASTE_POOL.map(one, taste[:3]):
+            liked.extend(part)
         liked = _dedup(liked, limit)
 
     # ① 最近更新（快，剧集/动漫/综艺主要靠它）
     latest = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-        for part in ex.map(lambda s: _latest(s, hours=72, limit=60, pages=5),
-                           active_sites()[:8]):
-            latest.extend(part)
+    for part in _LATEST_POOL.map(lambda s: _latest(s, hours=72, limit=60, pages=5),
+                                 active_sites()[:8]):
+        latest.extend(part)
     # ② 按分类 ID 补（电影/纪录片在「最近更新」里几乎没有，必须这样拉）
     pool = latest + _by_type(active_sites()[:4], range(3, 21))
     latest = _dedup(latest)
@@ -414,9 +424,7 @@ def detect_catmap_full(site):
                     parents.append(str(tid))
         # 父级分类并发探一下，空的直接从映射里删掉
         if parents:
-            with concurrent.futures.ThreadPoolExecutor(
-                    max_workers=min(4, len(parents))) as ex:
-                alive = list(ex.map(lambda t: _type_alive(site, t), parents))
+            alive = list(_CM_SUB_POOL.map(lambda t: _type_alive(site, t), parents))
             dead = [t for t, ok in zip(parents, alive) if not ok]
             for t in dead:
                 out.pop(t, None)
@@ -447,9 +455,8 @@ def detect_catmap_full(site):
     # 盲探是 30 个请求，别开太多 worker：它在后台跑，抢带宽会把正常站拖慢。
     # 关键是不能「等全部跑完」：站点连不上时 30 个 ID 会白等好几分钟，
     # 连续失败几个就直接收手（剩下的取消掉）。
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+    futs = [_CM_BLIND_POOL.submit(probe, t) for t in range(1, 31)]
     try:
-        futs = [ex.submit(probe, t) for t in range(1, 31)]
         for f in concurrent.futures.as_completed(futs):
             t, c2, ok = f.result()
             if not ok:
@@ -462,7 +469,9 @@ def detect_catmap_full(site):
     except Exception:
         pass
     finally:
-        ex.shutdown(wait=False, cancel_futures=True)
+        # 池是常驻的，不能 shutdown；只撤掉自己这批没跑的任务
+        for f in futs:
+            f.cancel()
 
     if out:
         cache_put(key, {"cats": out, "names": {}})
@@ -507,8 +516,7 @@ def _catmap_warm_inner():
     sites = active_sites()
     if not sites:
         return
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(sites), 12)) as ex:
-        missed = [s for s, m in zip(sites, ex.map(one, sites)) if not m]
+    missed = [s for s, m in zip(sites, _CM_WARM_POOL.map(one, sites)) if not m]
     # 首轮拉空的隔一会儿再试一次：十几个站同时打，个别站会瞬时超时/限流，
     # 失败一次就永久留空的话，App 里那几个源等于不存在（片库直接少一半）。
     if missed:
@@ -520,11 +528,9 @@ def _catmap_warm_inner():
                 return detect_catmap(s) or None
             except Exception:
                 return None
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(len(missed), 6)) as ex:
-            for s, m in zip(missed, ex.map(again, missed)):
-                if not m:
-                    log("分类映射 %s：重试后仍为空，该源不参与浏览" % s["name"])
+        for s, m in zip(missed, _CM_WARM_POOL.map(again, missed)):
+            if not m:
+                log("分类映射 %s：重试后仍为空，该源不参与浏览" % s["name"])
 
 
 def _area_keys(area):

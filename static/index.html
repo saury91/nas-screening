@@ -12,7 +12,11 @@
 <title>放映室 · 私人放映</title>
 <link rel="icon" href="static/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="static/manifest.webmanifest">
-<link rel="apple-touch-icon" href="static/favicon.svg">
+<!-- iOS 的「添加到主屏幕」只认 PNG，给 180×180 的不透明版 -->
+<link rel="apple-touch-icon" sizes="180x180" href="static/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="preload" href="static/fonts/inter/bec94a4daf.woff2" as="font"
       type="font/woff2" crossorigin>
 <link rel="stylesheet" href="static/app/styles/fonts.css?v=20261118a">

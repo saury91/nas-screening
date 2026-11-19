@@ -17,11 +17,20 @@ DB_PATH = os.environ.get("DB_PATH") or os.path.join(ROOT, "data", "media.db")
 STATIC = os.environ.get("STATIC_DIR") or os.path.join(ROOT, "static")
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "")
 
+# ── 每日备份 ─────────────────────────────────────────────────
+# README 一直写着「定时备份」，实际只有手动下载按钮。这里补上最小可用版：
+# 每天用 SQLite 在线备份 API 存一份快照，只留最近 N 份。
+BACKUP_DIR = os.environ.get("BACKUP_DIR") or os.path.join(
+    os.path.dirname(DB_PATH), "backups")
+BACKUP_KEEP = max(1, int(os.environ.get("BACKUP_KEEP", "7") or 7))
+BACKUP_DAILY = os.environ.get("BACKUP_DAILY", "1").strip().lower() not in (
+    "0", "false", "no", "off")
+
 # ── 账户模式 ─────────────────────────────────────────────────
-# 局域网自用：不需要账户与 PIN。NAS 只作为「配置分发 + UI 升级」的服务器，
-# 手机/电视 App 与浏览器都直接可用。
-# 想恢复多账户：NO_AUTH=0 启动即可。
-NO_AUTH = os.environ.get("NO_AUTH", "1").strip().lower() not in ("0", "false", "no", "off")
+# 单用户本机模式：不做登录/PIN/会话。NAS 只作为「配置分发 + UI 升级」的
+# 服务器，手机/电视 App 与浏览器都直接可用。
+# 以前留过一个 NO_AUTH=0 开关，但两端的登录入口都已删除，打开它只会让
+# 所有写接口 403 且无处登录，属于「看起来有、其实不可用」，已移除。
 
 # ── qBittorrent ───────────────────────────────────────────────
 QBT_URL = os.environ.get("QBT_URL", "http://127.0.0.1:8080")

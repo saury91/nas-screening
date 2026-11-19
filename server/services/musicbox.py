@@ -11,6 +11,7 @@
 """
 import json
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 
 from ..config import MUSICBOX_API, MUSICBOX_REFERER, MUSICBOX_SERVER, MUSIC_FULL_MIN, UA
 from ..db import pref_read
@@ -19,6 +20,8 @@ from . import proxy
 
 _SERVER = MUSICBOX_SERVER
 _TIMEOUT = 15
+# 「能不能整曲播放」的校验池：常驻，避免每次刷新首页新建 16 个线程
+_CHECK_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="musicbox-check")
 
 
 def api_base():
@@ -293,7 +296,7 @@ def select_full(groups, need, budget_ratio=1.6, workers=16):
     这里按货架轮流发车，谁先凑够就先撤，整体压到 2~3 秒。
     """
     from collections import deque
-    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+    from concurrent.futures import FIRST_COMPLETED, wait
 
     states = []
     for g in groups:
@@ -307,22 +310,22 @@ def select_full(groups, need, budget_ratio=1.6, workers=16):
         queue.extend((i, t) for t in s["cand"])
 
     inflight = {}
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        while queue or inflight:
-            while queue and len(inflight) < workers:
-                i, t = queue.popleft()
-                if len(states[i]["good"]) >= need:
-                    continue
-                inflight[ex.submit(is_full, t["id"])] = (i, t)
-            if not inflight:
-                break
-            done, _ = wait(list(inflight), return_when=FIRST_COMPLETED)
-            for f in done:
-                i, t = inflight.pop(f)
-                try:
-                    ok = f.result()
-                except Exception:
-                    ok = False
-                if ok and len(states[i]["good"]) < need:
-                    states[i]["good"].append(t)
+    # 常驻池：并发度由 inflight 数量自己控制，池子本身不再每次新建
+    while queue or inflight:
+        while queue and len(inflight) < workers:
+            i, t = queue.popleft()
+            if len(states[i]["good"]) >= need:
+                continue
+            inflight[_CHECK_POOL.submit(is_full, t["id"])] = (i, t)
+        if not inflight:
+            break
+        done, _ = wait(list(inflight), return_when=FIRST_COMPLETED)
+        for f in done:
+            i, t = inflight.pop(f)
+            try:
+                ok = f.result()
+            except Exception:
+                ok = False
+            if ok and len(states[i]["good"]) < need:
+                states[i]["good"].append(t)
     return [s["good"] for s in states]

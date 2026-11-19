@@ -284,3 +284,25 @@
 .pl-seek.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
 .pl-seek b{font-size:22px;font-weight:650;letter-spacing:.02em;color:var(--accent)}
 .pl-seek span{font-size:13px;color:#9aa0ac;font-variant-numeric:tabular-nums}
+
+/* 跳过片头 / 下一集提示：压在控制条上方左侧，只在剧集且处于片头/片尾窗口时出现 */
+.pl-skip{
+  position:absolute;left:clamp(16px,2vw,32px);bottom:clamp(86px,12vh,120px);
+  z-index:24;display:flex;flex-direction:column;align-items:flex-start;gap:1px;
+  padding:10px 16px;text-align:left;cursor:pointer;
+  border:1px solid rgba(255,255,255,.2);border-radius:12px;
+  background:rgba(12,14,19,.74);color:#f2f3f6;
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  animation:pl-skip-in .22s var(--ease);
+}
+.pl-skip[hidden]{display:none}
+.pl-skip b{font-size:15px;font-weight:650;letter-spacing:.01em}
+.pl-skip span{font-size:12px;color:#9aa0ac;font-variant-numeric:tabular-nums}
+.pl-skip:hover,.pl-skip:focus-visible{border-color:var(--accent);outline:none}
+@keyframes pl-skip-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* 窄屏（手机竖屏全屏播放）把提示抬高一点，别和手势条打架 */
+@media (max-width:640px){
+  .pl-skip{left:12px;bottom:96px;padding:8px 12px}
+  .pl-skip b{font-size:14px}
+}

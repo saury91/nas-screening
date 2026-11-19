@@ -17,6 +17,10 @@ from ..config import UA, TIMEOUT
 from ..text import (_clean_desc, _desc_better, _extract_meta, _join_names,
                     _norm_key, _relevance, _row_meta, _score_max, _zh_count)
 
+# 常驻线程池：首页/分类聚合会反复调用，每次新建池等于每个请求都开一批线程。
+_BY_TYPE_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=12, thread_name_prefix="cms-type")
+
 
 def fetch_vod(site, params, timeout=12):
     """按参数拉一个采集站，统一返回 vod 字段字典列表。
@@ -219,7 +223,7 @@ def _qs(site, qs, timeout=12):
     return _mk_items(site, {"list": fetch_vod(site, qs, timeout)})
 
 
-def _by_type(sites, ts, workers=12, deadline=15):
+def _by_type(sites, ts, deadline=15):
     """按分类 ID 批量取。
 
     采集站首页那 20 条几乎全是剧集/综艺/动漫，电影（剧情片/动作片…）
@@ -227,18 +231,15 @@ def _by_type(sites, ts, workers=12, deadline=15):
     而是把拉回来的条目按 type_name 重新归类，怎么排都不会错。
     """
     out = []
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
-    try:
-        futs = [ex.submit(_qs, s, "ac=detail&t=%d" % t)
-                for s in sites for t in ts]
-        done, _ = concurrent.futures.wait(futs, timeout=deadline)
-        for f in done:
-            try:
-                out.extend(f.result())
-            except Exception:
-                pass
-    finally:
-        ex.shutdown(wait=False)
+    futs = [_BY_TYPE_POOL.submit(_qs, s, "ac=detail&t=%d" % t)
+            for s in sites for t in ts]
+    # deadline 只约束「等多久」，超时的任务留在池里自然跑完，不再新建池兜底
+    done, _ = concurrent.futures.wait(futs, timeout=deadline)
+    for f in done:
+        try:
+            out.extend(f.result())
+        except Exception:
+            pass
     return out
 
 

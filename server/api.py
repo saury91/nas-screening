@@ -16,9 +16,9 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
-from .cache import cache_peek
+from .cache import cache_drop, cache_peek
 from .config import (CATEGORIES, CAT_ORDER, CAT_SLUG, DB_PATH, LYRIC_API,
-                     LYRIC_REFERER, NO_AUTH, SLUG_CAT, STATIC)
+                     LYRIC_REFERER, SLUG_CAT, STATIC)
 from .db import (dbrun, delete_fav, delete_history, note_search, pref_json,
                  source_get, sources_list, toggle_fav, touch_history)
 from .log import log
@@ -27,23 +27,13 @@ from .providers import (active_sites, add_source, all_sites, import_config,
                         test_source)
 from .providers import magnet
 from .providers.cms import fetch_vod
-from .services import auth, cast, catalog, config_io, discover, live, music, musicbox, probe, proxy
+from .services import cast, catalog, config_io, discover, live, music, musicbox, probe, proxy
 from .services.qbt import QBT
 
-# 只有管理员能碰的路由前缀：改配置、管账户、动下载。
-# 其余 /api/* 登录后任何人可用（看片、记录、收藏都是按人隔离的）。
-# 无账户模式下的「本机用户」：权限等于管理员，但没有任何 PIN/会话
-# 沿用历史数据里的 owner "admin"：否则老的观看记录/收藏会因为 owner 变了而看不见
+# 单用户本机模式：没有登录、没有 PIN、没有会话。
+# 历史数据里的 owner "admin" 保持不变，否则老的观看记录/收藏会看不见。
 LOCAL_USER = {"id": "admin", "name": "本机", "avatar": "", "role": "admin",
               "hasPin": False, "createdAt": 0, "lastSeen": 0}
-
-_ADMIN_PREFIX = (
-    "/api/sources", "/api/config/", "/api/profiles", "/api/backup",
-    "/api/live/add", "/api/live/refresh", "/api/live/collect",
-    "/api/live/seeds", "/api/live/check", "/api/live/auto",
-    "/api/music/config", "/api/music/test",
-    "/api/add", "/api/torrent", "/api/tasks",
-)
 
 # 内网升级包目录：data/apps/tv.apk + tv.json
 APPS_DIR = os.path.join(os.path.dirname(DB_PATH), "apps")
@@ -65,13 +55,6 @@ MIME = {
     ".woff2": "font/woff2",
     ".mp4": "video/mp4",
 }
-
-
-def _cookie(tok):
-    """会话同时写 Cookie：<video>/<img> 这类元素请求带不了自定义头。"""
-    return ("Set-Cookie",
-            "pr_token=%s; Path=/; Max-Age=%d; SameSite=Lax; HttpOnly"
-            % (tok, auth.TOKEN_TTL))
 
 
 def _json(obj, code=200):
@@ -115,40 +98,45 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     # ── 身份 ──────────────────────────────────────────────
-    # token 既支持请求头（fetch），也支持 Cookie（<video>/<img> 这类元素请求带不了头）
-    def _token(self):
-        t = self.headers.get("X-Token") or ""
-        if not t:
-            for part in (self.headers.get("Cookie") or "").split(";"):
-                k, _, v = part.strip().partition("=")
-                if k == "pr_token":
-                    t = v.strip()
-                    break
-        return t
-
     def me(self):
-        # 无账户模式（NO_AUTH=1）：谁都当本机管理员，整个登录/PIN 流程不参与
-        if NO_AUTH:
-            return LOCAL_USER
-        # 注意：Handler 实例是「每个连接」一个，keep-alive 上会复用。
-        # 直接用 hasattr 缓存会把第一个请求（登录前）的 None 带给后面的请求，
-        # 表现就是「刚登录完还是 401，刷新一下又好了」。所以每个请求开头都要重置。
-        if not hasattr(self, "_me_ready"):
-            self._me = auth.resolve(self._token())
-            self._me_ready = True
-        return self._me
+        """单用户模式：永远是本机用户。"""
+        return LOCAL_USER
 
-    def _reset_auth(self):
-        self.__dict__.pop("_me_ready", None)
-        self._me = None
+    def _write_guard(self):
+        """写接口的跨站防护。
 
-    def _is_admin(self):
-        m = self.me()
-        return bool(m and m.get("role") == "admin")
+        CORS 只管「跨站读不到响应」，管不住「跨站把请求发出去」：
+        `application/x-www-form-urlencoded` 的表单 POST 不触发预检，
+        局域网里任何网页都能借用户的浏览器删片源、加种子、改配置。
+        所以写接口两道闸：只收 JSON（非简单请求）+ 同源校验。
+        命令行 / App 不发 Origin，照常放行。
+        """
+        ctype = (self.headers.get("Content-Type") or "").lower()
+        if "application/json" not in ctype:
+            return "写接口只接受 application/json"
+        if (self.headers.get("Origin") or "") and self._cors_origin() is None:
+            return "跨站请求被拒绝"
+        if (self.headers.get("Sec-Fetch-Site") or "").lower() in ("cross-site", "same-site"):
+            return "跨站请求被拒绝"
+        return ""
 
-    def _deny(self, code, code_str, msg):
-        return self._send(code, json.dumps({"ok": False, "code": code_str, "msg": msg},
-                                           ensure_ascii=False))
+    def _log_req(self, code):
+        """只记慢请求和失败：每请求一行会把 NAS 上的日志刷满，也没人看。
+
+        排查「为什么详情页要转 6 秒」这类问题时，慢请求日志就是唯一的线索；
+        4xx/5xx 记下来是因为它们通常意味着前端和接口对不上了。
+        """
+        try:
+            t0 = getattr(self, "_t0", 0)
+            if not t0:
+                return
+            ms = int((time.time() - t0) * 1000)
+            if code < 400 and ms < 800:
+                return
+            log("%s %s → %d %dms" % (self.command,
+                                     (self.path or "")[:120], code, ms))
+        except Exception:
+            pass
 
     def _send(self, code, body, ctype="application/json; charset=utf-8",
               cache="no-store", extra=None):
@@ -180,6 +168,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
         except Exception:
             pass
+        self._log_req(code)
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -200,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     # ── 静态资源 ──────────────────────────────────────────────
-    def _serve_file(self, path, cache="public, max-age=300", download=False):
+    def _serve_file(self, path, cache="public, max-age=300", download=False, extra=None):
         root = os.path.realpath(STATIC)
         full = os.path.realpath(os.path.join(root, path.lstrip("/")))
         if not full.startswith(root + os.sep) or not os.path.isfile(full):
@@ -234,6 +223,8 @@ class Handler(BaseHTTPRequestHandler):
                ("Last-Modified", self.date_time_string(st.st_mtime))]
         if download:
             hdr.append(("Content-Disposition", "inline"))
+        if extra:
+            hdr.extend(extra)
         self._send(200, data, ctype, cache, hdr)
 
     def _range_file(self, full, ctype="audio/mpeg", download_name=""):
@@ -372,7 +363,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        self._reset_auth()
+        self._t0 = time.time()
         p = urllib.parse.urlparse(self.path)
         path = p.path
         qs = {k: v[0] for k, v in urllib.parse.parse_qs(p.query).items()}
@@ -380,6 +371,11 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/tv", "/tv/"):
                 # 电视浏览器里手输地址很痛苦，给一个短路径 + 大按钮
                 return self._serve_file("tv.html", cache="no-cache")
+            if path == "/sw.js":
+                # service worker 必须从根路径提供，才能接管整个站点（默认只能管 /static/）。
+                # 头里的 Service-Worker-Allowed 是给 nginx 之类的反代也照此处理的提示。
+                return self._serve_file("sw.js", cache="no-cache",
+                                        extra=[("Service-Worker-Allowed", "/")])
             if path.startswith("/static/"):
                 rel = path[len("/static/"):]
                 # 应用代码不缓存：升级后刷新即生效，避免旧 JS 和新 API 打架
@@ -698,7 +694,8 @@ class Handler(BaseHTTPRequestHandler):
             site = source_get(sid)
             if not site:
                 return _err("片源不存在", 404)
-            return _json(test_source(site))
+            # GET 只读：探活不改库，避免被预取/爬虫刷出状态
+            return _json(test_source(site, record=False))
         if path == "/api/tasks":
             return _json({"items": QBT.snapshot(), "ok": QBT.ok, "msg": QBT.msg})
         if path == "/api/torrent":
@@ -847,13 +844,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── POST ─────────────────────────────────────────────────
     def do_POST(self):
-        self._reset_auth()
+        self._t0 = time.time()
         path = urllib.parse.urlparse(self.path).path
-        # 无账户模式（NO_AUTH=1）下 me() 恒为本机管理员，这里等于放行；
-        # NO_AUTH=0 时才是真正的权限边界 —— 之前这两个符号定义了却没人调用，
-        # 改成多账户后所有写接口依然对任何登录用户开放。
-        if path.startswith(_ADMIN_PREFIX) and not self._is_admin():
-            return self._deny(403, "forbidden", "需要管理员权限")
+        blocked = self._write_guard()
+        if blocked:
+            return self._send(*_err(blocked, 403))
         try:
             b = self._body()
             return self._api_post(path, b)
@@ -902,7 +897,11 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if b.get("dryRun"):
                     return send(config_io.plan_import(doc, mode=mode, sections=sections))
-                return send(config_io.apply_import(doc, mode=mode, sections=sections))
+                res = config_io.apply_import(doc, mode=mode, sections=sections)
+                # 配置导入会增删片源/直播/音乐接口，聚合缓存整体作废
+                for _p in ("browse|", "detail|", "home.recommend", "catmap3|"):
+                    cache_drop(_p)
+                return send(res)
             except config_io.ConfigError as e:
                 return self._send(e.code, json.dumps(
                     {"ok": False, "msg": e.msg}, ensure_ascii=False),
@@ -954,16 +953,20 @@ class Handler(BaseHTTPRequestHandler):
             n = live.refresh_live()
             if not check:
                 return send({"ok": True, "msg": "已刷新 %d 个频道" % n})
-            c = live.check_channels("", limit=3000, workers=24, timeout=5)
+            # 同步刷新也走同一个上限：超过 PROBE_LIMIT 的部分不测，
+            # 由 truncated 标出来，免得接口卡上几分钟才返回。
+            c = live.check_channels("", limit=live.PROBE_LIMIT, timeout=5)
             pruned = live.prune_dead(3)
             live.pref_write("live.auto.last", str(int(time.time())))
             live.pref_set_json("live.auto.result", {
                 "at": int(time.time()), "fetched": n, "checked": c["checked"],
                 "ok": c["ok"], "dead": c["dead"], "pruned": pruned, "manual": True,
             })
+            tail = "（共 %d 条，本次只测前 %d 条）" % (c["total"], c["checked"]) \
+                if c["truncated"] else ""
             return send({"ok": True, "checked": c, "pruned": pruned,
-                         "msg": "刷新 %d，检测 %d，可用 %d，清理 %d" % (
-                             n, c["checked"], c["ok"], pruned)})
+                         "msg": "刷新 %d，检测 %d，可用 %d，清理 %d%s" % (
+                             n, c["checked"], c["ok"], pruned, tail)})
         if path == "/api/live/auto":
             live.set_auto(bool(b.get("enabled")))
             return send({"ok": True, "status": live.auto_status()})

@@ -11,10 +11,24 @@
 import threading
 import time
 
+from ..cache import cache_drop
 from ..db import (dbrun, source_delete, source_get, source_upsert,
                   sources_list)
 from ..log import log
 from . import cms, tvbox
+
+
+def _invalidate(name=None):
+    """片源变了，依赖它的聚合结果必须一起作废。
+
+    以前只清前端缓存，服务端这边的 browse/detail 还留着旧结果：
+    删掉一个源后，详情页最多 6 小时仍会给出它的线路。
+    """
+    cache_drop("browse|")
+    cache_drop("detail|")
+    cache_drop("home.recommend")
+    if name:
+        cache_drop("catmap3|" + name)
 
 
 # ── 查询 ──────────────────────────────────────────────────────
@@ -33,35 +47,49 @@ def all_sites():
 
 # ── 管理 ──────────────────────────────────────────────────────
 def add_source(kind, name, url, type_=1, pri=5, cat="综合", meta=None):
-    return source_upsert(kind, name, url, type_=type_, pri=pri, cat=cat, meta=meta)
+    sid = source_upsert(kind, name, url, type_=type_, pri=pri, cat=cat, meta=meta)
+    _invalidate(name)
+    return sid
 
 
 def remove_source(sid):
     s = source_get(sid)
     source_delete(sid)
+    _invalidate(s["name"] if s else None)
     return s
 
 
 def set_enabled(sid, on):
     dbrun("UPDATE sources SET enabled=? WHERE id=?", (1 if on else 0, sid))
+    s = source_get(sid)
+    _invalidate(s["name"] if s else None)
 
 
 def set_pri(sid, pri):
     dbrun("UPDATE sources SET pri=? WHERE id=?", (int(pri), sid))
+    s = source_get(sid)
+    _invalidate(s["name"] if s else None)
 
 
 def set_cat(sid, cat):
     dbrun("UPDATE sources SET cat=? WHERE id=?", (cat, sid))
+    s = source_get(sid)
+    _invalidate(s["name"] if s else None)
 
 
-def test_source(site, kw="沙丘"):
-    """探活：真的发一次搜索请求，返回耗时与命中条数。"""
+def test_source(site, kw="沙丘", record=True):
+    """探活：真的发一次搜索请求，返回耗时与命中条数。
+
+    record=False 用于 GET：探活是只读动作，不该因为一次 GET 就改库
+    （GET 会被浏览器预取、被爬虫扫，写库既不幂等也不好排查）。
+    """
     t0 = time.time()
     rows = cms.fetch_vod(site, "ac=detail&wd=" + kw, timeout=10)
     ms = int((time.time() - t0) * 1000)
     ok = bool(rows)
-    dbrun("""UPDATE sources SET status=?, checked_at=?, api_count=? WHERE id=?""",
-          ("ok" if ok else "fail", int(time.time()), len(rows), site.get("id") or 0))
+    if record:
+        dbrun("""UPDATE sources SET status=?, checked_at=?, api_count=? WHERE id=?""",
+              ("ok" if ok else "fail", int(time.time()), len(rows), site.get("id") or 0))
     return {"ok": ok, "ms": ms, "count": len(rows),
             "msg": ("连通，返回 %d 条" % len(rows)) if ok else "接口无有效返回"}
 
@@ -117,6 +145,9 @@ def import_config(url=None, text=None, name_prefix="", _depth=0):
     log("导入配置：%d 新增 / %d 更新 / %d 跳过 / %d 直播源" % (
         added, updated, len(skipped), len(lives)))
 
+    # 一次导入可能换掉全部片源，聚合缓存整体作废
+    _invalidate()
+
     # 直播源抓取比较慢，放后台，不卡导入响应
     if live_names:
         from ..services.live import refresh_live
@@ -146,6 +177,9 @@ def _import_multi(subs, name_prefix, depth):
         except Exception as e:
             return nm, su, None, str(e)[:90]
 
+    # 这里刻意**不**复用常驻池：pull 之后会递归调回本函数（深度上限 2），
+    # 共享池里父任务占着线程等子任务，池满就死锁。导入配置是低频操作，
+    # 每次新建 6 个线程可以接受。
     with ThreadPoolExecutor(max_workers=6) as ex:
         fetched = list(ex.map(pull, items))
 

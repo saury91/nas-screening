@@ -15,6 +15,8 @@ from .log import log
 
 _INIT_LOCK = threading.Lock()
 _TLS = threading.local()
+# 建表 + 迁移只需成功一次；每个新线程只建连接，不重跑 DDL
+_INIT_DONE = False
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -151,22 +153,33 @@ def _rebuild_profile_scope(con):
 
 
 def db_init():
+    """给当前线程建一条连接。建表/迁移只在进程内第一次调用时跑。
+
+    以前每个请求线程都重跑一遍 SCHEMA + 迁移：`PRAGMA journal_mode=WAL`
+    要拿写锁，并发请求全挤在这里，白白多出几十毫秒。
+    """
+    global _INIT_DONE
     d = os.path.dirname(DB_PATH)
     if d:
         os.makedirs(d, exist_ok=True)
     con = sqlite3.connect(DB_PATH, timeout=15, check_same_thread=False)
-    con.executescript(SCHEMA)
-    con.commit()
-    for _col, ddl in _MIGRATIONS:
-        try:
-            con.execute(ddl)
-        except Exception:
-            pass                      # 已经存在这一列
-    con.commit()
-    try:
-        _rebuild_profile_scope(con)
-    except Exception as e:
-        log("profile 迁移失败：%s" % str(e)[:120])
+    if _INIT_DONE:
+        return con
+    with _INIT_LOCK:
+        if not _INIT_DONE:
+            con.executescript(SCHEMA)
+            con.commit()
+            for _col, ddl in _MIGRATIONS:
+                try:
+                    con.execute(ddl)
+                except Exception:
+                    pass              # 已经存在这一列
+            con.commit()
+            try:
+                _rebuild_profile_scope(con)
+            except Exception as e:
+                log("profile 迁移失败：%s" % str(e)[:120])
+            _INIT_DONE = True
     return con
 
 
@@ -187,7 +200,15 @@ def dbrun(sql, args=(), fetch=False):
             con.commit()
             return rows
         except Exception as e:
+            # 连接可能已经坏了（NAS 上偶发 I/O 抖动）：明确关掉再丢，
+            # 否则每条失败连接都要等 GC 才释放，文件句柄会越堆越多
+            old = getattr(_TLS, "con", None)
             _TLS.con = None
+            if old is not None:
+                try:
+                    old.close()
+                except Exception:
+                    pass
             if attempt == 0:
                 time.sleep(0.08)
             else:

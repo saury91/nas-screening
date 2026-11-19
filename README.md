@@ -25,7 +25,7 @@
 | 预置配置 | 无，零内置连接信息 |
 | 账户 | 无登录、无 PIN |
 | 运行方式 | 零构建，`python3 app.py` 即可，无需 pip / Node / 打包 |
-| 离线 | NAS 关机后仍可搜索、浏览与播放 |
+| 离线 | App：本地主库，NAS 关机后可搜索、浏览与播放；Web：靠 service worker 保住界面壳，内容仍需 NAS 在线 |
 | 性质 | 个人自用，附带开源 |
 
 ---
@@ -70,9 +70,9 @@
 | 断点续播 | 进度按秒记录，下次从断点继续 |
 | 缓冲态 | 模糊海报 + 跳动波点 + 实时速率 |
 | 画中画 | 小窗播放时可继续浏览、搜索、换片 |
-| 字幕 | App：内嵌字幕轨切换，支持本地 SRT / VTT / ASS / TTML，按「片名 + 集」记忆，四档字号；Web：仅外挂文件 |
+| 字幕 | App：内嵌字幕轨切换，支持本地 SRT / VTT / ASS / TTML，按「片名 + 集」记忆，四档字号；Web：外挂 SRT / VTT / ASS，同一集再进来自动恢复，四档字号 |
 | 音轨 | App：多音轨手动切换 |
-| 跳过片头片尾 | 按剧记录区间；片头显示跳过按钮，片尾提示下一集与倒计时；仅本地记忆 |
+| 跳过片头片尾 | 按剧记录区间（默认片头 90 秒、片尾关闭，侧栏可改档位）；片头显示跳过按钮，片尾提示下一集与倒计时；只存本机 |
 
 ### 2.5 投屏
 
@@ -111,7 +111,7 @@
 | 音乐 | ✅ 完整 | ✅ 完整 | ✅ 完整（含音效预设） |
 | 投屏 | 接收端控制 | ✅ 发射端 | 接收端 |
 | 配置 | ✅ 全部入口 | 订阅源 + 导入导出 | 订阅源 + 导入导出 |
-| 下载 / 定时备份 | ✅ | ❌ | ❌ |
+| 下载 / 定时备份 | ✅ 下载 + 每日自动快照 | ❌ | ❌ |
 
 手机为四个 tab（影视 / 直播 / 音乐 / 我的）；电视仅用 BACK 返回，页面不设可聚焦返回键，初始焦点落在首个可操作项。
 
@@ -300,7 +300,9 @@ DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 | `MUSIC_DIR` | 空 | 本地音乐目录，也可在设置页填写 |
 | `QBT_URL` | `http://127.0.0.1:8080` | qBittorrent 地址 |
 | `QBT_USER` / `QBT_PASS` | 空 | 仅通过环境变量传入，无默认凭据 |
-| `NO_AUTH` | `1` | 为 `0` 时启用多账户 |
+| `BACKUP_DAILY` | `1` | 每日数据库快照，为 `0` 关闭 |
+| `BACKUP_DIR` | `./data/backups` | 快照目录 |
+| `BACKUP_KEEP` | `7` | 保留最近几份快照 |
 | `PROXY_ALLOW_PRIVATE` | 空 | HLS 代理默认拒绝私网地址；确有内网源时设为 `1` 放开 |
 
 以上变量也可写入仓库根目录的 `.env`，`app.py` 启动时自动读取（不覆盖已存在的环境变量）。
@@ -311,24 +313,27 @@ DB_PATH=/data/media.db SEED_FILE=/data/seed.json python3 app.py
 
 ```
 nas-screening/
-├── app.py                      后端入口（Python 标准库，无框架）
+├── app.py                      后端入口（Python 标准库，无框架；含 APK 版本检查与分发）
 ├── server/                     后端模块
-│   ├── api/                    路由：proxy / source / fav / history / cast …
-│   ├── sources.py              片源：配置解析 / 搜索 / 详情 / 线路（带缓存）
-│   ├── live_sources.py         直播：导入 / 探活 / 每日汇总
-│   ├── music*.py               音乐：本地 / Subsonic / 在线
-│   ├── db.py                   存储层
-│   └── app_upgrade.py          APK 版本检查与分发
+│   ├── api.py                  HTTP 路由：页面 / 静态 / /api/*、CORS、gzip、Range
+│   ├── cache.py                两级缓存（内存 + SQLite），按前缀失效
+│   ├── db.py                   存储层（SQLite，线程内连接）
+│   ├── net.py / text.py        出网与文本清洗
+│   ├── providers/              片源：TVBox / CMS 配置解析、探活、磁力
+│   └── services/               catalog 聚合 · live 直播 · music 本地与在线 ·
+│                               cast 投屏 · proxy 代理 · backup 快照 · config_io 导入导出
 ├── static/
-│   ├── app/                    Web 控制台（零构建原生 ESM）
-│   ├── styles/  theme.js       样式与主题
-│   └── vendors/                本地化的第三方库
+│   ├── index.html              单页入口（原生 ESM，无构建）
+│   ├── sw.js                   service worker：界面壳离线可用
+│   ├── app/core/               api / router / cache / offline / focus / skip …
+│   ├── app/components/         player / hero / nav / ui / musicplayer
+│   └── app/pages/              home / browse / search / detail / live / music / settings
 ├── native/                     Android（Kotlin Multiplatform）
-│   ├── core/                   协议 / 合并 / 归一（纯 Kotlin）
+│   ├── core/                   协议 / 合并 / 归一 / 播放规则（纯 Kotlin）
 │   ├── data/                   存储 / 同步 / 配对 / DLNA
 │   ├── ui-kit/  ui-media/      视觉底座与共用页面
 │   ├── app-phone/  app-tv/     手机端与电视端
-├── docs/                       截图
+├── docs/                       架构 / 规范 / 审核记录
 ├── tools/                      发布与导入辅助脚本
 └── tests/                      Python 单测
 ```

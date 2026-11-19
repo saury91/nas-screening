@@ -39,6 +39,10 @@ export function heroHTML(items) {
   }
   const it = items[0];
   return `<section class="hero" id="hero">
+    <div class="hero-bg" id="hero-bg-a" aria-hidden="true"></div>
+    <div class="hero-bg" id="hero-bg-b" aria-hidden="true"></div>
+    <div class="hero-veil" aria-hidden="true"></div>
+    <div class="hero-grain" aria-hidden="true"></div>
     <div class="hero-inner">
       <div class="hero-copy" id="hero-copy">${copy(it)}</div>
       <div class="hero-poster" id="hero-poster">${imgTag(it.pic, it.name, '', true)}</div>
@@ -67,6 +71,37 @@ export function mountHero(root, items) {
   let idx = 0;
   let paused = false;
 
+  // 两层背景交叉淡入：前层是当前，后层先加载好新图再翻上来。
+  // 单层直接换 background-image，浏览器会先白一下再出图。
+  let front = $('#hero-bg-a', root);
+  let back = $('#hero-bg-b', root);
+  let frontPic = items[0].pic || '';
+  const paint = (el, pic) => {
+    if (el) el.style.backgroundImage = pic ? bgUrl(pic) : 'none';
+  };
+  paint(front, frontPic);
+  paint(back, frontPic);
+  if (front) front.style.opacity = '1';
+  if (back) back.style.opacity = '0';
+
+  const crossfade = pic => {
+    pic = pic || '';
+    if (!back || !front || pic === frontPic) return;
+    const done = () => {
+      paint(back, pic);
+      back.style.opacity = '1';
+      front.style.opacity = '0';
+      [front, back] = [back, front];
+      frontPic = pic;
+    };
+    if (!pic) return done();
+    // 先预加载：图没就绪就翻层的话，淡入过程会看到半张白
+    const img = new Image();
+    img.onload = done;
+    img.onerror = done;
+    img.src = pic;
+  };
+
   const tint = it => {
     document.documentElement.style.setProperty('--ambient-poster', it.pic ? bgUrl(it.pic) : 'none');
   };
@@ -76,7 +111,8 @@ export function mountHero(root, items) {
     idx = (i + items.length) % items.length;
     const it = items[idx];
 
-    // 背景只有全局氛围光这一层：换片时它跟着淡入新海报的色调
+    // 背景双层交叉淡入 + 全局氛围光跟着换色调
+    crossfade(it.pic);
     tint(it);
 
     c.style.animation = 'none';
